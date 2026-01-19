@@ -16,7 +16,7 @@ A lightweight macOS menu bar app for system-wide voice-to-text transcription. Ho
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/whisper-hud.git
+git clone https://github.com/jvogan/whisper-hud.git
 cd whisper-hud
 
 # Create virtual environment
