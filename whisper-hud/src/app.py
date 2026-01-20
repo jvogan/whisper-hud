@@ -16,7 +16,7 @@ from typing import Optional
 
 from .recorder import AudioRecorder
 from .transcribe import TranscriptionManager
-from .hotkey import HotkeyListener
+from .hotkey import HotkeyListener, HotkeyCapture, format_hotkey_display, string_to_key
 from .hud import create_hud, HUD
 from .paste import insert_text, check_accessibility_permission
 from .config import Config
@@ -59,14 +59,21 @@ class WhisperHUDApp(rumps.App):
         # State
         self._is_recording = False
         self._lock = threading.Lock()
+        self._hotkey_capture: Optional[HotkeyCapture] = None
+        self._is_capturing_hotkey = False
 
         # Build menu
         self._build_menu()
 
-        # Start hotkey listener
+        # Build hotkey set from config
+        hotkey_set = self._build_hotkey_set()
+
+        # Start hotkey listener with config settings
         self.hotkey_listener = HotkeyListener(
             on_start=self._start_recording,
-            on_stop=self._stop_recording
+            on_stop=self._stop_recording,
+            hotkey=hotkey_set,
+            mode=self.config.hotkey_mode
         )
         self.hotkey_listener.start()
 
@@ -203,9 +210,53 @@ class WhisperHUDApp(rumps.App):
 
         self.menu.add(rumps.separator)
 
+        # === Hotkey Settings ===
+        hotkey_menu = rumps.MenuItem("Hotkey")
+
+        # Current hotkey display
+        hotkey_display = format_hotkey_display(self.config.hotkey)
+        mode_text = "hold" if self.config.hotkey_mode == "push_to_talk" else "press"
+        hotkey_menu.add(rumps.MenuItem(
+            f"Current: {hotkey_display} ({mode_text})",
+            callback=None
+        ))
+
+        hotkey_menu.add(rumps.separator)
+
+        # Change hotkey
+        hotkey_menu.add(rumps.MenuItem(
+            "Change Hotkey...",
+            callback=self._change_hotkey
+        ))
+
+        # Reset to default
+        hotkey_menu.add(rumps.MenuItem(
+            "Reset to Default (⌘⇧Space)",
+            callback=self._reset_hotkey
+        ))
+
+        hotkey_menu.add(rumps.separator)
+
+        # Mode selection
+        is_push_to_talk = self.config.hotkey_mode == "push_to_talk"
+        hotkey_menu.add(rumps.MenuItem(
+            f"{'● ' if is_push_to_talk else '   '}Hold to record (push-to-talk)",
+            callback=lambda _: self._set_hotkey_mode("push_to_talk")
+        ))
+        hotkey_menu.add(rumps.MenuItem(
+            f"{'● ' if not is_push_to_talk else '   '}Press to toggle recording",
+            callback=lambda _: self._set_hotkey_mode("toggle")
+        ))
+
+        self.menu.add(hotkey_menu)
+
+        self.menu.add(rumps.separator)
+
         # === Hotkey hint ===
+        hotkey_hint = format_hotkey_display(self.config.hotkey)
+        hint_action = "Hold" if self.config.hotkey_mode == "push_to_talk" else "Press"
         self.menu.add(rumps.MenuItem(
-            "Hold ⌘⇧Space to record",
+            f"{hint_action} {hotkey_hint} to record",
             callback=None
         ))
 
@@ -449,6 +500,148 @@ class WhisperHUDApp(rumps.App):
         """Toggle clipboard restoration setting."""
         self.config.restore_clipboard = not self.config.restore_clipboard
         self.config.save()
+        self._build_menu()
+
+    def _build_hotkey_set(self):
+        """Build a set of keys from config hotkey list."""
+        hotkey_set = set()
+        for key_name in self.config.hotkey:
+            key = string_to_key(key_name)
+            if key:
+                hotkey_set.add(key)
+        return hotkey_set if hotkey_set else HotkeyListener.DEFAULT_HOTKEY
+
+    def _change_hotkey(self, _):
+        """Start hotkey capture process."""
+        if self._is_capturing_hotkey:
+            return
+
+        self._is_capturing_hotkey = True
+
+        # Pause the main hotkey listener during capture
+        self.hotkey_listener.stop()
+
+        # Show notification to user
+        rumps.notification(
+            "WhisperHUD",
+            "Recording Hotkey",
+            "Press your desired key combination now..."
+        )
+
+        # Start capture
+        self._hotkey_capture = HotkeyCapture(
+            on_captured=self._on_hotkey_captured,
+            on_key_change=None  # We'll use notifications instead of live preview
+        )
+        self._hotkey_capture.start()
+
+        # Set a timeout to cancel capture after 10 seconds
+        def timeout():
+            if self._is_capturing_hotkey:
+                self._cancel_hotkey_capture()
+                rumps.notification(
+                    "WhisperHUD",
+                    "Hotkey Capture Cancelled",
+                    "No keys were pressed. Using previous hotkey."
+                )
+
+        threading.Timer(10.0, timeout).start()
+
+    def _on_hotkey_captured(self, key_set, key_names):
+        """Called when hotkey capture is complete."""
+        if not self._is_capturing_hotkey:
+            return
+
+        self._is_capturing_hotkey = False
+
+        if self._hotkey_capture:
+            self._hotkey_capture.stop()
+            self._hotkey_capture = None
+
+        if key_names:
+            # Save the new hotkey
+            self.config.hotkey = key_names
+            self.config.save()
+
+            # Update the listener
+            hotkey_set = self._build_hotkey_set()
+            self.hotkey_listener = HotkeyListener(
+                on_start=self._start_recording,
+                on_stop=self._stop_recording,
+                hotkey=hotkey_set,
+                mode=self.config.hotkey_mode
+            )
+            self.hotkey_listener.start()
+
+            # Notify user
+            display = format_hotkey_display(key_names)
+            rumps.notification(
+                "WhisperHUD",
+                "Hotkey Changed",
+                f"New hotkey: {display}"
+            )
+
+            self._build_menu()
+        else:
+            # Restart listener with old hotkey
+            self._restart_hotkey_listener()
+
+    def _cancel_hotkey_capture(self):
+        """Cancel hotkey capture and restore listener."""
+        self._is_capturing_hotkey = False
+
+        if self._hotkey_capture:
+            self._hotkey_capture.stop()
+            self._hotkey_capture = None
+
+        self._restart_hotkey_listener()
+
+    def _restart_hotkey_listener(self):
+        """Restart the hotkey listener with current config."""
+        if self.hotkey_listener.is_listening():
+            self.hotkey_listener.stop()
+
+        hotkey_set = self._build_hotkey_set()
+        self.hotkey_listener = HotkeyListener(
+            on_start=self._start_recording,
+            on_stop=self._stop_recording,
+            hotkey=hotkey_set,
+            mode=self.config.hotkey_mode
+        )
+        self.hotkey_listener.start()
+
+    def _reset_hotkey(self, _):
+        """Reset hotkey to default (Cmd+Shift+Space)."""
+        self.config.hotkey = ["cmd", "shift", "space"]
+        self.config.save()
+
+        self.hotkey_listener.update_hotkey(HotkeyListener.DEFAULT_HOTKEY)
+
+        rumps.notification(
+            "WhisperHUD",
+            "Hotkey Reset",
+            "Hotkey reset to ⌘⇧Space"
+        )
+
+        self._build_menu()
+
+    def _set_hotkey_mode(self, mode: str):
+        """Change the hotkey mode."""
+        if self.config.hotkey_mode == mode:
+            return
+
+        self.config.hotkey_mode = mode
+        self.config.save()
+
+        self.hotkey_listener.update_mode(mode)
+
+        mode_name = "Hold to record" if mode == "push_to_talk" else "Press to toggle"
+        rumps.notification(
+            "WhisperHUD",
+            "Mode Changed",
+            f"Recording mode: {mode_name}"
+        )
+
         self._build_menu()
 
     def _widget_start_recording(self):
