@@ -27,6 +27,7 @@ class Config:
 
     # Hotkey (stored as key names)
     hotkey: List[str] = field(default_factory=lambda: ["cmd", "shift", "space"])
+    hotkey_mode: str = "push_to_talk"  # "push_to_talk" (hold) or "toggle" (press to start/stop)
 
     # Behavior
     auto_paste: bool = True       # Automatically paste after transcription
