@@ -77,6 +77,62 @@ def key_to_string(key) -> str:
     return str(key)
 
 
+def _build_key_mapping():
+    """Build a key name to Key mapping, handling platform differences."""
+    mapping = {}
+
+    # Core keys available on all platforms
+    core_keys = [
+        ('cmd', 'cmd'), ('shift', 'shift'), ('ctrl', 'ctrl'), ('alt', 'alt'),
+        ('space', 'space'), ('enter', 'enter'), ('return', 'enter'),
+        ('tab', 'tab'), ('backspace', 'backspace'), ('delete', 'delete'),
+        ('escape', 'esc'), ('esc', 'esc'),
+        ('up', 'up'), ('down', 'down'), ('left', 'left'), ('right', 'right'),
+        ('page_up', 'page_up'), ('page_down', 'page_down'),
+        ('home', 'home'), ('end', 'end'), ('caps_lock', 'caps_lock'),
+    ]
+
+    for name, key_attr in core_keys:
+        try:
+            mapping[name] = getattr(keyboard.Key, key_attr)
+        except AttributeError:
+            pass
+
+    # Platform-specific keys (may not exist on macOS)
+    optional_keys = [
+        'num_lock', 'scroll_lock', 'print_screen', 'pause', 'insert',
+    ]
+    for key_name in optional_keys:
+        try:
+            mapping[key_name] = getattr(keyboard.Key, key_name)
+        except AttributeError:
+            pass
+
+    # F-keys
+    for i in range(1, 21):
+        try:
+            mapping[f'f{i}'] = getattr(keyboard.Key, f'f{i}')
+        except AttributeError:
+            pass
+
+    # Media keys
+    media_keys = [
+        'media_play_pause', 'media_volume_mute', 'media_volume_down',
+        'media_volume_up', 'media_previous', 'media_next',
+    ]
+    for key_name in media_keys:
+        try:
+            mapping[key_name] = getattr(keyboard.Key, key_name)
+        except AttributeError:
+            pass
+
+    return mapping
+
+
+# Build the key mapping once at module load time
+_KEY_MAPPING = _build_key_mapping()
+
+
 def string_to_key(name: str):
     """Convert a string name back to a pynput key."""
     name_lower = name.lower()
@@ -87,50 +143,8 @@ def string_to_key(name: str):
         return keyboard.KeyCode.from_vk(vk_code)
 
     # Handle special keys
-    key_mapping = {
-        'cmd': keyboard.Key.cmd,
-        'shift': keyboard.Key.shift,
-        'ctrl': keyboard.Key.ctrl,
-        'alt': keyboard.Key.alt,
-        'space': keyboard.Key.space,
-        'enter': keyboard.Key.enter,
-        'return': keyboard.Key.enter,
-        'tab': keyboard.Key.tab,
-        'backspace': keyboard.Key.backspace,
-        'delete': keyboard.Key.delete,
-        'escape': keyboard.Key.esc,
-        'esc': keyboard.Key.esc,
-        'up': keyboard.Key.up,
-        'down': keyboard.Key.down,
-        'left': keyboard.Key.left,
-        'right': keyboard.Key.right,
-        'page_up': keyboard.Key.page_up,
-        'page_down': keyboard.Key.page_down,
-        'home': keyboard.Key.home,
-        'end': keyboard.Key.end,
-        'caps_lock': keyboard.Key.caps_lock,
-        'num_lock': keyboard.Key.num_lock,
-        'scroll_lock': keyboard.Key.scroll_lock,
-        'print_screen': keyboard.Key.print_screen,
-        'pause': keyboard.Key.pause,
-        'insert': keyboard.Key.insert,
-        'f1': keyboard.Key.f1, 'f2': keyboard.Key.f2, 'f3': keyboard.Key.f3,
-        'f4': keyboard.Key.f4, 'f5': keyboard.Key.f5, 'f6': keyboard.Key.f6,
-        'f7': keyboard.Key.f7, 'f8': keyboard.Key.f8, 'f9': keyboard.Key.f9,
-        'f10': keyboard.Key.f10, 'f11': keyboard.Key.f11, 'f12': keyboard.Key.f12,
-        'f13': keyboard.Key.f13, 'f14': keyboard.Key.f14, 'f15': keyboard.Key.f15,
-        'f16': keyboard.Key.f16, 'f17': keyboard.Key.f17, 'f18': keyboard.Key.f18,
-        'f19': keyboard.Key.f19, 'f20': keyboard.Key.f20,
-        'media_play_pause': keyboard.Key.media_play_pause,
-        'media_volume_mute': keyboard.Key.media_volume_mute,
-        'media_volume_down': keyboard.Key.media_volume_down,
-        'media_volume_up': keyboard.Key.media_volume_up,
-        'media_previous': keyboard.Key.media_previous,
-        'media_next': keyboard.Key.media_next,
-    }
-
-    if name_lower in key_mapping:
-        return key_mapping[name_lower]
+    if name_lower in _KEY_MAPPING:
+        return _KEY_MAPPING[name_lower]
 
     # Single character key
     if len(name) == 1:
