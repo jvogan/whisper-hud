@@ -11,6 +11,7 @@ Models (December 2025):
 """
 
 import base64
+from typing import Callable
 import google.generativeai as genai
 from .base import TranscriptionProvider, TranscriptionResult
 from ..keychain import get_api_key
@@ -129,3 +130,84 @@ Preserve natural punctuation."""
     def get_current_model(self) -> str:
         """Get the current model ID."""
         return self.model
+
+    def supports_streaming(self) -> bool:
+        """Gemini supports streaming transcription."""
+        return True
+
+    def transcribe_streaming(
+        self,
+        audio_bytes: bytes,
+        on_chunk: Callable[[str], None]
+    ) -> TranscriptionResult:
+        """
+        Transcribe audio with streaming output.
+
+        Args:
+            audio_bytes: WAV file contents
+            on_chunk: Callback called with cumulative text as it streams
+
+        Returns:
+            TranscriptionResult with final text and metadata
+        """
+        if not audio_bytes:
+            return TranscriptionResult(
+                text="",
+                duration_seconds=0,
+                cost_estimate=0,
+                provider=self.name,
+                model=self.model
+            )
+
+        self._configure()
+
+        # Encode audio as base64
+        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+
+        # Create model instance
+        model = genai.GenerativeModel(self.model)
+
+        # Prepare audio part
+        audio_part = {
+            "mime_type": "audio/wav",
+            "data": audio_b64
+        }
+
+        # Transcription prompt
+        prompt = """Transcribe this audio exactly as spoken.
+Output ONLY the transcription text, nothing else.
+Do not add any commentary, labels, or formatting.
+Preserve natural punctuation."""
+
+        # Generate with streaming
+        response = model.generate_content([prompt, audio_part], stream=True)
+
+        cumulative_text = ""
+        for chunk in response:
+            if chunk.text:
+                cumulative_text += chunk.text
+                on_chunk(cumulative_text.strip())
+
+        # Get final text
+        final_text = cumulative_text.strip()
+
+        # Get the model config for cost calculation
+        model_config = next(
+            (m for m in self.MODELS if m["id"] == self.model),
+            self.MODELS[0]
+        )
+
+        # Estimate duration from audio bytes (16kHz, 16-bit mono = 32KB/sec)
+        duration_seconds = len(audio_bytes) / 32000
+
+        # Calculate cost
+        cost = (duration_seconds / 60) * model_config["cost_per_minute"]
+
+        return TranscriptionResult(
+            text=final_text,
+            duration_seconds=duration_seconds,
+            cost_estimate=cost,
+            provider=self.name,
+            model=self.model,
+            language=None
+        )

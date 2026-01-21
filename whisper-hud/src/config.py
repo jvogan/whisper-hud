@@ -19,11 +19,15 @@ class Config:
     """Application configuration."""
 
     # Default transcription provider
+    # Options: openai, gemini, apple, whisper_local, parakeet
     default_provider: str = "openai"
 
-    # Default model for each provider
+    # Default model for each transcription provider
     openai_model: str = "gpt-4o-transcribe"
     gemini_model: str = "gemini-2.0-flash-exp"
+    apple_model: str = "en-US"
+    whisper_local_model: str = "large-v3-turbo"
+    parakeet_model: str = "parakeet-tdt-0.6b-v3"
 
     # Hotkey (stored as key names)
     hotkey: List[str] = field(default_factory=lambda: ["cmd", "shift", "space"])
@@ -39,9 +43,27 @@ class Config:
     play_sound: bool = False      # Play sound on completion
     restore_clipboard: bool = True  # Restore clipboard after paste
 
+    # Translation settings
+    translation_enabled: bool = False
+    translation_provider: str = "ollama"  # ollama, gemini, openai
+    translation_model: str = "translategemma-4b"  # Ollama model: 4b, 12b, 27b
+    gemini_translate_model: str = "gemini-2.5-flash"  # Gemini translation model
+    openai_translate_model: str = "gpt-5-mini"  # OpenAI translation model
+    target_language: str = "es"  # Default: Spanish
+    source_language: str = "auto"  # "auto" or specific ISO 639-1 code
+
     # Stats
     total_transcriptions: int = 0
     total_cost: float = 0.0
+
+    # Setup wizard
+    setup_completed: bool = False
+
+    # Ollama automation
+    ollama_auto_start: bool = True  # Auto-start ollama serve on app launch
+
+    # Streaming display
+    streaming_enabled: bool = False  # Show live streaming display panel
 
     @classmethod
     def load(cls) -> "Config":
@@ -69,11 +91,14 @@ class Config:
 
     def get_provider_model(self, provider: str) -> str:
         """Get the configured model for a provider."""
-        if provider == "openai":
-            return self.openai_model
-        elif provider == "gemini":
-            return self.gemini_model
-        return ""
+        model_map = {
+            "openai": self.openai_model,
+            "gemini": self.gemini_model,
+            "apple": self.apple_model,
+            "whisper_local": self.whisper_local_model,
+            "parakeet": self.parakeet_model,
+        }
+        return model_map.get(provider, "")
 
     def set_provider_model(self, provider: str, model: str) -> None:
         """Set the model for a provider."""
@@ -81,6 +106,12 @@ class Config:
             self.openai_model = model
         elif provider == "gemini":
             self.gemini_model = model
+        elif provider == "apple":
+            self.apple_model = model
+        elif provider == "whisper_local":
+            self.whisper_local_model = model
+        elif provider == "parakeet":
+            self.parakeet_model = model
         self.save()
 
     def add_transcription_stats(self, cost: float) -> None:

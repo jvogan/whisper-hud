@@ -7,6 +7,8 @@ This is the heart of the app - coordinates all components:
 - Transcription via API
 - Text insertion via paste
 - Settings management
+- Streaming display panel
+- Setup wizard for onboarding
 """
 
 import rumps
@@ -16,12 +18,15 @@ from typing import Optional
 
 from .recorder import AudioRecorder
 from .transcribe import TranscriptionManager
+from .translate import TranslationManager
 from .hotkey import HotkeyListener, HotkeyCapture, format_hotkey_display, string_to_key
 from .hud import create_hud, HUD
 from .paste import insert_text, check_accessibility_permission
 from .config import Config
 from .keychain import set_api_key, get_api_key, get_configured_providers, mask_api_key
 from .floating_widget import create_floating_widget, FloatingWidget
+from .streaming_panel import create_streaming_panel, StreamingPanel
+from .setup_wizard import show_setup_wizard
 
 
 class WhisperHUDApp(rumps.App):
@@ -33,6 +38,7 @@ class WhisperHUDApp(rumps.App):
     ICON_PROCESSING = "⏳"
     ICON_SUCCESS = "✅"
     ICON_ERROR = "❌"
+    ICON_DOWNLOADING = "⬇️"
 
     def __init__(self):
         super().__init__(
@@ -46,8 +52,13 @@ class WhisperHUDApp(rumps.App):
         self.config = Config.load()
         self.recorder = AudioRecorder()
         self.transcriber = TranscriptionManager()
+        self.translator = TranslationManager()
         self.hud = create_hud()
         self.hud.set_enabled(self.config.show_hud)
+
+        # Streaming panel for live display
+        self.streaming_panel = create_streaming_panel()
+        self.streaming_panel.set_enabled(self.config.streaming_enabled)
 
         # Floating widget for click-to-record
         self.widget = create_floating_widget(
@@ -58,9 +69,11 @@ class WhisperHUDApp(rumps.App):
 
         # State
         self._is_recording = False
+        self._is_downloading = False
         self._lock = threading.Lock()
         self._hotkey_capture: Optional[HotkeyCapture] = None
         self._is_capturing_hotkey = False
+        self._setup_wizard = None
 
         # Build menu
         self._build_menu()
@@ -81,9 +94,15 @@ class WhisperHUDApp(rumps.App):
         if self.config.show_widget and self.widget:
             self.widget.show()
 
-        # Show welcome notification on first run
+        # Auto-start Ollama if enabled and translation is configured
+        if self.config.ollama_auto_start and self.config.translation_enabled:
+            self._auto_start_ollama()
+
+        # Show setup wizard on first run (when no API keys configured and setup not completed)
         configured = get_configured_providers()
-        if not configured:
+        if not configured and not self.config.setup_completed:
+            self._show_setup_wizard()
+        elif not configured:
             self._show_setup_reminder()
 
     def _build_menu(self):
@@ -92,19 +111,30 @@ class WhisperHUDApp(rumps.App):
 
         # Status header
         configured = get_configured_providers()
-        if configured:
-            status = f"Ready • {self.config.default_provider.title()}"
+        provider_name = self._get_provider_display_name(self.config.default_provider)
+
+        if self._is_downloading:
+            status = "⬇️ Downloading model..."
+        elif self.transcriber.get_provider(self.config.default_provider) and \
+             self.transcriber.get_provider(self.config.default_provider).is_configured():
+            status = f"Ready • {provider_name}"
+        elif configured:
+            status = f"Ready • {provider_name}"
         else:
-            status = "⚠️ No API key configured"
+            status = "⚠️ No provider configured"
 
         self.menu.add(rumps.MenuItem(status, callback=None))
         self.menu.add(rumps.separator)
 
-        # === Provider Selection ===
+        # === Provider Selection with Categories ===
         provider_menu = rumps.MenuItem("Provider")
         providers = self.transcriber.get_available_providers()
 
+        # Cloud providers
+        provider_menu.add(rumps.MenuItem("── Cloud ──", callback=None))
         for p in providers:
+            if p["category"] != "cloud":
+                continue
             is_configured = p["configured"]
             is_default = p["id"] == self.config.default_provider
             status_icon = "✓" if is_configured else "○"
@@ -116,6 +146,38 @@ class WhisperHUDApp(rumps.App):
             )
             provider_menu.add(item)
 
+        provider_menu.add(rumps.separator)
+
+        # Local providers
+        provider_menu.add(rumps.MenuItem("── Local ──", callback=None))
+        for p in providers:
+            if p["category"] != "local":
+                continue
+            is_configured = p["configured"]
+            is_default = p["id"] == self.config.default_provider
+
+            # Different status indicators for local providers
+            if p.get("requires_download", False):
+                if is_configured:
+                    status_icon = "✓"
+                else:
+                    status_icon = "○"  # Needs download
+            else:
+                status_icon = "✓" if is_configured else "○"
+
+            prefix = "● " if is_default else "   "
+
+            # Add download hint for local providers that need it
+            name = p["name"]
+            if p.get("requires_download", False) and not is_configured:
+                name = f"{name} [click to download]"
+
+            item = rumps.MenuItem(
+                f"{prefix}{name} {status_icon}",
+                callback=lambda sender, pid=p["id"], prov=p: self._select_or_download_provider(pid, prov)
+            )
+            provider_menu.add(item)
+
         self.menu.add(provider_menu)
 
         # === Model Selection ===
@@ -123,16 +185,70 @@ class WhisperHUDApp(rumps.App):
         current_provider = self.transcriber.get_provider(self.config.default_provider)
         if current_provider:
             current_model = current_provider.get_current_model()
-            for model in current_provider.get_models():
-                is_selected = model["id"] == current_model
-                prefix = "● " if is_selected else "   "
-                cost = f"${model['cost_per_minute']:.3f}/min"
+            all_models = current_provider.get_models()
 
-                item = rumps.MenuItem(
-                    f"{prefix}{model['name']} ({cost})",
-                    callback=lambda sender, mid=model["id"]: self._select_model(mid)
-                )
-                model_menu.add(item)
+            # Check if models have category info (local providers)
+            has_categories = any(m.get("category") for m in all_models)
+
+            if has_categories:
+                # Group models by category for better organization
+                categories = {"speed": [], "balanced": [], "quality": []}
+                for model in all_models:
+                    cat = model.get("category", "balanced")
+                    if cat in categories:
+                        categories[cat].append(model)
+                    else:
+                        categories["balanced"].append(model)
+
+                category_labels = {
+                    "speed": "── Fastest ──",
+                    "balanced": "── Balanced ──",
+                    "quality": "── Best Quality ──"
+                }
+
+                for cat_id in ["speed", "balanced", "quality"]:
+                    cat_models = categories[cat_id]
+                    if not cat_models:
+                        continue
+
+                    model_menu.add(rumps.MenuItem(category_labels[cat_id], callback=None))
+
+                    for model in cat_models:
+                        is_selected = model["id"] == current_model
+                        prefix = "● " if is_selected else "   "
+                        downloaded = model.get('downloaded', True)
+                        recommended = model.get('recommended', False)
+
+                        # Build label
+                        label = model['name']
+                        if recommended:
+                            label += " (recommended)"
+                        if not downloaded:
+                            label += " [download]"
+
+                        item = rumps.MenuItem(
+                            f"{prefix}{label}",
+                            callback=lambda sender, mid=model["id"], dl=downloaded: self._select_model_or_download(mid, dl)
+                        )
+                        model_menu.add(item)
+            else:
+                # Cloud providers - simple list with cost
+                for model in all_models:
+                    is_selected = model["id"] == current_model
+                    prefix = "● " if is_selected else "   "
+                    cost = model.get('cost_per_minute', 0)
+                    cost_str = f"${cost:.3f}/min" if cost > 0 else "Free"
+                    downloaded = model.get('downloaded', True)
+
+                    if not downloaded:
+                        size_mb = model.get('size_mb', 0)
+                        cost_str = f"{size_mb}MB - click to download"
+
+                    item = rumps.MenuItem(
+                        f"{prefix}{model['name']} ({cost_str})",
+                        callback=lambda sender, mid=model["id"], dl=downloaded: self._select_model_or_download(mid, dl)
+                    )
+                    model_menu.add(item)
 
         self.menu.add(model_menu)
 
@@ -199,7 +315,172 @@ class WhisperHUDApp(rumps.App):
             callback=self._toggle_restore_clipboard
         ))
 
+        settings_menu.add(rumps.separator)
+
+        settings_menu.add(rumps.MenuItem(
+            f"{'✓ ' if self.config.streaming_enabled else '   '}Live streaming display",
+            callback=self._toggle_streaming
+        ))
+
         self.menu.add(settings_menu)
+
+        self.menu.add(rumps.separator)
+
+        # === Translation ===
+        translation_menu = rumps.MenuItem("Translation")
+
+        # Enable/disable toggle
+        translation_menu.add(rumps.MenuItem(
+            f"{'✓ ' if self.config.translation_enabled else '   '}Enable translation",
+            callback=self._toggle_translation
+        ))
+
+        translation_menu.add(rumps.separator)
+
+        # Translation provider submenu with categories
+        trans_provider_menu = rumps.MenuItem("Provider")
+        trans_providers = self.translator.get_available_providers()
+
+        # Local translation providers
+        trans_provider_menu.add(rumps.MenuItem("── Local ──", callback=None))
+        for tp in trans_providers:
+            if tp["category"] != "local":
+                continue
+            is_selected = self.translator.get_current_provider() == tp["id"]
+            is_available = tp["available"]
+            prefix = "● " if is_selected else "   "
+            status = "✓" if is_available else "○"
+
+            trans_provider_menu.add(rumps.MenuItem(
+                f"{prefix}{tp['name']} {status}",
+                callback=lambda sender, pid=tp["id"]: self._set_translation_provider(pid)
+            ))
+
+        trans_provider_menu.add(rumps.separator)
+
+        # Cloud translation providers
+        trans_provider_menu.add(rumps.MenuItem("── Cloud ──", callback=None))
+        for tp in trans_providers:
+            if tp["category"] != "cloud":
+                continue
+            is_selected = self.translator.get_current_provider() == tp["id"]
+            is_available = tp["available"]
+            prefix = "● " if is_selected else "   "
+            status = "✓" if is_available else "○"
+
+            trans_provider_menu.add(rumps.MenuItem(
+                f"{prefix}{tp['name']} {status}",
+                callback=lambda sender, pid=tp["id"]: self._set_translation_provider(pid)
+            ))
+
+        translation_menu.add(trans_provider_menu)
+
+        # Target language submenu (grouped by region)
+        lang_menu = rumps.MenuItem("Target language")
+        languages = self.translator.get_supported_languages()
+
+        # Group languages for easier navigation
+        common_langs = ["es", "fr", "de", "it", "pt", "zh", "ja", "ko", "ar", "ru"]
+        other_langs = sorted([k for k in languages.keys() if k not in common_langs],
+                            key=lambda x: languages[x])
+
+        # Common languages first
+        lang_menu.add(rumps.MenuItem("── Common ──", callback=None))
+        for code in common_langs:
+            if code in languages:
+                is_selected = self.config.target_language == code
+                prefix = "● " if is_selected else "   "
+                lang_menu.add(rumps.MenuItem(
+                    f"{prefix}{languages[code]} ({code})",
+                    callback=lambda sender, c=code: self._set_target_language(c)
+                ))
+
+        lang_menu.add(rumps.separator)
+        lang_menu.add(rumps.MenuItem("── All Languages ──", callback=None))
+        for code in other_langs:
+            is_selected = self.config.target_language == code
+            prefix = "● " if is_selected else "   "
+            lang_menu.add(rumps.MenuItem(
+                f"{prefix}{languages[code]} ({code})",
+                callback=lambda sender, c=code: self._set_target_language(c)
+            ))
+
+        translation_menu.add(lang_menu)
+
+        # Model selection submenu for current translation provider (with category grouping)
+        trans_model_menu = rumps.MenuItem("Model")
+        models = self.translator.get_models()
+        current_trans_model = self.translator.get_current_model()
+
+        # Group models by category
+        categories = {"speed": [], "balanced": [], "quality": []}
+        for model_info in models:
+            cat = model_info.get("category", "balanced")
+            if cat in categories:
+                categories[cat].append(model_info)
+            else:
+                categories["balanced"].append(model_info)
+
+        category_labels = {
+            "speed": "── Fastest ──",
+            "balanced": "── Balanced ──",
+            "quality": "── Best Quality ──"
+        }
+
+        for cat_id in ["speed", "balanced", "quality"]:
+            cat_models = categories[cat_id]
+            if not cat_models:
+                continue
+
+            trans_model_menu.add(rumps.MenuItem(category_labels[cat_id], callback=None))
+
+            for model_info in cat_models:
+                is_selected = current_trans_model == model_info["id"]
+                prefix = "● " if is_selected else "   "
+                suffix = " (recommended)" if model_info.get("recommended") else ""
+
+                trans_model_menu.add(rumps.MenuItem(
+                    f"{prefix}{model_info['name']}{suffix}",
+                    callback=lambda sender, mid=model_info["id"]: self._set_translation_model(mid)
+                ))
+
+        translation_menu.add(trans_model_menu)
+
+        translation_menu.add(rumps.separator)
+
+        # Ollama-specific options (only show if Ollama is selected)
+        if self.translator.get_current_provider() == "ollama":
+            status = self.translator.get_status()
+            if not status.get("ollama_installed", False):
+                translation_menu.add(rumps.MenuItem(
+                    "Install Ollama...",
+                    callback=self._install_ollama
+                ))
+            elif not status.get("ollama_running", False):
+                translation_menu.add(rumps.MenuItem(
+                    "Start Ollama",
+                    callback=self._start_ollama
+                ))
+            elif not status.get("downloaded", False):
+                translation_menu.add(rumps.MenuItem(
+                    f"Download model ({status.get('size_gb', 0)}GB)...",
+                    callback=self._download_translation_model
+                ))
+            else:
+                translation_menu.add(rumps.MenuItem(
+                    f"✓ Model ready ({status.get('size_gb', 0)}GB)",
+                    callback=None
+                ))
+
+            translation_menu.add(rumps.separator)
+
+            # Auto-start Ollama toggle
+            translation_menu.add(rumps.MenuItem(
+                f"{'✓ ' if self.config.ollama_auto_start else '   '}Auto-start Ollama",
+                callback=self._toggle_ollama_auto_start
+            ))
+
+        self.menu.add(translation_menu)
 
         self.menu.add(rumps.separator)
 
@@ -262,8 +543,132 @@ class WhisperHUDApp(rumps.App):
 
         self.menu.add(rumps.separator)
 
+        # === Setup Wizard ===
+        self.menu.add(rumps.MenuItem("Run Setup Wizard...", callback=self._run_setup_wizard))
+
+        self.menu.add(rumps.separator)
+
         # === Quit ===
         self.menu.add(rumps.MenuItem("Quit WhisperHUD", callback=self._quit))
+
+    def _get_provider_display_name(self, provider_id: str) -> str:
+        """Get display name for a provider."""
+        names = {
+            "openai": "OpenAI",
+            "gemini": "Gemini",
+            "apple": "Apple",
+            "whisper_local": "Whisper",
+            "parakeet": "Parakeet",
+        }
+        return names.get(provider_id, provider_id.title())
+
+    def _select_or_download_provider(self, provider_id: str, provider_info: dict):
+        """Select a provider, or prompt for download if needed."""
+        # Check if provider needs download
+        if provider_info.get("requires_download", False):
+            provider = self.transcriber.get_provider(provider_id)
+            if provider and not provider.is_configured():
+                # Needs download
+                self._prompt_model_download(provider_id)
+                return
+
+        self._select_provider(provider_id)
+
+    def _prompt_model_download(self, provider_id: str):
+        """Show download prompt for a local provider."""
+        download_info = self.transcriber.get_download_info(provider_id)
+
+        if download_info.get("downloaded", False):
+            # Already downloaded
+            self._select_provider(provider_id)
+            return
+
+        size_mb = download_info.get("size_mb", 0)
+        has_space = download_info.get("has_disk_space", True)
+
+        if not has_space:
+            available_mb = download_info.get("available_mb", 0)
+            rumps.alert(
+                title="Insufficient Disk Space",
+                message=(
+                    f"Model requires {size_mb}MB but only "
+                    f"{available_mb:.0f}MB available.\n\n"
+                    f"Free up some disk space and try again."
+                )
+            )
+            return
+
+        # Show download confirmation
+        provider_name = self._get_provider_display_name(provider_id)
+        response = rumps.alert(
+            title=f"Download {provider_name} Model",
+            message=(
+                f"Download {provider_name} model?\n\n"
+                f"Size: ~{size_mb}MB\n"
+                f"Location: ~/.cache/whisper-hud/\n\n"
+                f"This may take a few minutes."
+            ),
+            ok="Download",
+            cancel="Cancel"
+        )
+
+        if response != 1:
+            return
+
+        self._start_model_download(provider_id)
+
+    def _start_model_download(self, provider_id: str):
+        """Start downloading a model in the background."""
+        self._is_downloading = True
+        self.title = self.ICON_DOWNLOADING
+        self._build_menu()
+
+        rumps.notification(
+            "WhisperHUD",
+            "Downloading Model",
+            "This will run in the background. You'll be notified when complete."
+        )
+
+        def do_download():
+            def progress_callback(msg, pct):
+                print(f"[Download] {msg} ({pct:.0f}%)")
+
+            success = self.transcriber.download_model(provider_id, progress_callback)
+
+            self._is_downloading = False
+            self.title = self.ICON_IDLE
+
+            if success:
+                rumps.notification(
+                    "WhisperHUD",
+                    "Download Complete",
+                    f"Model is ready! Switching to {self._get_provider_display_name(provider_id)}."
+                )
+                self._select_provider(provider_id)
+            else:
+                rumps.notification(
+                    "WhisperHUD",
+                    "Download Failed",
+                    "Check console for details."
+                )
+                self._build_menu()
+
+        threading.Thread(target=do_download, daemon=True).start()
+
+    def _select_model_or_download(self, model_id: str, downloaded: bool):
+        """Select a model, or download it first if needed."""
+        if not downloaded:
+            # Need to download
+            provider_id = self.config.default_provider
+            provider = self.transcriber.get_provider(provider_id)
+
+            if provider and hasattr(provider, 'set_model'):
+                provider.set_model(model_id)
+                self.config.set_provider_model(provider_id, model_id)
+
+            self._prompt_model_download(provider_id)
+        else:
+            self._select_model(model_id)
 
     def _start_recording(self):
         """Called when hotkey is pressed."""
@@ -323,39 +728,126 @@ class WhisperHUDApp(rumps.App):
         # Transcribe in background thread
         def do_transcribe():
             try:
-                result = self.transcriber.transcribe(audio_bytes)
+                # Check if streaming is enabled and provider supports it
+                provider = self.transcriber.get_provider(self.config.default_provider)
+                use_streaming = (
+                    self.config.streaming_enabled and
+                    provider and
+                    provider.supports_streaming()
+                )
+
+                if use_streaming:
+                    # Show streaming panel
+                    self.streaming_panel.show_transcribing(
+                        show_translation=self.config.translation_enabled
+                    )
+
+                    # Transcribe with streaming
+                    result = provider.transcribe_streaming(
+                        audio_bytes,
+                        on_chunk=self.streaming_panel.update_transcription
+                    )
+                    # Update stats manually since we bypassed TranscriptionManager
+                    self.config.add_transcription_stats(result.cost_estimate)
+                else:
+                    # Regular non-streaming transcription
+                    result = self.transcriber.transcribe(audio_bytes)
 
                 if result.text:
-                    # Show success
-                    word_count = len(result.text.split())
-                    self.title = self.ICON_SUCCESS
+                    final_text = result.text
 
-                    if self.config.show_hud:
-                        self.hud.show_success(f"✓ {word_count} words")
+                    # Translate if enabled
+                    if self.config.translation_enabled:
+                        try:
+                            if self.config.show_hud:
+                                self.hud.show_processing("Translating...")
+
+                            if use_streaming:
+                                self.streaming_panel.show_translating()
+
+                            # Check if translation provider supports streaming
+                            use_translation_streaming = (
+                                use_streaming and
+                                self.translator.supports_streaming()
+                            )
+
+                            if use_translation_streaming:
+                                translation = self.translator.translate_streaming(
+                                    text=result.text,
+                                    on_chunk=self.streaming_panel.update_translation,
+                                    source_lang=result.language or "en",
+                                    target_lang=self.config.target_language
+                                )
+                            else:
+                                translation = self.translator.translate(
+                                    text=result.text,
+                                    source_lang=result.language or "en",
+                                    target_lang=self.config.target_language
+                                )
+                                if use_streaming:
+                                    self.streaming_panel.update_translation(translation.text)
+
+                            final_text = translation.text
+
+                            # Get target language name for display
+                            lang_name = self.translator.get_supported_languages().get(
+                                self.config.target_language,
+                                self.config.target_language
+                            )
+                            word_count = len(final_text.split())
+                            self.title = self.ICON_SUCCESS
+
+                            if self.config.show_hud:
+                                self.hud.show_success(f"✓ {word_count} words → {lang_name}")
+
+                        except Exception as e:
+                            # Translation failed, use original text
+                            print(f"Translation failed: {e}")
+                            final_text = result.text
+                            word_count = len(final_text.split())
+                            self.title = self.ICON_SUCCESS
+                            if self.config.show_hud:
+                                self.hud.show_success(f"✓ {word_count} words (translation failed)")
+                    else:
+                        # No translation, just show word count
+                        word_count = len(final_text.split())
+                        self.title = self.ICON_SUCCESS
+                        if self.config.show_hud:
+                            self.hud.show_success(f"✓ {word_count} words")
+
+                    # Show completion on streaming panel
+                    if use_streaming:
+                        self.streaming_panel.show_complete()
 
                     # Auto-paste if enabled
                     if self.config.auto_paste:
                         time.sleep(0.1)  # Brief delay
                         insert_text(
-                            result.text,
+                            final_text,
                             restore_clipboard=self.config.restore_clipboard
                         )
                 else:
                     self.title = self.ICON_ERROR
                     if self.config.show_hud:
                         self.hud.show_error("No speech detected")
+                    if use_streaming:
+                        self.streaming_panel.hide()
 
             except ValueError as e:
                 # Configuration error (no API key)
                 self.title = self.ICON_ERROR
                 if self.config.show_hud:
                     self.hud.show_error(str(e)[:30])
+                if self.config.streaming_enabled:
+                    self.streaming_panel.hide()
 
             except Exception as e:
                 print(f"Transcription error: {e}")
                 self.title = self.ICON_ERROR
                 if self.config.show_hud:
                     self.hud.show_error("API error")
+                if self.config.streaming_enabled:
+                    self.streaming_panel.hide()
 
             finally:
                 # Reset icon after a brief delay
@@ -644,6 +1136,275 @@ class WhisperHUDApp(rumps.App):
 
         self._build_menu()
 
+    def _toggle_translation(self, sender):
+        """Toggle translation on/off."""
+        # Check if translation is available before enabling
+        if not self.config.translation_enabled:
+            if not self.translator.is_available():
+                provider_name = self.translator.provider.display_name
+                rumps.alert(
+                    title="Translation Not Available",
+                    message=(
+                        f"Translation provider '{provider_name}' is not available.\n\n"
+                        f"Please configure the provider or select a different one."
+                    )
+                )
+                return
+
+        self.config.translation_enabled = not self.config.translation_enabled
+        self.config.save()
+        self._build_menu()
+
+    def _set_translation_provider(self, provider_id: str):
+        """Set the translation provider."""
+        self.translator.set_provider(provider_id)
+        self._build_menu()
+
+    def _set_target_language(self, lang_code: str):
+        """Set the target translation language."""
+        self.config.target_language = lang_code
+        self.config.save()
+        self._build_menu()
+
+    def _set_translation_model(self, model_id: str):
+        """Set the translation model."""
+        self.translator.set_model(model_id)
+        self._build_menu()
+
+    def _show_ollama_install_help(self, sender):
+        """Show help for installing Ollama."""
+        rumps.alert(
+            title="Install Ollama",
+            message=(
+                "Ollama is required for local translation.\n\n"
+                "Install with Homebrew:\n"
+                "  brew install ollama\n\n"
+                "Or download from:\n"
+                "  https://ollama.ai\n\n"
+                "After installing, run:\n"
+                "  ollama serve"
+            )
+        )
+
+    def _show_ollama_start_help(self, sender):
+        """Show help for starting Ollama."""
+        rumps.alert(
+            title="Start Ollama",
+            message=(
+                "Ollama is installed but not running.\n\n"
+                "Start it by running:\n"
+                "  ollama serve\n\n"
+                "Or start the Ollama app if you installed\n"
+                "the desktop version."
+            )
+        )
+
+    def _download_translation_model(self, sender):
+        """Download the translation model."""
+        # Check disk space first
+        has_space, available_gb, required_gb = self.translator.check_disk_space()
+        if not has_space:
+            rumps.alert(
+                title="Insufficient Disk Space",
+                message=(
+                    f"Model requires {required_gb:.1f}GB but only "
+                    f"{available_gb:.1f}GB available.\n\n"
+                    f"Free up some disk space and try again."
+                )
+            )
+            return
+
+        # Show confirmation
+        model_info = next(
+            (m for m in self.translator.get_models()
+             if m["id"] == self.translator.get_current_model()),
+            None
+        )
+        if not model_info:
+            return
+
+        response = rumps.alert(
+            title="Download Translation Model",
+            message=(
+                f"Download {model_info['name']}?\n\n"
+                f"Size: {model_info.get('size_gb', 0)}GB\n"
+                f"RAM required: {model_info.get('ram_required', 'N/A')}\n\n"
+                f"This may take a few minutes depending on\n"
+                f"your internet connection."
+            ),
+            ok="Download",
+            cancel="Cancel"
+        )
+
+        if response != 1:  # User clicked Cancel
+            return
+
+        # Show downloading notification
+        rumps.notification(
+            "WhisperHUD",
+            "Downloading Translation Model",
+            "This will run in the background. You'll be notified when complete."
+        )
+
+        # Download in background thread
+        def do_download():
+            def progress_callback(msg):
+                print(f"Download: {msg}")
+
+            success = self.translator.download_model(progress_callback)
+
+            if success:
+                rumps.notification(
+                    "WhisperHUD",
+                    "Download Complete",
+                    "Translation model is ready to use!"
+                )
+            else:
+                rumps.notification(
+                    "WhisperHUD",
+                    "Download Failed",
+                    "Check console for details."
+                )
+
+            # Refresh menu
+            self._build_menu()
+
+        threading.Thread(target=do_download, daemon=True).start()
+
+    def _toggle_streaming(self, sender):
+        """Toggle streaming display on/off."""
+        self.config.streaming_enabled = not self.config.streaming_enabled
+        self.config.save()
+        self.streaming_panel.set_enabled(self.config.streaming_enabled)
+        self._build_menu()
+
+    def _toggle_ollama_auto_start(self, sender):
+        """Toggle Ollama auto-start setting."""
+        self.config.ollama_auto_start = not self.config.ollama_auto_start
+        self.config.save()
+        self._build_menu()
+
+    def _install_ollama(self, sender):
+        """Install Ollama via Homebrew."""
+        # Check if Homebrew is installed
+        if not self.translator.is_homebrew_installed():
+            rumps.alert(
+                title="Homebrew Required",
+                message=(
+                    "Homebrew is required to install Ollama.\n\n"
+                    "Install Homebrew from: https://brew.sh\n\n"
+                    "After installing Homebrew, try again."
+                )
+            )
+            return
+
+        response = rumps.alert(
+            title="Install Ollama",
+            message=(
+                "This will install Ollama using Homebrew.\n\n"
+                "The installation may take a few minutes.\n"
+                "You'll be notified when complete."
+            ),
+            ok="Install",
+            cancel="Cancel"
+        )
+
+        if response != 1:
+            return
+
+        rumps.notification(
+            "WhisperHUD",
+            "Installing Ollama",
+            "This will run in the background..."
+        )
+
+        def do_install():
+            success = self.translator.install_ollama(
+                progress_callback=lambda msg: print(f"[Ollama Install] {msg}")
+            )
+
+            if success:
+                rumps.notification(
+                    "WhisperHUD",
+                    "Installation Complete",
+                    "Ollama is now installed. Starting server..."
+                )
+                # Auto-start the server
+                self._auto_start_ollama()
+            else:
+                rumps.notification(
+                    "WhisperHUD",
+                    "Installation Failed",
+                    "Try running: brew install ollama"
+                )
+
+            self._build_menu()
+
+        threading.Thread(target=do_install, daemon=True).start()
+
+    def _start_ollama(self, sender):
+        """Start the Ollama server."""
+        rumps.notification(
+            "WhisperHUD",
+            "Starting Ollama",
+            "Starting Ollama server..."
+        )
+
+        def do_start():
+            success, pid = self.translator.start_ollama_server()
+
+            if success:
+                rumps.notification(
+                    "WhisperHUD",
+                    "Ollama Started",
+                    "Ollama server is now running."
+                )
+            else:
+                rumps.notification(
+                    "WhisperHUD",
+                    "Failed to Start",
+                    "Try running: ollama serve"
+                )
+
+            self._build_menu()
+
+        threading.Thread(target=do_start, daemon=True).start()
+
+    def _auto_start_ollama(self):
+        """Auto-start Ollama if installed but not running."""
+        status = self.translator.get_status()
+        if status.get("ollama_installed", False) and not status.get("ollama_running", False):
+            def do_start():
+                success, pid = self.translator.start_ollama_server()
+                if success:
+                    print("Ollama auto-started successfully")
+                    self._build_menu()
+
+            threading.Thread(target=do_start, daemon=True).start()
+
+    def _show_setup_wizard(self):
+        """Show the setup wizard for first-time setup."""
+        def on_complete(result):
+            print(f"Setup wizard completed: {result}")
+            self._build_menu()
+            rumps.notification(
+                "WhisperHUD",
+                "Setup Complete",
+                "You're ready to start transcribing! Hold ⌘⇧Space to record."
+            )
+
+        def on_cancel():
+            print("Setup wizard cancelled")
+
+        self._setup_wizard = show_setup_wizard(
+            on_complete=on_complete,
+            on_cancel=on_cancel
+        )
+
+    def _run_setup_wizard(self, sender):
+        """Run the setup wizard from menu."""
+        self._show_setup_wizard()
+
     def _widget_start_recording(self):
         """Called when widget is clicked to start recording."""
         self._start_recording()
@@ -666,6 +1427,7 @@ class WhisperHUDApp(rumps.App):
         """Clean shutdown."""
         self.hotkey_listener.stop()
         self.hud.hide()
+        self.streaming_panel.hide()
         if self.widget:
             self.widget.hide()
         rumps.quit_application()

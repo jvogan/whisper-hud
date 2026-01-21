@@ -4,7 +4,7 @@ Abstract base class for transcription providers.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Callable, Generator
 
 
 @dataclass
@@ -61,3 +61,31 @@ class TranscriptionProvider(ABC):
     def get_current_model(self) -> str:
         """Get the current model ID."""
         pass
+
+    def supports_streaming(self) -> bool:
+        """Check if this provider supports streaming transcription."""
+        return False
+
+    def transcribe_streaming(
+        self,
+        audio_bytes: bytes,
+        on_chunk: Callable[[str], None]
+    ) -> TranscriptionResult:
+        """
+        Transcribe audio with streaming output.
+
+        Providers that support streaming should override this method.
+        Default implementation falls back to regular transcribe().
+
+        Args:
+            audio_bytes: WAV file contents
+            on_chunk: Callback called with cumulative text as it streams
+
+        Returns:
+            TranscriptionResult with final text and metadata
+        """
+        # Default: fall back to non-streaming
+        result = self.transcribe(audio_bytes)
+        if result.text:
+            on_chunk(result.text)
+        return result
