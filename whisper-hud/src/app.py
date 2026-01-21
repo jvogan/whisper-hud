@@ -671,8 +671,39 @@ class WhisperHUDApp(rumps.App):
         rumps.quit_application()
 
 
+def print_startup_banner():
+    """Print a welcome banner when the app starts."""
+    # ANSI color codes
+    CYAN = '\033[0;36m'
+    WHITE = '\033[1;37m'
+    DIM = '\033[0;90m'
+    RESET = '\033[0m'
+
+    banner = f"""
+{CYAN}       ╭─────────────────────────────────────╮
+       │                                     │
+       │   ░▒▓  W H I S P E R H U D  ▓▒░    │
+       │                                     │
+       │      ┌─────────────────────┐        │
+       │      │  ◉ ─ ─ ─ ╱╲ ─ ─ ─   │        │
+       │      │    ░░▒▒▓▓██▓▓▒▒░░   │        │
+       │      └─────────────────────┘        │
+       │                                     │
+       │   voice → text, invisibly           │
+       │                                     │
+       ╰─────────────────────────────────────╯{RESET}
+
+  {WHITE}Ready!{RESET} Look for 🎙️ in your menu bar.
+  {DIM}Hold ⌘⇧Space to record, release to transcribe.{RESET}
+"""
+    print(banner)
+
+
 def run():
     """Entry point for the application."""
+    # Print startup banner
+    print_startup_banner()
+
     # Check for accessibility permission
     if not check_accessibility_permission():
         rumps.alert(
