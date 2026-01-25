@@ -9,3 +9,19 @@ keyring>=25.0.0
 pyperclip>=1.8.2
 pyobjc-framework-Cocoa>=11.0
 pyobjc-framework-Quartz>=11.0
+pyobjc-framework-Speech>=11.0
+requests>=2.28.0
+
+# Optional: local transcription (Whisper)
+# faster-whisper>=1.0.0
+# huggingface_hub>=0.20.0
+
+# Optional: local transcription (Parakeet, Apple Silicon)
+# parakeet-mlx>=0.1.0
+
+# Optional: for native background removal (macOS 14+)
+# pyobjc-framework-Vision>=11.0
+
+# Optional: for AI background removal (fallback for older macOS)
+# Pillow>=10.0.0
+# rembg>=2.0.0

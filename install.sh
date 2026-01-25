@@ -26,7 +26,16 @@ DOT="${DIM}·${RESET}"
 print_banner() {
     echo ""
     echo -e "${CYAN}"
-    cat << 'EOF'
+
+    # Try to load banner from file, fallback to inline if not found
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    BANNER_FILE="$SCRIPT_DIR/assets/ascii/banner_installer.txt"
+
+    if [[ -f "$BANNER_FILE" ]]; then
+        cat "$BANNER_FILE"
+    else
+        # Fallback inline banner
+        cat << 'EOF'
                ╭─────────────────────────────────────╮
                │                                     │
                │   ░▒▓  W H I S P E R H U D  ▓▒░    │
@@ -40,6 +49,8 @@ print_banner() {
                │                                     │
                ╰─────────────────────────────────────╯
 EOF
+    fi
+
     echo -e "${RESET}"
     echo ""
 }
@@ -85,15 +96,27 @@ check_macos() {
     print_success "macOS detected"
 }
 
+# Select Python binary (prefer 3.11 for compatibility)
+select_python() {
+    if command -v python3.11 &> /dev/null; then
+        PYTHON_BIN="python3.11"
+    elif command -v python3 &> /dev/null; then
+        PYTHON_BIN="python3"
+    else
+        PYTHON_BIN=""
+    fi
+}
+
 # Check Python version
 check_python() {
-    if command -v python3 &> /dev/null; then
-        PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    select_python
+    if [[ -n "$PYTHON_BIN" ]]; then
+        PYTHON_VERSION=$($PYTHON_BIN -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
         MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
         MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
 
         if [[ $MAJOR -ge 3 ]] && [[ $MINOR -ge 11 ]]; then
-            print_success "Python $PYTHON_VERSION found"
+            print_success "Python $PYTHON_VERSION found ($PYTHON_BIN)"
             return 0
         else
             print_error "Python 3.11+ required (found $PYTHON_VERSION)"
@@ -116,7 +139,7 @@ setup_venv() {
     if [[ -d "venv" ]]; then
         print_info "Virtual environment already exists"
     else
-        python3 -m venv venv
+        "$PYTHON_BIN" -m venv venv
         print_success "Virtual environment created"
     fi
 
@@ -147,7 +170,7 @@ create_launcher() {
 # WhisperHUD Launcher
 cd "$(dirname "$0")"
 source venv/bin/activate
-python -m src.main
+python -m whisper_hud.main
 LAUNCHER
 
     chmod +x "$LAUNCHER_PATH"
@@ -167,7 +190,7 @@ print_next_steps() {
     echo -e "  ${BOLD}Or manually:${RESET}"
     echo -e "    ${DIM}cd whisper-hud${RESET}"
     echo -e "    ${DIM}source venv/bin/activate${RESET}"
-    echo -e "    ${DIM}python -m src.main${RESET}"
+    echo -e "    ${DIM}python -m whisper_hud.main${RESET}"
     echo ""
     echo -e "${DIM}┌─────────────────────────────────────────────────┐${RESET}"
     echo -e "${DIM}│${RESET} ${YELLOW}First time?${RESET} You'll need to:                     ${DIM}│${RESET}"
@@ -177,11 +200,16 @@ print_next_steps() {
     echo -e "${DIM}│${RESET}                                                 ${DIM}│${RESET}"
     echo -e "${DIM}│${RESET}  2. Grant Microphone permission                 ${DIM}│${RESET}"
     echo -e "${DIM}│${RESET}                                                 ${DIM}│${RESET}"
-    echo -e "${DIM}│${RESET}  3. Add your API key (OpenAI or Gemini)         ${DIM}│${RESET}"
+    echo -e "${DIM}│${RESET}  3. Add your API key (cloud providers only)     ${DIM}│${RESET}"
     echo -e "${DIM}│${RESET}     ${DIM}Click menu bar icon → API Keys${RESET}              ${DIM}│${RESET}"
     echo -e "${DIM}│${RESET}                                                 ${DIM}│${RESET}"
     echo -e "${DIM}│${RESET}  4. Hold ${CYAN}⌘⇧Space${RESET} and speak!                   ${DIM}│${RESET}"
     echo -e "${DIM}└─────────────────────────────────────────────────┘${RESET}"
+    echo ""
+    echo -e "  ${BOLD}Optional local engines:${RESET}"
+    echo -e "    ${DIM}cd whisper-hud && source venv/bin/activate${RESET}"
+    echo -e "    ${DIM}pip install -e \".[whisper-local]\"${RESET}"
+    echo -e "    ${DIM}pip install -e \".[parakeet]\"${RESET}"
     echo ""
 }
 

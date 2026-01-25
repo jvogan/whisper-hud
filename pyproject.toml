@@ -1,0 +1,110 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whisper-hud"
+version = "1.0.0"
+description = "Voice to text, invisibly - a macOS menu bar transcription app"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [
+    {name = "Jacob Vogan"}
+]
+keywords = [
+    "voice-to-text",
+    "transcription",
+    "macos",
+    "menu-bar",
+    "whisper",
+    "speech-recognition"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: MacOS X",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Utilities"
+]
+dependencies = [
+    "rumps>=0.4.0",
+    "pynput>=1.7.6",
+    "sounddevice>=0.5.0",
+    "numpy>=2.0.0",
+    "scipy>=1.13.0",
+    "openai>=1.50.0",
+    "google-generativeai>=0.8.0",
+    "keyring>=25.0.0",
+    "pyperclip>=1.8.2",
+    "pyobjc-framework-Cocoa>=11.0",
+    "pyobjc-framework-Quartz>=11.0",
+    "pyobjc-framework-Speech>=11.0",
+    "requests>=2.28.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "flake8>=7.0.0",
+    "black>=24.3.0",
+    "pre-commit>=3.6.0",
+    "pytest>=8.0.0",
+]
+encryption = [
+    "cryptography>=41.0.0",
+]
+custom-icons = [
+    "Pillow>=10.0.0",
+    "rembg>=2.0.0",
+]
+vision = [
+    "pyobjc-framework-Vision>=11.0",
+]
+whisper-local = [
+    "faster-whisper>=1.0.0",
+    "huggingface_hub>=0.20.0",
+]
+parakeet = [
+    "parakeet-mlx>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/jvogan/whisper-hud"
+Documentation = "https://github.com/jvogan/whisper-hud#readme"
+Repository = "https://github.com/jvogan/whisper-hud.git"
+Issues = "https://github.com/jvogan/whisper-hud/issues"
+
+[project.scripts]
+whisper-hud = "whisper_hud.main:run"
+
+[tool.setuptools.packages.find]
+where = ["whisper-hud"]
+
+[tool.black]
+line-length = 120
+target-version = ['py311']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | venv
+  | build
+  | dist
+)/
+'''
+
+[tool.flake8]
+max-line-length = 120
+exclude = [".git", "__pycache__", "venv", ".venv", "build", "dist"]
+ignore = ["E501", "W503"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]

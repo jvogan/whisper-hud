@@ -1,0 +1,148 @@
+# Publish WhisperHUD to PyPI
+#
+# Triggered automatically after a successful release, or manually.
+#
+# Setup required:
+#   1. Create a PyPI account at https://pypi.org
+#   2. Create an API token at https://pypi.org/manage/account/token/
+#   3. Add the token as a GitHub secret named PYPI_API_TOKEN
+#
+# Usage:
+#   Automatic: Runs after release.yml completes
+#   Manual: Actions > Publish to PyPI > Run workflow
+
+name: Publish to PyPI
+
+on:
+  # Run after release workflow completes
+  workflow_run:
+    workflows: ["Release"]
+    types:
+      - completed
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (without v prefix)'
+        required: false
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  publish:
+    name: Build and Publish to PyPI
+    runs-on: ubuntu-latest
+    # Only run if release was successful (or manual trigger)
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Get version
+        id: version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            # Validate version format
+            if [[ ! "$INPUT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Error: Invalid version format"
+              exit 1
+            fi
+            VERSION="$INPUT_VERSION"
+          else
+            # Get latest tag
+            VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "")
+            if [ -z "$VERSION" ]; then
+              # Fall back to pyproject.toml version
+              VERSION=$(grep -m1 'version = ' pyproject.toml | sed 's/.*"\(.*\)".*/\1/')
+            fi
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Publishing version: $VERSION"
+
+      - name: Verify version consistency
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          PYPROJECT_VERSION=$(grep -m1 'version = ' pyproject.toml | sed 's/.*"\(.*\)".*/\1/')
+          INIT_VERSION=$(grep '__version__' whisper-hud/whisper_hud/__init__.py | sed 's/.*"\(.*\)".*/\1/')
+
+          echo "pyproject.toml: $PYPROJECT_VERSION"
+          echo "__init__.py: $INIT_VERSION"
+          echo "Target: $VERSION"
+
+          if [ "$PYPROJECT_VERSION" != "$VERSION" ] || [ "$INIT_VERSION" != "$VERSION" ]; then
+            echo "Warning: Version mismatch detected"
+          fi
+
+      - name: Build package
+        run: |
+          python -m build
+
+          echo "Built packages:"
+          ls -la dist/
+
+      - name: Check package
+        run: |
+          twine check dist/*
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          twine upload dist/*
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "## PyPI Publish Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** $VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Install with:**" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "pip install whisper-hud" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**PyPI URL:** https://pypi.org/project/whisper-hud/" >> $GITHUB_STEP_SUMMARY
+
+  # Test installation from PyPI
+  test-install:
+    name: Test PyPI Installation
+    needs: publish
+    runs-on: macos-latest
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Wait for PyPI to update
+        run: sleep 30
+
+      - name: Install from PyPI
+        run: |
+          pip install whisper-hud
+
+      - name: Verify installation
+        run: |
+          python -c "import whisper_hud; print(f'Installed version: {whisper_hud.__version__}')"
+          which whisper-hud

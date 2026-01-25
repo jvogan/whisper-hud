@@ -1,0 +1,211 @@
+"""
+py2app setup configuration for WhisperHUD.
+
+Creates a standalone macOS .app bundle with all dependencies bundled.
+
+Usage:
+    python setup_app.py py2app
+
+Requirements:
+    pip install py2app
+
+The resulting app will be in dist/WhisperHUD.app
+"""
+
+import os
+import sys
+from pathlib import Path
+from setuptools import setup
+
+# Ensure we can import from the project
+sys.path.insert(0, str(Path(__file__).parent / "whisper-hud"))
+
+# App metadata
+APP_NAME = "WhisperHUD"
+APP_VERSION = "1.0.0"
+APP_BUNDLE_ID = "com.whisperhud.app"
+MAIN_SCRIPT = "whisper-hud/whisper_hud/main.py"
+
+# Get version from package
+try:
+    from whisper_hud import __version__
+    APP_VERSION = __version__
+except ImportError:
+    pass
+
+# Paths
+PROJECT_ROOT = Path(__file__).parent
+ASSETS_DIR = PROJECT_ROOT / "assets"
+ICONS_DIR = ASSETS_DIR / "icons"
+APP_ICON = ICONS_DIR / "AppIcon.icns"
+
+# Data files to include in the app bundle
+DATA_FILES = [
+    # Assets
+    ("assets/icons", [
+        str(ICONS_DIR / "AppIcon.icns"),
+        str(ICONS_DIR / "icon.svg"),
+    ]),
+    ("assets/icons/icon.iconset", [
+        str(p) for p in (ICONS_DIR / "icon.iconset").glob("*.png")
+    ]),
+    ("assets/dithered", [
+        str(p) for p in (ASSETS_DIR / "dithered").glob("*.png")
+    ] if (ASSETS_DIR / "dithered").exists() else []),
+    ("assets/ascii", [
+        str(p) for p in (ASSETS_DIR / "ascii").glob("*.txt")
+    ] if (ASSETS_DIR / "ascii").exists() else []),
+]
+
+# Filter out empty entries
+DATA_FILES = [(dest, files) for dest, files in DATA_FILES if files]
+
+# py2app options
+OPTIONS = {
+    "argv_emulation": False,  # Menu bar apps don't need this
+    "iconfile": str(APP_ICON) if APP_ICON.exists() else None,
+    "plist": {
+        # App identification
+        "CFBundleName": APP_NAME,
+        "CFBundleDisplayName": APP_NAME,
+        "CFBundleIdentifier": APP_BUNDLE_ID,
+        "CFBundleVersion": APP_VERSION,
+        "CFBundleShortVersionString": APP_VERSION,
+        "CFBundleExecutable": APP_NAME,
+
+        # App behavior
+        "LSUIElement": True,  # Menu bar app - no dock icon
+        "LSMinimumSystemVersion": "12.0",  # macOS Monterey+
+        "NSHighResolutionCapable": True,
+
+        # Required permissions
+        "NSMicrophoneUsageDescription": (
+            "WhisperHUD needs microphone access to transcribe your voice. "
+            "Audio is processed locally or sent to your configured transcription provider."
+        ),
+        "NSAppleEventsUsageDescription": (
+            "WhisperHUD needs to control other applications to paste transcribed text "
+            "at the cursor position in any app."
+        ),
+
+        # Accessibility
+        "NSAccessibilityUsageDescription": (
+            "WhisperHUD needs accessibility access to insert transcribed text "
+            "at your cursor position and detect the active application."
+        ),
+
+        # Privacy descriptions
+        "NSDesktopFolderUsageDescription": (
+            "WhisperHUD may need access to save audio files or transcriptions."
+        ),
+
+        # Sparkle auto-update configuration
+        "SUFeedURL": "https://github.com/yourusername/whisper-hud/releases/latest/download/appcast.xml",
+        "SUPublicDSAKeyFile": "dsa_pub.pem",
+        "SUEnableAutomaticChecks": True,
+        "SUScheduledCheckInterval": 86400,  # Check daily (seconds)
+
+        # Copyright
+        "NSHumanReadableCopyright": f"Copyright 2024-2025 WhisperHUD. All rights reserved.",
+
+        # Document types (none for menu bar app)
+        "CFBundleDocumentTypes": [],
+
+        # URL schemes (optional, for deep linking)
+        "CFBundleURLTypes": [
+            {
+                "CFBundleURLName": APP_BUNDLE_ID,
+                "CFBundleURLSchemes": ["whisperhud"],
+            }
+        ],
+    },
+
+    # Include these Python packages
+    "packages": [
+        "rumps",
+        "pynput",
+        "sounddevice",
+        "numpy",
+        "scipy",
+        "openai",
+        "keyring",
+        "pyperclip",
+        "objc",
+        "Foundation",
+        "AppKit",
+        "Cocoa",
+        "Quartz",
+    ],
+
+    # Exclude these to reduce bundle size
+    "excludes": [
+        "tkinter",
+        "matplotlib",
+        "pandas",
+        "PIL",  # Only needed for asset generation
+        "test",
+        "tests",
+        "unittest",
+    ],
+
+    # Include these specific modules
+    "includes": [
+        "whisper_hud",
+        "whisper_hud.app",
+        "whisper_hud.config",
+        "whisper_hud.recorder",
+        "whisper_hud.transcribe",
+        "whisper_hud.translate",
+        "whisper_hud.hotkey",
+        "whisper_hud.hud",
+        "whisper_hud.paste",
+        "whisper_hud.paste_targets",
+        "whisper_hud.floating_widget",
+        "whisper_hud.streaming_panel",
+        "whisper_hud.setup_wizard",
+        "whisper_hud.keychain",
+        "whisper_hud.branding",
+        "whisper_hud.image_processor",
+        "whisper_hud.character_packs",
+        "whisper_hud.appearance_editor",
+        "whisper_hud.pack_creator",
+        "whisper_hud.launch_agent",
+        "whisper_hud.logging_config",
+        "whisper_hud.encryption",
+        "whisper_hud.providers",
+        "whisper_hud.providers.base",
+        "whisper_hud.providers.openai_whisper",
+        "whisper_hud.providers.apple_speech",
+        "whisper_hud.providers.gemini",
+        "whisper_hud.providers.parakeet",
+        "whisper_hud.providers.whisper_local",
+        "whisper_hud.providers.translation",
+        "whisper_hud.providers.translation.base",
+        "whisper_hud.providers.translation.gemini_translate",
+        "whisper_hud.providers.translation.ollama",
+        "whisper_hud.providers.translation.openai_translate",
+    ],
+
+    # Framework paths (will be populated by build script if Sparkle is available)
+    "frameworks": [],
+
+    # Resources to copy into bundle
+    "resources": [],
+
+    # Optimization
+    "optimize": 2,  # -OO optimization
+    "compressed": True,
+
+    # Build options
+    "strip": True,  # Strip debug symbols
+    "semi_standalone": False,  # Full standalone (include Python framework)
+}
+
+setup(
+    name=APP_NAME,
+    version=APP_VERSION,
+    app=[MAIN_SCRIPT],
+    data_files=DATA_FILES,
+    options={"py2app": OPTIONS},
+    setup_requires=["py2app"],
+)

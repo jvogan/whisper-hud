@@ -1,0 +1,11 @@
+# Recording Spinner Animation Frames
+# Each frame is separated by ---
+# Use with recording indicator
+
+◉ ─ ─ ─ ╱╲ ─ ─ ─ ◉
+---
+○ ─ ─ ─ ╱╲ ─ ─ ─ ●
+---
+● ─ ─ ─ ╱╲ ─ ─ ─ ○
+---
+◉ ─ ─ ─ ╱╲ ─ ─ ─ ◉
