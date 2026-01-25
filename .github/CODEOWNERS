@@ -1,0 +1,16 @@
+# Code owners for WhisperHUD
+# These users will be requested for review when PRs modify matching paths
+
+# Default owners for everything
+* @jvogan
+
+# Core application code
+/whisper-hud/whisper_hud/ @jvogan
+
+# CI/CD configuration
+/.github/ @jvogan
+
+# Documentation
+/README.md @jvogan
+/CHANGELOG.md @jvogan
+/CONTRIBUTING.md @jvogan

@@ -1,0 +1,35 @@
+{
+  "id": "panda",
+  "name": "Panda",
+  "description": "Cute panda character with expressive poses for each state",
+  "author": "WhisperHUD",
+  "version": "1.0.0",
+  "preview_image": "idle.png",
+  "states": {
+    "idle": {
+      "file": "idle.png",
+      "description": "Sleeping panda with Zzz"
+    },
+    "recording": {
+      "file": "recording.png",
+      "description": "Panda writing with pencil"
+    },
+    "processing": {
+      "file": "processing.png",
+      "description": "Confused panda with question mark"
+    },
+    "error": {
+      "file": "error.png",
+      "description": "Dizzy panda with stars"
+    },
+    "success": {
+      "file": "success.png",
+      "description": "Happy panda with sparkles"
+    }
+  },
+  "settings": {
+    "shape_mode": "alpha",
+    "apply_state_tint": false,
+    "recommended_size": "large"
+  }
+}
