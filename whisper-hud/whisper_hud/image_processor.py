@@ -83,8 +83,6 @@ _cache_order: list = []  # Track insertion order for LRU eviction
 
 def _cache_set(key: str, image: 'NSImage') -> None:
     """Set a cache entry with LRU eviction when limit is reached."""
-    global _image_cache, _cache_order
-
     # If key already exists, move it to end (most recently used)
     if key in _image_cache:
         _cache_order.remove(key)
@@ -104,8 +102,6 @@ def _cache_set(key: str, image: 'NSImage') -> None:
 
 def _cache_get(key: str) -> Optional['NSImage']:
     """Get a cache entry, updating access order for LRU."""
-    global _cache_order
-
     if key in _image_cache:
         # Move to end (most recently used)
         if key in _cache_order:
