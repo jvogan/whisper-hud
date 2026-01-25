@@ -41,7 +41,6 @@ def _load_sparkle():
         return True
 
     try:
-        from objc import loadBundle
         from Foundation import NSBundle
 
         # Try to load Sparkle from the app bundle's Frameworks directory

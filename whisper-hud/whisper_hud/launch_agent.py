@@ -4,7 +4,6 @@ Launch at login management for macOS.
 Uses launchd Launch Agents to start WhisperHUD at login.
 """
 
-import os
 import plistlib
 import subprocess
 import sys

@@ -1962,7 +1962,7 @@ class WhisperHUDApp(rumps.App):
     def _export_settings(self, sender):
         """Export settings to a file."""
         try:
-            from AppKit import NSSavePanel, NSApp
+            from AppKit import NSSavePanel
             import os
 
             panel = NSSavePanel.savePanel()
@@ -2656,7 +2656,7 @@ class WhisperHUDApp(rumps.App):
 
     def _reset_all_settings(self, sender):
         """Reset all settings to defaults."""
-        from .keychain import delete_api_key, get_configured_providers
+        from .keychain import get_configured_providers
         from .image_processor import clear_cache
         from .config import Config
 
@@ -2676,8 +2676,8 @@ class WhisperHUDApp(rumps.App):
             cancel="Cancel"
         )
         if response == 1:
-            # Save API keys state (we'll preserve them)
-            configured_providers = get_configured_providers()
+            # Note: API keys are preserved (not deleted)
+            _ = get_configured_providers()  # Verify keychain access works
 
             # Reset to defaults
             fresh_config = Config()
