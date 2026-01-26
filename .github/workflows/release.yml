@@ -256,7 +256,7 @@ jobs:
           fi
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         env:
           VERSION: ${{ steps.version.outputs.version }}
           CHANGELOG_NOTES: ${{ steps.changelog.outputs.notes }}
