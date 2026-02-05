@@ -80,7 +80,7 @@ print_section() {
 # Check if we're in the right directory
 check_directory() {
     if [[ ! -f "requirements.txt" ]] || [[ ! -d "whisper-hud" ]]; then
-        print_error "Please run this script from the whisper-hud project root"
+        print_error "Please run this script from the project root directory"
         print_info "cd whisper-hud && ./install.sh"
         exit 1
     fi

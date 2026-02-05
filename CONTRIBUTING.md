@@ -34,7 +34,7 @@ See `docs/DEVELOPER.md` for local setup, lint, and test commands.
 
 - macOS 12+ (Monterey or later)
 - Python 3.11+
-- API key only if you use cloud providers (OpenAI or Gemini)
+- API key only if you use cloud providers (OpenAI, Gemini, or Anthropic)
 
 ## How to Contribute
 
