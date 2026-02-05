@@ -6,6 +6,7 @@ API keys are stored separately in Keychain (see keychain.py).
 """
 
 import json
+import os
 from pathlib import Path
 from dataclasses import dataclass, asdict, field
 from typing import List, Optional
@@ -18,17 +19,36 @@ CONFIG_DIR = Path.home() / ".config" / "whisper-hud"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 
+def _ensure_config_permissions() -> None:
+    """Tighten config directory/file permissions to user-only access."""
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return
+
+    try:
+        os.chmod(CONFIG_DIR, 0o700)
+    except Exception as e:
+        logger.warning(f"Could not set config directory permissions: {e}")
+
+    if CONFIG_FILE.exists():
+        try:
+            os.chmod(CONFIG_FILE, 0o600)
+        except Exception as e:
+            logger.warning(f"Could not set config file permissions: {e}")
+
+
 @dataclass
 class Config:
     """Application configuration."""
 
     # Default transcription provider
     # Options: openai, gemini, apple, whisper_local, parakeet
-    default_provider: str = "openai"
+    default_provider: str = "apple"
 
     # Default model for each transcription provider
     openai_model: str = "gpt-4o-transcribe"
-    gemini_model: str = "gemini-2.0-flash-exp"
+    gemini_model: str = "gemini-3-flash-preview"
     apple_model: str = "en-US"
     whisper_local_model: str = "large-v3-turbo"
     parakeet_model: str = "parakeet-tdt-0.6b-v3"
@@ -42,8 +62,11 @@ class Config:
     show_hud: bool = True         # Show floating HUD
     show_widget: bool = False     # Show floating widget button
     widget_size: str = "medium"   # Widget size: small, medium, large, xlarge
+    widget_position: Optional[dict] = None  # {"x": float, "y": float} for persisted position
     auto_stop: bool = True        # Auto-stop recording after silence
     silence_duration: float = 1.5  # Seconds of silence before auto-stop
+    silence_threshold: float = 0.002  # Audio level threshold for silence (below ambient noise)
+    max_recording_duration: int = 600  # Max recording duration in seconds (10 min default)
     play_sound: bool = False      # Play sound on completion
     restore_clipboard: bool = True  # Restore clipboard after paste
     show_notifications: bool = True  # Show system notifications
@@ -52,12 +75,13 @@ class Config:
 
     # Translation settings
     translation_enabled: bool = False
-    translation_provider: str = "ollama"  # ollama, gemini, openai
+    translation_provider: str = "apple"  # apple, ollama, gemini, openai
     translation_model: str = "translategemma-4b"  # Ollama model: 4b, 12b, 27b
-    gemini_translate_model: str = "gemini-2.5-flash"  # Gemini translation model
+    gemini_translate_model: str = "gemini-3-flash-preview"  # Gemini translation model
     openai_translate_model: str = "gpt-5-mini"  # OpenAI translation model
-    target_language: str = "es"  # Default: Spanish
-    source_language: str = "auto"  # "auto" or specific ISO 639-1 code
+    anthropic_translate_model: str = "claude-sonnet-4-5"  # Anthropic translation model
+    target_language: str = "zh"  # Default: Chinese (Simplified)
+    source_language: str = "en"  # "auto" or specific ISO 639-1 code
 
     # Stats
     total_transcriptions: int = 0
@@ -78,6 +102,11 @@ class Config:
     paste_target_identifier: str = ""   # App name, tmux session, etc.
     paste_target_return_focus: bool = True  # Return to original app after paste
     paste_target_recent: List[str] = field(default_factory=list)  # Recent targets ["type:id", ...]
+
+    # Recent language selections (for quick access in menus)
+    recent_source_languages: List[str] = field(default_factory=list)  # Recent source language codes
+    recent_target_languages: List[str] = field(default_factory=list)  # Recent target language codes
+    max_recent_languages: int = 5  # Maximum recent languages to remember
 
     # Transcription history
     history_enabled: bool = False  # Store transcription history
@@ -113,10 +142,22 @@ class Config:
     @classmethod
     def load(cls) -> "Config":
         """Load config from disk or return defaults."""
+        _ensure_config_permissions()
         if CONFIG_FILE.exists():
             try:
                 with open(CONFIG_FILE) as f:
                     data = json.load(f)
+
+                # Migration: Old silence_threshold default (0.05) was too high for typical mics
+                # Real MacBook mic RMS during speech is 0.005-0.03, so old default never detected speech
+                if 'silence_threshold' in data and data['silence_threshold'] >= 0.03:
+                    old_val = data['silence_threshold']
+                    data['silence_threshold'] = 0.005
+                    logger.info(
+                        f"Migrating silence_threshold from {old_val} to 0.005 "
+                        "(old default was too high for typical microphones)"
+                    )
+
                 # Handle missing fields gracefully
                 return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
             except Exception as e:
@@ -131,9 +172,10 @@ class Config:
     def save(self) -> bool:
         """Save config to disk."""
         try:
-            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            with open(CONFIG_FILE, "w") as f:
+            _ensure_config_permissions()
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(asdict(self), f, indent=2)
+            _ensure_config_permissions()
             return True
         except Exception as e:
             logger.error(f"Failed to save config: {e}")
@@ -204,23 +246,29 @@ class Config:
         # Encrypt text fields if encryption is enabled
         store_text = text
         store_original = original_text
+        encrypted_ok = False
 
         if self.history_encrypted:
             from .encryption import encrypt_text
             encrypted = encrypt_text(text)
-            if encrypted:
-                store_text = encrypted
+            if not encrypted:
+                logger.warning("History encryption enabled but failed; skipping history entry")
+                return
+            store_text = encrypted
+            encrypted_ok = True
             if translated and original_text:
                 encrypted_original = encrypt_text(original_text)
-                if encrypted_original:
-                    store_original = encrypted_original
+                if not encrypted_original:
+                    logger.warning("History encryption enabled but failed on original text; skipping history entry")
+                    return
+                store_original = encrypted_original
 
         entry = {
             "text": store_text,
             "timestamp": time.time(),
             "provider": provider,
             "translated": translated,
-            "encrypted": self.history_encrypted,  # Mark if entry is encrypted
+            "encrypted": encrypted_ok,  # Mark if entry is encrypted
         }
         if translated and store_original:
             entry["original_text"] = store_original
@@ -332,6 +380,30 @@ class Config:
         icons_dir.mkdir(parents=True, exist_ok=True)
         return icons_dir
 
+    def add_recent_source_language(self, lang_code: str) -> None:
+        """Add a source language to the recent list."""
+        if lang_code == "auto":
+            return  # Don't track auto-detect
+        # Remove if already in list
+        if lang_code in self.recent_source_languages:
+            self.recent_source_languages.remove(lang_code)
+        # Add to front
+        self.recent_source_languages.insert(0, lang_code)
+        # Trim to max
+        self.recent_source_languages = self.recent_source_languages[:self.max_recent_languages]
+        self.save()
+
+    def add_recent_target_language(self, lang_code: str) -> None:
+        """Add a target language to the recent list."""
+        # Remove if already in list
+        if lang_code in self.recent_target_languages:
+            self.recent_target_languages.remove(lang_code)
+        # Add to front
+        self.recent_target_languages.insert(0, lang_code)
+        # Trim to max
+        self.recent_target_languages = self.recent_target_languages[:self.max_recent_languages]
+        self.save()
+
     def get_appearance_colors(self, state: str) -> dict:
         """Get colors for a specific widget state."""
         default_colors = {
@@ -358,7 +430,10 @@ class Config:
         self.widget_appearance["theme"] = "custom"
         self.save()
 
-    def set_custom_icon(self, path: str, apply_tint: bool = True, tint_opacity: float = 0.3, shape_mode: str = "auto") -> None:
+    def set_custom_icon(
+        self, path: str, apply_tint: bool = True,
+        tint_opacity: float = 0.3, shape_mode: str = "auto"
+    ) -> None:
         """Set a custom icon for the widget."""
         self.widget_appearance["custom_icon"] = {
             "enabled": bool(path),
@@ -449,6 +524,10 @@ class Config:
 
             with open(filepath, "w") as f:
                 json.dump(export_data, f, indent=2)
+            try:
+                os.chmod(filepath, 0o600)
+            except Exception:
+                pass
             return True
         except Exception as e:
             logger.error(f"Failed to export settings: {e}")
@@ -476,6 +555,10 @@ class Config:
             settings = data.get("settings", {})
             if not settings:
                 return False, "No settings found in file", None
+            # Drop sensitive/transient fields even if present in import
+            settings.pop("history", None)
+            settings.pop("total_transcriptions", None)
+            settings.pop("total_cost", None)
 
             # Create config from imported settings
             valid_fields = {k: v for k, v in settings.items() if k in cls.__dataclass_fields__}

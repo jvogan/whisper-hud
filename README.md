@@ -24,16 +24,6 @@
 
 # WhisperHUD
 
-## Demo
-
-Add a short demo GIF or video before going public. If you drop a file at `assets/demo.gif`, you can enable this block:
-
-<!--
-<p align="center">
-  <img src="assets/demo.gif" alt="WhisperHUD demo" width="800">
-</p>
--->
-
 ## Features
 
 - **Hold-to-record**: Press `Cmd+Shift+Space` anywhere to start recording
@@ -41,7 +31,7 @@ Add a short demo GIF or video before going public. If you drop a file at `assets
 - **Auto-paste**: Transcribed text appears instantly at your cursor
 - **Visual feedback**: Menu bar icon and optional HUD show recording/processing status
 - **Auto-stop**: Optionally stop recording automatically after silence
-- **Translation**: Local (Ollama) or cloud (Gemini/OpenAI) translation into 50+ languages
+- **Translation**: Local (Apple/Ollama) or cloud (Gemini/OpenAI/Anthropic) translation into 50+ languages
 - **Streaming display**: See live text as it's transcribed and translated
 - **Secure**: API keys stored in macOS Keychain, never in files
 - **Cost tracking**: See your usage and estimated costs in the menu
@@ -81,7 +71,7 @@ WhisperHUD needs two macOS permissions to work properly:
 
 ## Getting API Keys
 
-Only needed if you use cloud providers (OpenAI/Gemini).
+Only needed if you use cloud providers (OpenAI/Gemini/Anthropic).
 
 ### Google Gemini (Free tier available)
 1. Go to [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
@@ -90,6 +80,11 @@ Only needed if you use cloud providers (OpenAI/Gemini).
 
 ### OpenAI
 1. Go to [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+2. Create a new API key
+3. Add billing/credits to your account
+
+### Anthropic
+1. Go to [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys)
 2. Create a new API key
 3. Add billing/credits to your account
 
@@ -137,20 +132,21 @@ Access settings from the menu bar icon:
 - **Play sound**: Audio feedback on completion
 - **Save history**: Store recent transcriptions locally (disabled by default)
 
-**Translation** (Ollama local or cloud)
-- **Provider**: Ollama (local), Gemini, or OpenAI
+**Translation** (Apple local, Ollama local, or cloud)
+- **Provider**: Apple (local), Ollama (local), Gemini, OpenAI, or Anthropic
 - **Enable translation**: Translate transcriptions before pasting
 - **Target language**: Language to translate into (50+ supported)
 - **Translation model**: Choose an Ollama size (4B/12B/27B) or a cloud model
 
 ## Translation Feature
 
-WhisperHUD can translate your transcriptions locally using [Ollama](https://ollama.ai), or via cloud providers (Gemini/OpenAI).
+WhisperHUD can translate locally using Apple Translation (macOS 26+), locally using [Ollama](https://ollama.ai), or via cloud providers (Gemini/OpenAI/Anthropic).
 Local translation keeps data on-device; cloud translation sends text to the provider.
 
 ### Enabling Translation
 1. Go to Settings > Translation
 2. Select a provider:
+   - **Apple (local)**: Uses Apple's Translation framework (macOS 26+). For dev builds, run `./scripts/build-apple-translate.sh` to compile the helper.
    - **Ollama (local)**: WhisperHUD can install/start Ollama and download a model (~3-18GB)
    - **Gemini/OpenAI (cloud)**: Requires API key, no local model download
 3. Enable translation
@@ -165,7 +161,8 @@ Local translation keeps data on-device; cloud translation sends text to the prov
 | translategemma-27b | ~18GB | Slower | Best |
 
 ### Supported Languages
-Arabic, Chinese, Dutch, French, German, Hindi, Indonesian, Italian, Japanese, Korean, Polish, Portuguese, Russian, Spanish, Turkish, Ukrainian, Vietnamese
+Language support varies by provider. Common options include:
+Arabic, Chinese, Dutch, French, German, Hindi, Indonesian, Italian, Japanese, Korean, Portuguese, Russian, Spanish, Turkish, Vietnamese
 
 ## Streaming Display
 
@@ -191,10 +188,11 @@ Typical usage (30 seconds of speech): $0.001 - $0.003
 ## Security
 
 - **API keys** are stored in macOS Keychain (encrypted, system-protected)
-- **Audio** is processed in memory and never saved to disk; cloud providers receive audio/text when selected
+- **Audio** is processed in memory; local providers may write short‑lived temp files that are securely deleted
+- **Cloud providers** receive audio/text when selected (OpenAI/Gemini/Anthropic)
 - **Local providers** (Apple, Whisper Local, Parakeet, Ollama) keep data on-device
-- **History** is disabled by default; enabling it stores recent transcriptions locally in `~/.config/whisper-hud/`
-- **Settings** are stored locally in `~/.config/whisper-hud/`
+- **History** is disabled by default; enabling it stores recent transcriptions locally in `~/.config/whisper-hud/` (optional encryption at rest)
+- **Settings** are stored locally in `~/.config/whisper-hud/` with user‑only permissions
 - **No telemetry** or data collection
 - **Accessibility permission** is powerful; only grant it to trusted apps
 
@@ -204,10 +202,14 @@ If you use any third-party assets in `assets/`, list sources and licenses in `as
 
 ## Requirements
 
-- macOS 12+ (Monterey or later)
+- macOS 12+ (Monterey or later; Apple Translation requires macOS 26+)
 - Python 3.11+
-- OpenAI/Gemini API key if you use cloud providers (not required for local providers)
+- OpenAI/Gemini/Anthropic API key if you use cloud providers (not required for local providers)
 - Homebrew (optional, for Ollama translation)
+
+## Release
+
+See the [Release Checklist](docs/RELEASE_CHECKLIST.md) before making the repo public or shipping a release.
 
 ## Troubleshooting
 
@@ -266,6 +268,6 @@ pip install -r requirements.txt
 
 MIT License - see [LICENSE](LICENSE) for details.
 
-## Author
+## Authors
 
-Jacob Vogan
+Whisper HUD Contributors

@@ -10,7 +10,7 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
 authors = [
-    {name = "Jacob Vogan"}
+    {name = "Whisper HUD Contributors"}
 ]
 keywords = [
     "voice-to-text",
@@ -40,6 +40,7 @@ dependencies = [
     "numpy>=2.0.0",
     "scipy>=1.13.0",
     "openai>=1.50.0",
+    "anthropic>=0.76.0",
     "google-generativeai>=0.8.0",
     "keyring>=25.0.0",
     "pyperclip>=1.8.2",
@@ -102,8 +103,8 @@ exclude = '''
 
 [tool.flake8]
 max-line-length = 120
-exclude = [".git", "__pycache__", "venv", ".venv", "build", "dist"]
-ignore = ["E501", "W503"]
+exclude = ".git,__pycache__,venv,.venv,build,dist"
+extend-ignore = "E501,W503"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

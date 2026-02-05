@@ -1,8 +1,6 @@
 """Tests for configuration management."""
 
-import pytest
 import tempfile
-import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,7 +15,7 @@ class TestConfig:
             from whisper_hud.config import Config
             config = Config()
 
-            assert config.default_provider == "openai"
+            assert config.default_provider == "apple"
             assert config.hotkey_mode == "push_to_talk"
             assert config.auto_paste is True
             assert config.show_hud is True
@@ -69,6 +67,6 @@ class TestConfig:
             config = Config()
 
             assert config.get_provider_model("openai") == "gpt-4o-transcribe"
-            assert config.get_provider_model("gemini") == "gemini-2.0-flash-exp"
+            assert config.get_provider_model("gemini") == "gemini-3-flash-preview"
             assert config.get_provider_model("apple") == "en-US"
             assert config.get_provider_model("unknown") == ""

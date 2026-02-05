@@ -1,6 +1,5 @@
 """Tests for paste/text insertion functionality."""
 
-import pytest
 from unittest.mock import patch, MagicMock
 
 

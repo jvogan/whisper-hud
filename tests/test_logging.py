@@ -1,8 +1,6 @@
 """Tests for logging configuration."""
 
-import pytest
 import logging
-from io import StringIO
 
 
 class TestLogging:

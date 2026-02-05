@@ -1,8 +1,5 @@
 """Tests for keychain API key management."""
 
-import pytest
-from unittest.mock import patch, MagicMock
-
 
 class TestKeychain:
     """Tests for keychain functions."""
