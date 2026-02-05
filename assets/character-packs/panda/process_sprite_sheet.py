@@ -3,9 +3,11 @@
 Process the panda sprite sheet: split into panels and remove green screen.
 """
 
-from PIL import Image
-import numpy as np
+import argparse
 from pathlib import Path
+
+import numpy as np
+from PIL import Image
 
 
 def remove_green_screen(img: Image.Image) -> Image.Image:
@@ -209,8 +211,26 @@ def split_sprite_sheet(sprite_path: str, output_dir: str):
     print(f"\nDone! Created {len(states) + 1} panda icons in {output_dir}")
 
 
-if __name__ == "__main__":
-    sprite_sheet = "/Users/jacobvogan/github/panda_icon_test.jpeg"
-    output_dir = Path(__file__).parent
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Split a panda sprite sheet into icons."
+    )
+    parser.add_argument(
+        "sprite_sheet",
+        help="Path to the sprite sheet image.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=str(Path(__file__).parent),
+        help="Output directory (default: script directory).",
+    )
+    return parser.parse_args()
 
-    split_sprite_sheet(sprite_sheet, str(output_dir))
+
+if __name__ == "__main__":
+    args = _parse_args()
+    sprite_path = Path(args.sprite_sheet)
+    if not sprite_path.exists():
+        raise SystemExit(f"Sprite sheet not found: {sprite_path}")
+
+    split_sprite_sheet(str(sprite_path), args.output_dir)

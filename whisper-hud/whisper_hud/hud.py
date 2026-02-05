@@ -151,8 +151,8 @@ class HUD:
         if not HAS_APPKIT or self._window is not None:
             return
 
-        # Window dimensions (wider to accommodate level bars)
-        width, height = 220, 44
+        # Window dimensions (wider to accommodate level bars and longer error messages)
+        width, height = 260, 44
         corner_radius = 12
 
         # Position in top-center of screen
@@ -196,8 +196,8 @@ class HUD:
         indicator_layer.setCornerRadius_(8)
         content.addSubview_(self._indicator_view)
 
-        # Create text label
-        self._label = NSTextField.alloc().initWithFrame_(NSMakeRect(40, 10, 120, 24))
+        # Create text label (wider to accommodate longer error messages)
+        self._label = NSTextField.alloc().initWithFrame_(NSMakeRect(40, 10, 160, 24))
         self._label.setBezeled_(False)
         self._label.setDrawsBackground_(False)
         self._label.setEditable_(False)
@@ -210,7 +210,7 @@ class HUD:
         self._level_bars = []
         bar_width = 4
         bar_spacing = 2
-        bar_start_x = 165
+        bar_start_x = 205
         bar_base_y = 12
         for i in range(5):
             bar_height = 6 + i * 4  # Increasing heights: 6, 10, 14, 18, 22
@@ -256,8 +256,10 @@ class HUD:
                 return
 
             # Map level (0-1) to number of lit bars (0-5)
-            # Use non-linear mapping for better visual feedback
-            num_lit = int(min(5, level * level * 8))  # Quadratic for sensitivity
+            # Use square root for better perception of loudness changes
+            # Higher multiplier makes quiet sounds more visible
+            import math
+            num_lit = int(min(5, math.sqrt(level) * 8)) if level > 0.02 else 0
 
             for i, bar in enumerate(self._level_bars):
                 bar_layer = bar.layer()
@@ -296,13 +298,15 @@ class HUD:
             self._schedule_dismiss(auto_dismiss)
 
     def show_error(self, message: str = "Error"):
-        """Show error state."""
+        """Show error state with dynamic dismiss time."""
         if not self._enabled:
             return
-        # Truncate long messages
-        display_msg = message[:25] + "..." if len(message) > 28 else message
+        # Truncate long messages (45 chars is readable in the HUD width)
+        display_msg = message[:45] + "..." if len(message) > 48 else message
         self._show(display_msg, HUDState.ERROR)
-        self._schedule_dismiss(3.0)
+        # Dynamic dismiss: base 3s + 0.5s per 20 chars, capped at 8s
+        dismiss_time = 3.0 + (len(message) / 40)
+        self._schedule_dismiss(min(dismiss_time, 8.0))
 
     def _schedule_dismiss(self, delay: float):
         """Schedule HUD dismissal."""

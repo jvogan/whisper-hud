@@ -20,6 +20,7 @@ WhisperHUD supports multiple transcription providers, each with different trade-
 
 **Models available:**
 - `gpt-4o-transcribe` - Best quality, faster (recommended)
+- `gpt-4o-transcribe-diarize` - Adds speaker diarization
 - `gpt-4o-mini-transcribe` - Good quality, cheapest
 - `whisper-1` - Original Whisper model
 
@@ -44,7 +45,10 @@ WhisperHUD supports multiple transcription providers, each with different trade-
 ### Google Gemini
 
 **Models available:**
-- `gemini-2.0-flash-exp` - Very fast, great accuracy
+- `gemini-3-flash-preview` - Fast and strong quality
+- `gemini-3-pro-preview` - Highest quality (preview)
+- `gemini-2.5-flash` - Stable, fast, cost-effective
+- `gemini-2.5-flash-lite` - Lowest latency/cost
 
 **Setup:**
 1. Get API key from [aistudio.google.com](https://aistudio.google.com/apikey)
@@ -129,7 +133,6 @@ Parakeet is an Apple Silicon-optimized local model (via `parakeet-mlx`).
 
 **Models available:**
 - `parakeet-tdt-0.6b-v3` - Multilingual (25 European languages)
-- `parakeet-tdt-0.6b-v2` - English only
 
 **Setup:**
 ```bash
@@ -173,9 +176,11 @@ After transcription, you can optionally translate to another language.
 
 | Provider | Speed | Quality | Privacy | Cost |
 |----------|-------|---------|---------|------|
+| **Apple** | Fast | Good | Local | Free |
 | **Ollama** | Medium | Good | Local | Free |
 | **Gemini** | Fast | Excellent | Cloud | Free tier |
 | **OpenAI** | Fast | Excellent | Cloud | Paid |
+| **Anthropic** | Fast | Excellent | Cloud | Paid |
 
 ### Ollama (Local Translation)
 
@@ -192,4 +197,11 @@ ollama serve  # Start server (WhisperHUD can auto-start this)
 
 ### Cloud Translation
 
-Uses the same API keys as transcription. Enable in settings and select target language.
+Uses the same API keys as transcription where applicable (Gemini/OpenAI). Anthropic requires its own API key.
+Enable in settings and select target language.
+### Apple (Local Translation)
+
+Uses Apple's Translation framework (macOS 26+). For dev builds, run:
+```bash
+./scripts/build-apple-translate.sh
+```

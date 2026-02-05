@@ -25,10 +25,14 @@ venv/
 env/
 .venv/
 .env/
+.env
+.env.*
+.envrc
 
 # IDE
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 *~
@@ -45,6 +49,15 @@ htmlcov/
 
 # Logs
 *.log
+firebase-debug.log
 
 # Local config (API keys should be in keychain, not files)
 .env.local
+
+# Apple Translation helper binary (built locally)
+whisper-hud/bin/*
+!whisper-hud/bin/.gitkeep
+
+# Swift build artifacts
+whisper-hud/apple-translate-helper/.build/
+whisper-hud/apple-translate-helper/.swiftpm/

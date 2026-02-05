@@ -5,6 +5,6 @@ A macOS menu bar app for system-wide voice-to-text transcription.
 """
 
 __version__ = "1.0.0"
-__author__ = "Jacob Vogan"
+__author__ = "Whisper HUD Contributors"
 
 # WhisperHUD - macOS Voice-to-Text Utility

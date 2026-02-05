@@ -35,7 +35,7 @@ from xml.dom import minidom
 
 
 # Configuration
-GITHUB_REPO = "jacobvogan/whisper-hud"
+GITHUB_REPO = "jvogan/whisper-hud"
 GITHUB_RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases"
 DOWNLOAD_BASE_URL = f"https://github.com/{GITHUB_REPO}/releases/download"
 APPCAST_FILENAME = "appcast.xml"

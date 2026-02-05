@@ -106,7 +106,8 @@ class StreamingPanel:
         self._window.setOpaque_(False)
         self._window.setBackgroundColor_(NSColor.clearColor())
         self._window.setHasShadow_(True)
-        self._window.setIgnoresMouseEvents_(True)
+        # Allow mouse events so users can select and copy text
+        self._window.setIgnoresMouseEvents_(False)
         self._window.setCollectionBehavior_(
             NSWindowCollectionBehaviorCanJoinAllSpaces
             | NSWindowCollectionBehaviorStationary
@@ -159,14 +160,14 @@ class StreamingPanel:
         scroll_view.setBorderType_(0)  # No border
         scroll_view.setDrawsBackground_(False)
 
-        # Text view inside scroll view
+        # Text view inside scroll view (selectable for copy/paste)
         text_view_frame = NSMakeRect(0, 0, self.WIDTH - 2 * self.PADDING - 10, text_height)
         self._transcription_text = NSTextView.alloc().initWithFrame_(text_view_frame)
         self._transcription_text.setDrawsBackground_(False)
         self._transcription_text.setTextColor_(NSColor.whiteColor())
         self._transcription_text.setFont_(NSFont.systemFontOfSize_(15))
         self._transcription_text.setEditable_(False)
-        self._transcription_text.setSelectable_(False)
+        self._transcription_text.setSelectable_(True)  # Allow text selection
 
         scroll_view.setDocumentView_(self._transcription_text)
         content.addSubview_(scroll_view)
@@ -212,7 +213,7 @@ class StreamingPanel:
         self._translation_text.setTextColor_(NSColor.whiteColor())
         self._translation_text.setFont_(NSFont.systemFontOfSize_(15))
         self._translation_text.setEditable_(False)
-        self._translation_text.setSelectable_(False)
+        self._translation_text.setSelectable_(True)  # Allow text selection
 
         scroll_view.setDocumentView_(self._translation_text)
         content.addSubview_(scroll_view)
@@ -223,6 +224,16 @@ class StreamingPanel:
             return
         self._show_translation = show_translation
         self._show("Transcribing...", StreamingPanelState.TRANSCRIBING)
+
+    def _has_text_selection(self, text_view) -> bool:
+        """Check if the text view has an active text selection."""
+        if not text_view:
+            return False
+        try:
+            selected_range = text_view.selectedRange()
+            return selected_range.length > 0
+        except Exception:
+            return False
 
     def update_transcription(self, text: str):
         """Update the transcription text with throttling."""
@@ -242,10 +253,11 @@ class StreamingPanel:
         def _update():
             if self._transcription_text:
                 self._transcription_text.setString_(text)
-                # Scroll to bottom
-                self._transcription_text.scrollRangeToVisible_(
-                    (len(text), 0)
-                )
+                # Only auto-scroll if user doesn't have text selected
+                if not self._has_text_selection(self._transcription_text):
+                    self._transcription_text.scrollRangeToVisible_(
+                        (len(text), 0)
+                    )
 
         try:
             AppHelper.callAfter(_update)
@@ -285,10 +297,11 @@ class StreamingPanel:
         def _update():
             if self._translation_text:
                 self._translation_text.setString_(text)
-                # Scroll to bottom
-                self._translation_text.scrollRangeToVisible_(
-                    (len(text), 0)
-                )
+                # Only auto-scroll if user doesn't have text selected
+                if not self._has_text_selection(self._translation_text):
+                    self._translation_text.scrollRangeToVisible_(
+                        (len(text), 0)
+                    )
 
         try:
             AppHelper.callAfter(_update)

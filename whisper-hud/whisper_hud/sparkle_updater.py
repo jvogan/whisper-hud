@@ -252,7 +252,7 @@ class SparkleUpdater:
                 message=(
                     "Automatic updates are not available in this version.\n\n"
                     "Please check the GitHub releases page for the latest version:\n"
-                    "https://github.com/yourusername/whisper-hud/releases"
+                    "https://github.com/jvogan/whisper-hud/releases"
                 ),
                 ok="OK"
             )

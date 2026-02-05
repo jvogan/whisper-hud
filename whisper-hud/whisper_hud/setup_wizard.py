@@ -828,6 +828,13 @@ class SetupWizard:
 
         # Save the API key
         set_api_key(self._selected_provider, self._api_key)
+        # Clear in-memory key after storing
+        self._api_key = ""
+        if self._api_key_field:
+            try:
+                self._api_key_field.setStringValue_("")
+            except Exception:
+                pass
 
         # Continue to translation step
         self._show_step(WizardStep.TRANSLATION)

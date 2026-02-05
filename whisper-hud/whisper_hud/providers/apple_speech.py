@@ -134,20 +134,20 @@ class AppleSpeechProvider(TranscriptionProvider):
             )
 
         try:
-            from Foundation import NSURL, NSTemporaryDirectory
+            from Foundation import NSURL
             import os
+            import tempfile
 
-            # Write audio to temporary file (Speech framework needs a file URL)
+            # Write audio to a unique temp file (Speech framework needs a file URL)
             # Use restrictive permissions (owner-only) and consistent prefix for cleanup
-            temp_dir = NSTemporaryDirectory()
-            temp_file = os.path.join(temp_dir, "whisper_hud_temp.wav")
-
-            # Create file with restricted permissions (0o600 = owner read/write only)
-            fd = os.open(temp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            try:
-                os.write(fd, audio_bytes)
-            finally:
-                os.close(fd)
+            with tempfile.NamedTemporaryFile(
+                prefix="whisper_hud_",
+                suffix=".wav",
+                delete=False
+            ) as temp_fp:
+                os.chmod(temp_fp.name, 0o600)
+                temp_fp.write(audio_bytes)
+                temp_file = temp_fp.name
 
             # Create file URL
             file_url = NSURL.fileURLWithPath_(temp_file)
@@ -290,3 +290,81 @@ class AppleSpeechProvider(TranscriptionProvider):
             return "Apple Speech is available"
         except ImportError:
             return "Install pyobjc-framework-Speech: pip install pyobjc-framework-Speech"
+
+    @classmethod
+    def get_setup_instructions(cls) -> tuple[str, str]:
+        """
+        Get detailed setup instructions.
+
+        Returns:
+            Tuple of (title, message) for the setup dialog
+        """
+        if platform.system() != "Darwin":
+            return ("Not Available", "Apple Speech requires macOS.")
+
+        version = cls.get_macos_version()
+        if version < (12, 0):
+            return (
+                "macOS Update Required",
+                f"Apple Speech requires macOS 12 (Monterey) or later.\n\n"
+                f"Your version: macOS {platform.mac_ver()[0]}\n\n"
+                "Please update macOS to use Apple Speech Recognition."
+            )
+
+        try:
+            from Speech import SFSpeechRecognizer
+        except ImportError:
+            return (
+                "Package Required",
+                "The Speech framework binding is not installed.\n\n"
+                "Install it by running:\n"
+                "pip install pyobjc-framework-Speech\n\n"
+                "Then restart WhisperHUD."
+            )
+
+        # Check if recognizer works
+        try:
+            from Foundation import NSLocale
+            locale = NSLocale.localeWithLocaleIdentifier_("en-US")
+            recognizer = SFSpeechRecognizer.alloc().initWithLocale_(locale)
+
+            if recognizer is None:
+                return (
+                    "Speech Recognition Unavailable",
+                    "The Speech Recognizer could not be initialized.\n\n"
+                    "Try restarting your Mac."
+                )
+
+            if not recognizer.isAvailable():
+                return (
+                    "Permissions Required",
+                    "Apple Speech Recognition needs permissions.\n\n"
+                    "1. Open System Settings\n"
+                    "2. Go to Privacy & Security → Speech Recognition\n"
+                    "3. Enable WhisperHUD\n\n"
+                    "You may also need to enable Dictation:\n"
+                    "System Settings → Keyboard → Dictation"
+                )
+        except Exception as e:
+            return (
+                "Setup Error",
+                f"Could not initialize Speech Recognition:\n{str(e)[:100]}\n\n"
+                "Try restarting WhisperHUD or your Mac."
+            )
+
+        return ("Ready", "Apple Speech is ready to use.")
+
+    @staticmethod
+    def open_speech_settings():
+        """Open System Settings to Speech Recognition permissions."""
+        import subprocess
+        # macOS 13+ uses System Settings, earlier uses System Preferences
+        version = AppleSpeechProvider.get_macos_version()
+        if version >= (13, 0):
+            subprocess.run([
+                "open", "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition"
+            ], capture_output=True)
+        else:
+            subprocess.run([
+                "open", "/System/Library/PreferencePanes/Security.prefPane"
+            ], capture_output=True)

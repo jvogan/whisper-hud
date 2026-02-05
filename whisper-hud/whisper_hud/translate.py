@@ -8,8 +8,10 @@ Supports both local (Ollama) and cloud (Gemini, OpenAI) providers.
 from typing import Optional, Callable, Dict, Type
 from .providers.translation.base import TranslationProvider, TranslationResult
 from .providers.translation.ollama import OllamaTranslateProvider
+from .providers.translation.apple_translate import AppleTranslateProvider
 from .providers.translation.gemini_translate import GeminiTranslateProvider
 from .providers.translation.openai_translate import OpenAITranslateProvider
+from .providers.translation.anthropic_translate import AnthropicTranslateProvider
 from .config import Config
 
 
@@ -19,14 +21,16 @@ class TranslationManager:
     # Registry of available providers
     PROVIDER_CLASSES: Dict[str, Type[TranslationProvider]] = {
         "ollama": OllamaTranslateProvider,
+        "apple": AppleTranslateProvider,
         "gemini": GeminiTranslateProvider,
         "openai": OpenAITranslateProvider,
+        "anthropic": AnthropicTranslateProvider,
     }
 
     # Provider categories for UI organization
     PROVIDER_CATEGORIES = {
-        "local": ["ollama"],
-        "cloud": ["gemini", "openai"],
+        "local": ["ollama", "apple"],
+        "cloud": ["gemini", "openai", "anthropic"],
     }
 
     def __init__(self, config: Optional[Config] = None):
@@ -53,22 +57,30 @@ class TranslationManager:
         if provider_id == "ollama":
             return self.config.translation_model
         elif provider_id == "gemini":
-            return getattr(self.config, 'gemini_translate_model', 'gemini-2.0-flash-exp')
+            return getattr(self.config, 'gemini_translate_model', 'gemini-3-flash-preview')
         elif provider_id == "openai":
-            return getattr(self.config, 'openai_translate_model', 'gpt-4o-mini')
+            return getattr(self.config, 'openai_translate_model', 'gpt-5-mini')
+        elif provider_id == "anthropic":
+            return getattr(self.config, 'anthropic_translate_model', 'claude-sonnet-4-5')
+        elif provider_id == "apple":
+            return "system"
         return ""
 
     @property
     def provider(self) -> TranslationProvider:
         """Get the currently active translation provider."""
-        provider_id = getattr(self.config, 'translation_provider', 'ollama')
+        provider_id = getattr(self.config, 'translation_provider', 'apple')
         provider = self.get_provider(provider_id)
         if provider is None:
-            # Fallback to Ollama
-            provider = self.get_provider("ollama")
+            # Fallback to Apple (built-in, no setup required)
+            provider = self.get_provider("apple")
         return provider
 
-    def get_available_providers(self) -> list[dict]:
+    def get_available_providers(
+        self,
+        check_availability: bool = True,
+        availability_override: Optional[Dict[str, bool]] = None
+    ) -> list[dict]:
         """
         Get list of available providers with their status.
 
@@ -79,7 +91,12 @@ class TranslationManager:
 
         for provider_id, provider_class in self.PROVIDER_CLASSES.items():
             provider = self.get_provider(provider_id)
-            is_available = provider.is_available() if provider else False
+            if check_availability:
+                is_available = provider.is_available() if provider else False
+            elif availability_override and provider_id in availability_override:
+                is_available = availability_override[provider_id]
+            else:
+                is_available = None
 
             # Determine category
             category = "local" if provider_id in self.PROVIDER_CATEGORIES["local"] else "cloud"
@@ -139,7 +156,7 @@ class TranslationManager:
         Returns:
             Dict with status information
         """
-        provider_id = getattr(self.config, 'translation_provider', 'ollama')
+        provider_id = getattr(self.config, 'translation_provider', 'apple')
         provider = self.provider
         status = provider.get_model_status()
 
@@ -175,7 +192,7 @@ class TranslationManager:
 
     def get_current_provider(self) -> str:
         """Get the current provider ID."""
-        return getattr(self.config, 'translation_provider', 'ollama')
+        return getattr(self.config, 'translation_provider', 'apple')
 
     def set_model(self, model_id: str) -> None:
         """Change the translation model for the current provider."""
@@ -189,6 +206,8 @@ class TranslationManager:
             self.config.gemini_translate_model = model_id
         elif provider_id == "openai":
             self.config.openai_translate_model = model_id
+        elif provider_id == "anthropic":
+            self.config.anthropic_translate_model = model_id
 
         self.config.save()
 

@@ -74,12 +74,13 @@ if HAS_APPKIT:
     class WidgetView(NSView):
         """Custom view for the floating widget with drag support."""
 
-        def initWithFrame_onClick_(self, frame, on_click):
+        def initWithFrame_onClick_onDragEnd_(self, frame, on_click, on_drag_end):
             self = objc_super(WidgetView, self).initWithFrame_(frame)
             if self is None:
                 return None
 
             self._on_click = on_click
+            self._on_drag_end = on_drag_end  # Callback when drag ends
             self._is_hovering = False
             self._state = WidgetState.IDLE
             self._initial_location = None
@@ -312,6 +313,13 @@ if HAS_APPKIT:
 
                 if is_click and self._on_click:
                     self._on_click()
+            elif self._did_drag:
+                # Notify that drag ended (for position persistence)
+                if self._on_drag_end:
+                    window = self.window()
+                    if window:
+                        frame = window.frame()
+                        self._on_drag_end(frame.origin.x, frame.origin.y)
 
             # Reset all drag tracking state
             self._initial_location = None
@@ -351,7 +359,9 @@ class FloatingWidget:
         self,
         on_record_start: Callable[[], None],
         on_record_stop: Callable[[], None],
-        size: str = "medium"
+        size: str = "medium",
+        initial_position: Optional[dict] = None,
+        on_position_changed: Optional[Callable[[float, float], None]] = None
     ):
         self._on_record_start = on_record_start
         self._on_record_stop = on_record_stop
@@ -361,7 +371,12 @@ class FloatingWidget:
         self._state = WidgetState.IDLE
         self._visible = False
         self._lock = threading.Lock()
-        self._position: Optional[tuple] = None  # Remember position
+        # Load initial position from config if provided
+        if initial_position and "x" in initial_position and "y" in initial_position:
+            self._position = (initial_position["x"], initial_position["y"])
+        else:
+            self._position = None
+        self._on_position_changed = on_position_changed
         self._appearance_config: Optional[dict] = None
         self._image_processor = None
 
@@ -409,10 +424,11 @@ class FloatingWidget:
         )
         self._window.setMovableByWindowBackground_(True)
 
-        # Create custom view with size info
-        self._view = WidgetView.alloc().initWithFrame_onClick_(
+        # Create custom view with size info and drag end callback
+        self._view = WidgetView.alloc().initWithFrame_onClick_onDragEnd_(
             NSMakeRect(0, 0, width, height),
-            self._handle_click
+            self._handle_click,
+            self._handle_drag_end
         )
         self._view._dims = dims  # Pass dimensions to view
 
@@ -440,6 +456,12 @@ class FloatingWidget:
                 self._update_view()
                 if self._on_record_stop:
                     threading.Thread(target=self._on_record_stop, daemon=True).start()
+
+    def _handle_drag_end(self, x: float, y: float):
+        """Handle end of drag - save position."""
+        self._position = (x, y)
+        if self._on_position_changed:
+            self._on_position_changed(x, y)
 
     def _update_view(self):
         """Update view state."""
@@ -543,6 +565,19 @@ class FloatingWidget:
         """Get current size."""
         return self._size
 
+    def get_position(self) -> Optional[dict]:
+        """Get current widget position as dict for config storage."""
+        if self._position:
+            return {"x": self._position[0], "y": self._position[1]}
+        # If window exists, get current position
+        if self._window:
+            try:
+                frame = self._window.frame()
+                return {"x": frame.origin.x, "y": frame.origin.y}
+            except Exception:
+                pass
+        return None
+
     def set_appearance(self, appearance_config: dict, image_processor=None):
         """
         Set the widget appearance configuration.
@@ -600,9 +635,17 @@ class FloatingWidget:
 def create_floating_widget(
     on_record_start: Callable[[], None],
     on_record_stop: Callable[[], None],
-    size: str = "medium"
+    size: str = "medium",
+    initial_position: Optional[dict] = None,
+    on_position_changed: Optional[Callable[[float, float], None]] = None
 ) -> Optional[FloatingWidget]:
     """Create a floating widget if AppKit is available."""
     if HAS_APPKIT:
-        return FloatingWidget(on_record_start, on_record_stop, size=size)
+        return FloatingWidget(
+            on_record_start,
+            on_record_stop,
+            size=size,
+            initial_position=initial_position,
+            on_position_changed=on_position_changed
+        )
     return None

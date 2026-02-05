@@ -35,6 +35,10 @@ def setup_logging(
 
     if os.environ.get("WHISPER_HUD_DEBUG"):
         level = logging.DEBUG
+        log_file = True
+
+    if os.environ.get("WHISPER_HUD_LOG_FILE"):
+        log_file = True
 
     logger.setLevel(level)
 
@@ -54,6 +58,7 @@ def setup_logging(
         if log_dir is None:
             log_dir = Path.home() / ".config" / "whisper-hud" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
+        _tighten_permissions(log_dir, 0o700)
 
         file_handler = logging.FileHandler(
             log_dir / "whisper-hud.log",
@@ -67,6 +72,7 @@ def setup_logging(
         )
         file_handler.setFormatter(file_format)
         logger.addHandler(file_handler)
+        _tighten_permissions(log_dir / "whisper-hud.log", 0o600)
 
     return logger
 
@@ -84,6 +90,14 @@ def get_logger(name: str = None) -> logging.Logger:
     if name:
         return logging.getLogger(f"whisper-hud.{name}")
     return logging.getLogger("whisper-hud")
+
+
+def _tighten_permissions(path: Path, mode: int) -> None:
+    """Best-effort chmod for logs/configs on multi-user systems."""
+    try:
+        os.chmod(path, mode)
+    except Exception:
+        pass
 
 
 # Convenience: set up basic logging on import

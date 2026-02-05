@@ -120,6 +120,12 @@ if [ ! -f "$PROJECT_ROOT/assets/icons/AppIcon.icns" ]; then
 fi
 echo -e "${GREEN}✓ Assets ready${NC}"
 
+# Build Apple Translation helper if supported
+if [ -f "$PROJECT_ROOT/scripts/build-apple-translate.sh" ]; then
+    echo -e "${CYAN}Building Apple Translation helper (if supported)...${NC}"
+    "$PROJECT_ROOT/scripts/build-apple-translate.sh" || true
+fi
+
 # Build the app
 echo -e "${CYAN}Building $APP_NAME.app...${NC}"
 cd "$PROJECT_ROOT"

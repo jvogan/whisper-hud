@@ -267,6 +267,10 @@ class WhisperLocalProvider(TranscriptionProvider):
             ) as f:
                 f.write(audio_bytes)
                 temp_path = f.name
+            try:
+                os.chmod(temp_path, 0o600)
+            except Exception:
+                pass
 
             try:
                 # Transcribe
@@ -439,6 +443,10 @@ class WhisperLocalProvider(TranscriptionProvider):
             ) as f:
                 f.write(audio_bytes)
                 temp_path = f.name
+            try:
+                os.chmod(temp_path, 0o600)
+            except Exception:
+                pass
 
             try:
                 # Transcribe with streaming

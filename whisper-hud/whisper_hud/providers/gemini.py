@@ -4,10 +4,11 @@ Google Gemini API provider for audio transcription.
 Gemini models can process audio natively and provide transcription.
 Supports speaker diarization through prompting.
 
-Models (December 2025):
-- gemini-2.0-flash-exp: Latest, very fast
-- gemini-1.5-flash: Stable, fastest
-- gemini-1.5-pro: Best quality for complex audio
+Models (February 2026):
+- gemini-3-pro-preview: Highest quality, supports audio input
+- gemini-3-flash-preview: Fast, strong quality, supports audio input
+- gemini-2.5-flash: Stable, supports audio input
+- gemini-2.5-flash-lite: Lowest latency/cost, supports audio input
 """
 
 import base64
@@ -26,26 +27,33 @@ class GeminiProvider(TranscriptionProvider):
     # Available models with approximate costs
     MODELS = [
         {
-            "id": "gemini-2.0-flash-exp",
-            "name": "Gemini 2.0 Flash",
-            "description": "Latest model, very fast, experimental",
-            "cost_per_minute": 0.001
+            "id": "gemini-3-pro-preview",
+            "name": "Gemini 3 Pro (Preview)",
+            "description": "Highest quality, supports audio input",
+            "cost_per_minute": 0.001,
         },
         {
-            "id": "gemini-1.5-flash",
-            "name": "Gemini 1.5 Flash",
-            "description": "Stable and fast, production ready",
-            "cost_per_minute": 0.001
+            "id": "gemini-3-flash-preview",
+            "name": "Gemini 3 Flash",
+            "description": "Latest, fastest, frontier intelligence",
+            "cost_per_minute": 0.001,
+            "recommended": True
         },
         {
-            "id": "gemini-1.5-pro",
-            "name": "Gemini 1.5 Pro",
-            "description": "Best quality, handles complex audio",
-            "cost_per_minute": 0.005
-        }
+            "id": "gemini-2.5-flash",
+            "name": "Gemini 2.5 Flash",
+            "description": "Stable, fast, supports audio input",
+            "cost_per_minute": 0.001,
+        },
+        {
+            "id": "gemini-2.5-flash-lite",
+            "name": "Gemini 2.5 Flash Lite",
+            "description": "Lowest latency/cost, supports audio input",
+            "cost_per_minute": 0.001,
+        },
     ]
 
-    def __init__(self, model: str = "gemini-2.0-flash-exp"):
+    def __init__(self, model: str = "gemini-3-flash-preview"):
         self.model = model
         self._configured = False
 

@@ -17,23 +17,28 @@ class OpenAITranslateProvider(TranslationProvider):
     name = "openai"
     display_name = "OpenAI (Cloud)"
 
-    # Available models (January 2026)
+    # Available models (February 2026)
     MODELS = {
-        "gpt-5-nano": {
-            "name": "GPT-5 Nano",
-            "description": "Fastest, most affordable",
-            "category": "speed",
+        "gpt-5.2": {
+            "name": "GPT-5.2",
+            "description": "Best quality, smartest",
+            "category": "quality",
+            "recommended": True,
+        },
+        "gpt-5.2-pro": {
+            "name": "GPT-5.2 Pro",
+            "description": "Harder thinking, best for tough translations",
+            "category": "quality",
         },
         "gpt-5-mini": {
             "name": "GPT-5 Mini",
             "description": "Fast, cost-effective",
             "category": "balanced",
-            "recommended": True,
         },
-        "gpt-5.2": {
-            "name": "GPT-5.2",
-            "description": "Best quality, smartest",
-            "category": "quality",
+        "gpt-5-nano": {
+            "name": "GPT-5 Nano",
+            "description": "Fastest, most affordable",
+            "category": "speed",
         },
     }
 
@@ -143,10 +148,7 @@ class OpenAITranslateProvider(TranslationProvider):
             messages = self._build_messages(text, source_lang, target_lang)
 
             response = client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.1,
-                max_tokens=4096,
+                **self._build_request_kwargs(messages, stream=False)
             )
 
             result_text = response.choices[0].message.content.strip()
@@ -259,11 +261,7 @@ Rules:
             messages = self._build_messages(text, source_lang, target_lang)
 
             response = client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.1,
-                max_tokens=4096,
-                stream=True
+                **self._build_request_kwargs(messages, stream=True)
             )
 
             cumulative_text = ""
@@ -309,6 +307,28 @@ Rules:
             }
             for model_id, config in self.MODELS.items()
         ]
+
+    def _build_request_kwargs(self, messages: list, stream: bool) -> dict:
+        """Build request params, honoring GPT-5.2 parameter compatibility."""
+        kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": 4096,
+        }
+
+        if stream:
+            kwargs["stream"] = True
+
+        if self._supports_temperature():
+            kwargs["temperature"] = 0.1
+            # GPT-5.2 requires reasoning_effort=none for temperature/top_p/logprobs
+            kwargs["reasoning_effort"] = "none"
+
+        return kwargs
+
+    def _supports_temperature(self) -> bool:
+        """Temperature is only supported on GPT-5.2 with reasoning_effort=none."""
+        return self.model.startswith("gpt-5.2")
 
     @classmethod
     def get_supported_languages(cls) -> dict[str, str]:

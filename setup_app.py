@@ -14,6 +14,7 @@ The resulting app will be in dist/WhisperHUD.app
 
 import os
 import sys
+from urllib.parse import urlparse
 from pathlib import Path
 from setuptools import setup
 
@@ -39,6 +40,17 @@ ASSETS_DIR = PROJECT_ROOT / "assets"
 ICONS_DIR = ASSETS_DIR / "icons"
 APP_ICON = ICONS_DIR / "AppIcon.icns"
 
+# Optional Sparkle updater configuration (set via env)
+SPARKLE_FEED_URL = os.environ.get("WHISPERHUD_SPARKLE_FEED_URL")
+SPARKLE_PUBLIC_ED_KEY = os.environ.get("WHISPERHUD_SPARKLE_PUBLIC_ED_KEY")
+
+if SPARKLE_FEED_URL:
+    parsed = urlparse(SPARKLE_FEED_URL)
+    if parsed.scheme != "https":
+        raise ValueError("WHISPERHUD_SPARKLE_FEED_URL must use https")
+    if not SPARKLE_PUBLIC_ED_KEY:
+        raise ValueError("WHISPERHUD_SPARKLE_PUBLIC_ED_KEY is required when Sparkle updates are enabled")
+
 # Data files to include in the app bundle
 DATA_FILES = [
     # Assets
@@ -57,14 +69,16 @@ DATA_FILES = [
     ] if (ASSETS_DIR / "ascii").exists() else []),
 ]
 
+# Apple Translation helper (optional)
+APPLE_TRANSLATE_HELPER = PROJECT_ROOT / "whisper-hud" / "bin" / "whisperhud-apple-translate"
+if APPLE_TRANSLATE_HELPER.exists():
+    DATA_FILES.append(("bin", [str(APPLE_TRANSLATE_HELPER)]))
+
 # Filter out empty entries
 DATA_FILES = [(dest, files) for dest, files in DATA_FILES if files]
 
-# py2app options
-OPTIONS = {
-    "argv_emulation": False,  # Menu bar apps don't need this
-    "iconfile": str(APP_ICON) if APP_ICON.exists() else None,
-    "plist": {
+# Base Info.plist
+plist = {
         # App identification
         "CFBundleName": APP_NAME,
         "CFBundleDisplayName": APP_NAME,
@@ -99,12 +113,6 @@ OPTIONS = {
             "WhisperHUD may need access to save audio files or transcriptions."
         ),
 
-        # Sparkle auto-update configuration
-        "SUFeedURL": "https://github.com/yourusername/whisper-hud/releases/latest/download/appcast.xml",
-        "SUPublicDSAKeyFile": "dsa_pub.pem",
-        "SUEnableAutomaticChecks": True,
-        "SUScheduledCheckInterval": 86400,  # Check daily (seconds)
-
         # Copyright
         "NSHumanReadableCopyright": f"Copyright 2024-2025 WhisperHUD. All rights reserved.",
 
@@ -118,7 +126,21 @@ OPTIONS = {
                 "CFBundleURLSchemes": ["whisperhud"],
             }
         ],
-    },
+}
+
+# Sparkle auto-update configuration (optional)
+if SPARKLE_FEED_URL:
+    plist["SUFeedURL"] = SPARKLE_FEED_URL
+    plist["SUEnableAutomaticChecks"] = True
+    plist["SUScheduledCheckInterval"] = 86400  # Check daily (seconds)
+if SPARKLE_PUBLIC_ED_KEY:
+    plist["SUPublicEDKey"] = SPARKLE_PUBLIC_ED_KEY
+
+# py2app options
+OPTIONS = {
+    "argv_emulation": False,  # Menu bar apps don't need this
+    "iconfile": str(APP_ICON) if APP_ICON.exists() else None,
+    "plist": plist,
 
     # Include these Python packages
     "packages": [
@@ -128,6 +150,7 @@ OPTIONS = {
         "numpy",
         "scipy",
         "openai",
+        "anthropic",
         "keyring",
         "pyperclip",
         "objc",
@@ -184,6 +207,7 @@ OPTIONS = {
         "whisper_hud.providers.translation.gemini_translate",
         "whisper_hud.providers.translation.ollama",
         "whisper_hud.providers.translation.openai_translate",
+        "whisper_hud.providers.translation.anthropic_translate",
     ],
 
     # Framework paths (will be populated by build script if Sparkle is available)

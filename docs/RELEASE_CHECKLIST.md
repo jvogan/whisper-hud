@@ -1,24 +1,31 @@
-# Release Checklist (Public GitHub)
+# Release Checklist
 
-## Visual & Branding
-- Add a short demo GIF or video to `assets/` and enable it in `README.md`
-- Ensure any third‑party assets are listed in `assets/ATTRIBUTIONS.md`
+Use this checklist before making the repository public or cutting a release.
 
-## Docs & Metadata
-- Confirm README reflects current providers, pricing, and requirements
-- Update `CHANGELOG.md` with a release entry
-- Verify `LICENSE`, `CODE_OF_CONDUCT.md`, and `SECURITY.md`
+## Repository hygiene
+- [ ] `git status` is clean (no local-only edits)
+- [ ] No large binary artifacts committed (`dist/`, `build/`, `.app`, `.dmg`)
+- [ ] All sensitive files are ignored: `.env`, `*.log`, temp outputs
+- [ ] `firebase-debug.log` (or other local logs) removed
+- [ ] Secret scan passes (`secret-scan` workflow / gitleaks)
+ - [ ] Dependency review passes (GitHub dependency-review action)
 
-## Code Health
-- Run `make test` and `make lint`
-- Search for secrets: `rg -n "api[_-]?key|sk-[A-Za-z0-9]|AIza" -S .`
-- Check packaging: `pip install -e .` and launch
+## Security & privacy
+- [ ] API keys are stored only in Keychain (no hard-coded keys)
+- [ ] History is disabled by default; encryption at rest is optional and works
+- [ ] Temp audio files are securely deleted after local transcription
+- [ ] Sparkle updates: HTTPS feed + signed (Ed25519) with `SUPublicEDKey`
+- [ ] `SECURITY.md` is accurate and has a working contact path
 
-## CI / Repo
-- Confirm GitHub Actions are green
-- Ensure default branch is `main`
-- Add topics/description on GitHub repo page
+## Quality & docs
+- [ ] README install + usage steps work on a clean macOS machine
+- [ ] `docs/API_PROVIDERS.md` is accurate and up to date
+- [ ] Demo assets are attributed in `assets/ATTRIBUTIONS.md`
+- [ ] License and copyright headers are current
 
-## Release
-- Bump version in `pyproject.toml`
-- Tag release (e.g., `v1.0.1`)
+## Build & release
+- [ ] Tests pass (`make test` or `pytest`)
+- [ ] Lint passes (`make lint`)
+- [ ] App builds with `./scripts/build-app.sh --clean`
+- [ ] Code signing + notarization pass (see `scripts/sign-app.sh`)
+- [ ] Update feed (if used) points to the new release

@@ -76,10 +76,10 @@ def get_configured_providers() -> list[str]:
     Return list of providers that have API keys configured.
 
     Returns:
-        List of provider names, e.g., ["openai", "gemini"]
+        List of provider names, e.g., ["openai", "gemini", "anthropic"]
     """
     providers = []
-    for provider in ["openai", "gemini"]:
+    for provider in ["openai", "gemini", "anthropic"]:
         if get_api_key(provider):
             providers.append(provider)
     return providers
@@ -97,7 +97,7 @@ def validate_api_key(provider: str, api_key: str) -> tuple[bool, str]:
     Validate an API key by making a test API call.
 
     Args:
-        provider: "openai" or "gemini"
+        provider: "openai", "gemini", or "anthropic"
         api_key: The API key to validate
 
     Returns:
@@ -107,6 +107,8 @@ def validate_api_key(provider: str, api_key: str) -> tuple[bool, str]:
         return _validate_openai_key(api_key)
     elif provider == "gemini":
         return _validate_gemini_key(api_key)
+    elif provider == "anthropic":
+        return _validate_anthropic_key(api_key)
     else:
         return False, f"Unknown provider: {provider}"
 
@@ -147,7 +149,8 @@ def _validate_gemini_key(api_key: str) -> tuple[bool, str]:
     try:
         import requests
         response = requests.get(
-            f"https://generativelanguage.googleapis.com/v1/models?key={api_key}",
+            "https://generativelanguage.googleapis.com/v1/models",
+            headers={"x-goog-api-key": api_key},
             timeout=10
         )
         if response.status_code == 200:
@@ -169,6 +172,40 @@ def _validate_gemini_key(api_key: str) -> tuple[bool, str]:
         return False, "Connection timed out"
     except requests.exceptions.ConnectionError:
         return False, "Could not connect to Google AI"
+    except ImportError:
+        # requests not installed, skip validation
+        return True, ""
+    except Exception as e:
+        return False, f"Validation error: {str(e)[:50]}"
+
+
+def _validate_anthropic_key(api_key: str) -> tuple[bool, str]:
+    """Validate Anthropic API key by making a test request."""
+    try:
+        import requests
+        response = requests.get(
+            "https://api.anthropic.com/v1/models",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01"
+            },
+            timeout=10
+        )
+        if response.status_code == 200:
+            return True, ""
+        elif response.status_code == 401:
+            return False, "Invalid API key"
+        elif response.status_code == 403:
+            return False, "API key lacks permissions"
+        elif response.status_code == 429:
+            # Rate limited but key is valid
+            return True, ""
+        else:
+            return False, f"API error: {response.status_code}"
+    except requests.exceptions.Timeout:
+        return False, "Connection timed out"
+    except requests.exceptions.ConnectionError:
+        return False, "Could not connect to Anthropic"
     except ImportError:
         # requests not installed, skip validation
         return True, ""

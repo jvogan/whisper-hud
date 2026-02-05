@@ -2,7 +2,7 @@
 Anthropic translation provider for cloud-based translation.
 
 Uses Anthropic's Messages API for high-quality translation with streaming support.
-Claude Haiku 4.5 provides fast, accurate translations.
+Claude 4.5 models provide fast, accurate translations.
 """
 
 from typing import Optional, Callable
@@ -15,13 +15,23 @@ class AnthropicTranslateProvider(TranslationProvider):
     name = "anthropic"
     display_name = "Anthropic Claude"
 
-    # Available models (January 2026)
+    # Available models (February 2026)
     MODELS = {
-        "claude-haiku-4.5": {
-            "name": "Claude Haiku 4.5",
-            "description": "Fast, efficient, accurate",
+        "claude-sonnet-4-5": {
+            "name": "Claude Sonnet 4.5",
+            "description": "Best all-around balance of quality and speed",
             "category": "balanced",
             "recommended": True,
+        },
+        "claude-haiku-4-5": {
+            "name": "Claude Haiku 4.5",
+            "description": "Fastest, most cost-efficient",
+            "category": "speed",
+        },
+        "claude-opus-4-5": {
+            "name": "Claude Opus 4.5",
+            "description": "Highest quality, deeper reasoning",
+            "category": "quality",
         },
     }
 
@@ -85,9 +95,9 @@ class AnthropicTranslateProvider(TranslationProvider):
         "zu": "Zulu",
     }
 
-    def __init__(self, model: str = "claude-haiku-4.5"):
+    def __init__(self, model: str = "claude-sonnet-4-5"):
         if model not in self.MODELS:
-            model = "claude-haiku-4.5"
+            model = "claude-sonnet-4-5"
         self.model = model
         self._client = None
 

@@ -17,23 +17,28 @@ class GeminiTranslateProvider(TranslationProvider):
     name = "gemini"
     display_name = "Gemini (Cloud)"
 
-    # Available models (January 2026)
+    # Available models (February 2026)
     MODELS = {
-        "gemini-3.0-flash": {
-            "name": "Gemini 3 Flash",
-            "description": "Cutting-edge, fastest",
-            "category": "speed",
+        "gemini-3-pro-preview": {
+            "name": "Gemini 3 Pro (Preview)",
+            "description": "Highest quality, best for nuanced translation",
+            "category": "quality",
         },
-        "gemini-2.5-flash": {
-            "name": "Gemini 2.5 Flash",
-            "description": "Fast, efficient",
+        "gemini-3-flash-preview": {
+            "name": "Gemini 3 Flash",
+            "description": "Fast and strong quality",
             "category": "balanced",
             "recommended": True,
         },
-        "gemini-2.5-pro": {
-            "name": "Gemini 2.5 Pro",
-            "description": "Best quality",
-            "category": "quality",
+        "gemini-2.5-flash": {
+            "name": "Gemini 2.5 Flash",
+            "description": "Stable, fast, cost-effective",
+            "category": "balanced",
+        },
+        "gemini-2.5-flash-lite": {
+            "name": "Gemini 2.5 Flash Lite",
+            "description": "Lowest latency/cost",
+            "category": "speed",
         },
     }
 
@@ -152,9 +157,9 @@ class GeminiTranslateProvider(TranslationProvider):
         "yo": "Yoruba",
     }
 
-    def __init__(self, model: str = "gemini-2.5-flash"):
+    def __init__(self, model: str = "gemini-3-flash-preview"):
         if model not in self.MODELS:
-            model = "gemini-2.5-flash"
+            model = "gemini-3-flash-preview"
         self.model = model
         self._client = None
 

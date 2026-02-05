@@ -7,6 +7,7 @@ fun character icons like pandas, cats, robots, etc.
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass, field
@@ -432,6 +433,11 @@ def save_user_pack(
 
     # Final destination
     user_dir = _get_user_packs_dir()
+    user_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(user_dir, 0o700)
+    except Exception:
+        pass
     pack_dir = user_dir / pack_id
 
     # Check if pack already exists (early check)
@@ -442,6 +448,10 @@ def save_user_pack(
     temp_dir = None
     try:
         temp_dir = Path(tempfile.mkdtemp(prefix=f"whisper_pack_{pack_id}_"))
+        try:
+            os.chmod(temp_dir, 0o700)
+        except Exception:
+            pass
 
         # Save each image to temp
         state_files = {}
@@ -454,6 +464,10 @@ def save_user_pack(
 
             if not image_processor.save_image(image, str(filepath)):
                 return False, f"Failed to save image for state: {state}"
+            try:
+                os.chmod(filepath, 0o600)
+            except Exception:
+                pass
 
             state_files[state] = filename
 
@@ -480,9 +494,10 @@ def save_user_pack(
         manifest_path = temp_dir / "manifest.json"
         with open(manifest_path, 'w') as f:
             json.dump(manifest, f, indent=2)
-
-        # Ensure user packs directory exists
-        user_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(manifest_path, 0o600)
+        except Exception:
+            pass
 
         # Final check before atomic move (race condition window minimized)
         if pack_dir.exists():
@@ -491,6 +506,10 @@ def save_user_pack(
         # Atomic move from temp to final location
         shutil.move(str(temp_dir), str(pack_dir))
         temp_dir = None  # Moved successfully, don't clean up
+        try:
+            os.chmod(pack_dir, 0o700)
+        except Exception:
+            pass
 
         logger.info(f"Created user pack: {pack_name} at {pack_dir}")
         return True, str(pack_dir)

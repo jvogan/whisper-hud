@@ -96,18 +96,20 @@ class TranscriptionManager:
             "availability_message": WhisperLocalProvider.get_availability_message()
         })
 
-        # Only show Parakeet on Apple Silicon
-        if ParakeetProvider.is_apple_silicon():
+        # Show Parakeet on all macOS systems (with availability info)
+        import platform
+        if platform.system() == "Darwin":
             parakeet_provider = ParakeetProvider()
+            is_apple_silicon = ParakeetProvider.is_apple_silicon()
             providers.append({
                 "id": "parakeet",
-                "name": "Parakeet (Apple Silicon)",
+                "name": "Parakeet" + (" (Apple Silicon)" if is_apple_silicon else " (requires Apple Silicon)"),
                 "display_name": "Parakeet",
-                "configured": parakeet_provider.is_configured(),
+                "configured": parakeet_provider.is_configured() if is_apple_silicon else False,
                 "category": "local",
                 "requires_download": True,
-                "models": parakeet_provider.get_models(),
-                "is_installed": ParakeetProvider.is_parakeet_installed(),
+                "models": parakeet_provider.get_models() if is_apple_silicon else [],
+                "is_installed": ParakeetProvider.is_parakeet_installed() if is_apple_silicon else False,
                 "availability_message": ParakeetProvider.get_availability_message()
             })
 

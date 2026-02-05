@@ -1,8 +1,9 @@
 """
 OpenAI Transcription API provider.
 
-Models (December 2025):
+Models (February 2026):
 - gpt-4o-transcribe: Best accuracy, improved WER over Whisper
+- gpt-4o-transcribe-diarize: Speaker-aware transcripts (diarization)
 - gpt-4o-mini-transcribe: Faster, more affordable
 - whisper-1: Classic Whisper v2, still available
 
@@ -27,6 +28,12 @@ class OpenAITranscribeProvider(TranscriptionProvider):
             "id": "gpt-4o-transcribe",
             "name": "GPT-4o Transcribe",
             "description": "Best accuracy, handles accents and noise well",
+            "cost_per_minute": 0.006
+        },
+        {
+            "id": "gpt-4o-transcribe-diarize",
+            "name": "GPT-4o Transcribe Diarize",
+            "description": "Speaker-aware transcript (HUD shows plain text)",
             "cost_per_minute": 0.006
         },
         {
@@ -79,7 +86,8 @@ class OpenAITranscribeProvider(TranscriptionProvider):
         )
 
         # Call transcription API
-        # gpt-4o-transcribe models support json and text output
+        # gpt-4o-transcribe models support json or text output
+        # gpt-4o-transcribe-diarize supports json/text/diarized_json
         # whisper-1 also supports srt, vtt, verbose_json
         if self.model == "whisper-1":
             response = self.client.audio.transcriptions.create(
@@ -90,6 +98,17 @@ class OpenAITranscribeProvider(TranscriptionProvider):
             duration = response.duration
             text = response.text.strip()
             language = response.language
+        elif self.model == "gpt-4o-transcribe-diarize":
+            response = self.client.audio.transcriptions.create(
+                model=self.model,
+                file=audio_file,
+                response_format="diarized_json",
+                chunking_strategy="auto"
+            )
+            text = self._extract_text(response)
+            # Estimate duration from audio bytes (16kHz, 16-bit mono = 32KB/sec)
+            duration = len(audio_bytes) / 32000
+            language = None
         else:
             # gpt-4o-transcribe models
             response = self.client.audio.transcriptions.create(
@@ -132,3 +151,33 @@ class OpenAITranscribeProvider(TranscriptionProvider):
     def get_current_model(self) -> str:
         """Get the current model ID."""
         return self.model
+
+    @staticmethod
+    def _extract_text(response) -> str:
+        """Extract text from diarized responses without speaker labels."""
+        # First try standard text field
+        if hasattr(response, "text") and response.text:
+            return response.text.strip()
+        if isinstance(response, dict) and response.get("text"):
+            return str(response.get("text", "")).strip()
+
+        # Fall back to concatenating segments
+        segments = None
+        if isinstance(response, dict):
+            segments = response.get("segments")
+        else:
+            segments = getattr(response, "segments", None)
+
+        if not segments:
+            return ""
+
+        texts: list[str] = []
+        for segment in segments:
+            if isinstance(segment, dict):
+                segment_text = segment.get("text")
+            else:
+                segment_text = getattr(segment, "text", None)
+            if segment_text:
+                texts.append(str(segment_text).strip())
+
+        return " ".join(texts).strip()

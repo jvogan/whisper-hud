@@ -43,12 +43,6 @@ class ParakeetProvider(TranscriptionProvider):
             "languages": "multilingual",
             "recommended": True,
         },
-        "parakeet-tdt-0.6b-v2": {
-            "name": "Parakeet 0.6B v2",
-            "size_mb": 600,
-            "description": "English only",
-            "languages": ["en"],
-        },
     }
 
     # Supported languages for v3 model
@@ -184,6 +178,10 @@ class ParakeetProvider(TranscriptionProvider):
             ) as f:
                 f.write(audio_bytes)
                 temp_path = f.name
+            try:
+                os.chmod(temp_path, 0o600)
+            except Exception:
+                pass
 
             try:
                 # Transcribe
@@ -358,6 +356,10 @@ class ParakeetProvider(TranscriptionProvider):
             ) as f:
                 f.write(audio_bytes)
                 temp_path = f.name
+            try:
+                os.chmod(temp_path, 0o600)
+            except Exception:
+                pass
 
             try:
                 # Transcribe with word timestamps

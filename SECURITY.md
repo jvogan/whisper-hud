@@ -34,5 +34,7 @@ When using WhisperHUD:
 ## Known Security Considerations
 
 - Audio is processed locally by default (when using local Whisper)
-- When using cloud providers (OpenAI, Groq), audio is sent to their servers
+- When using cloud providers (OpenAI, Gemini, Anthropic), audio/text is sent to their servers
+- Local providers may use short‑lived temp audio files, which are securely deleted after processing
 - API keys are stored securely in macOS Keychain, not in plain text files
+- Transcription history is off by default and can be encrypted at rest if enabled
