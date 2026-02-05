@@ -1,0 +1,6 @@
+title = "WhisperHUD gitleaks config"
+
+[allowlist]
+paths = [
+  "tests/test_keychain.py",
+]
