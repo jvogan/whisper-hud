@@ -84,18 +84,23 @@ Update README with translation docs
 ## Project Structure
 
 ```
-whisper-hud/
+whisper-hud/                # Repository root
 ├── whisper-hud/
-│   └── whisper_hud/
-│       ├── app.py        # Main application logic
-│       ├── main.py       # Entry point
-│       ├── recorder.py   # Audio recording
-│       ├── transcribe.py # Provider orchestration
-│       ├── translate.py  # Translation orchestration
-│       └── config.py     # Settings management
-├── requirements.txt
+│   └── whisper_hud/        # Python package
+│       ├── app.py          # Main application logic
+│       ├── main.py         # Entry point
+│       ├── config.py       # Settings management
+│       ├── recorder.py     # Audio recording
+│       ├── transcribe.py   # Provider orchestration
+│       ├── translate.py    # Translation orchestration
+│       └── providers/      # Transcription & translation providers
+├── tests/                  # Test suite
+├── docs/                   # Documentation
+├── assets/                 # Icons, banners, character packs
+├── scripts/                # Build & release scripts
 ├── install.sh
-└── run.sh
+├── run.sh
+└── pyproject.toml
 ```
 
 ## Testing

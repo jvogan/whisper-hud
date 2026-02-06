@@ -250,7 +250,7 @@ cd whisper-hud && source venv/bin/activate && python -m whisper_hud.main
 
 ### Reinstall dependencies
 ```bash
-cd whisper-hud/whisper-hud
+cd whisper-hud
 rm -rf venv
 python3 -m venv venv
 source venv/bin/activate
