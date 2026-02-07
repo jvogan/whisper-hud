@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add entries under **Unreleased** during development.
 - Include a date when you cut a release.
 
-## [1.0.0] - 2025-01-23
+## [1.0.0] - 2026-02-07
 
 ### Added
 
@@ -56,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Transcription history with copy support
 
 - **Security**
-  - API keys stored in macOS Keychain
+  - API key storage modes: passphrase-encrypted local store (default), macOS Keychain, or session-only
   - Audio processed in memory only
   - Local translation via Ollama
   - No telemetry or data collection

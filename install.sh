@@ -23,6 +23,11 @@ CHECK="${GREEN}✓${RESET}"
 ARROW="${CYAN}→${RESET}"
 DOT="${DIM}·${RESET}"
 
+is_python_311_plus() {
+    local candidate="$1"
+    "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1
+}
+
 print_banner() {
     echo ""
     echo -e "${CYAN}"
@@ -81,7 +86,7 @@ print_section() {
 check_directory() {
     if [[ ! -f "requirements.txt" ]] || [[ ! -d "whisper-hud" ]]; then
         print_error "Please run this script from the project root directory"
-        print_info "cd whisper-hud && ./install.sh"
+        print_info "cd /path/to/whisper-hud && ./install.sh"
         exit 1
     fi
 }
@@ -98,10 +103,20 @@ check_macos() {
 
 # Select Python binary (prefer 3.11 for compatibility)
 select_python() {
-    if command -v python3.11 &> /dev/null; then
+    if [[ -n "${PYTHON_BIN:-}" ]]; then
+        if command -v "$PYTHON_BIN" >/dev/null 2>&1 && is_python_311_plus "$PYTHON_BIN"; then
+            return
+        fi
+        print_error "PYTHON_BIN must point to Python 3.11+ (got: $PYTHON_BIN)"
+        exit 1
+    fi
+
+    if command -v python3.11 >/dev/null 2>&1 && is_python_311_plus "python3.11"; then
         PYTHON_BIN="python3.11"
-    elif command -v python3 &> /dev/null; then
+    elif command -v python3 >/dev/null 2>&1 && is_python_311_plus "python3"; then
         PYTHON_BIN="python3"
+    elif command -v python >/dev/null 2>&1 && is_python_311_plus "python"; then
+        PYTHON_BIN="python"
     else
         PYTHON_BIN=""
     fi
@@ -110,24 +125,20 @@ select_python() {
 # Check Python version
 check_python() {
     select_python
-    if [[ -n "$PYTHON_BIN" ]]; then
-        PYTHON_VERSION=$($PYTHON_BIN -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-        MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
-        MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
-
-        if [[ $MAJOR -ge 3 ]] && [[ $MINOR -ge 11 ]]; then
-            print_success "Python $PYTHON_VERSION found ($PYTHON_BIN)"
-            return 0
-        else
-            print_error "Python 3.11+ required (found $PYTHON_VERSION)"
-            print_info "Install via: brew install python@3.11"
-            exit 1
-        fi
-    else
+    if [[ -z "$PYTHON_BIN" ]]; then
         print_error "Python 3 not found"
         print_info "Install via: brew install python@3.11"
         exit 1
     fi
+
+    PYTHON_VERSION=$($PYTHON_BIN -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')
+    if ! is_python_311_plus "$PYTHON_BIN"; then
+        print_error "Python 3.11+ required (found $PYTHON_VERSION)"
+        print_info "Install via: brew install python@3.11"
+        exit 1
+    fi
+
+    print_success "Python $PYTHON_VERSION found ($PYTHON_BIN)"
 }
 
 # Setup virtual environment
@@ -160,23 +171,45 @@ install_deps() {
 
 # Create launch script
 create_launcher() {
-    print_step "Creating launcher..."
+    print_step "Preparing launcher..."
 
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     LAUNCHER_PATH="$SCRIPT_DIR/run.sh"
 
+    if [[ -f "$LAUNCHER_PATH" ]]; then
+        chmod +x "$LAUNCHER_PATH"
+        print_success "Launcher ready: ./run.sh"
+        return
+    fi
+
     cat > "$LAUNCHER_PATH" << 'LAUNCHER'
 #!/bin/bash
 # WhisperHUD Launcher
+set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR/whisper-hud"
-if [ -f "$SCRIPT_DIR/scripts/build-apple-translate.sh" ]; then
-    if [ ! -x "$SCRIPT_DIR/whisper-hud/bin/whisperhud-apple-translate" ]; then
-        "$SCRIPT_DIR/scripts/build-apple-translate.sh" || true
-    fi
+APP_DIR="$SCRIPT_DIR/whisper-hud"
+VENV_ACTIVATE="$APP_DIR/venv/bin/activate"
+
+if [[ ! -d "$APP_DIR" ]]; then
+    echo "Error: Could not find app directory at $APP_DIR"
+    echo "Run this script from the WhisperHUD repository root."
+    exit 1
 fi
-source venv/bin/activate
-python -m whisper_hud.main
+
+cd "$APP_DIR"
+
+if [[ -f "$SCRIPT_DIR/scripts/build-apple-translate.sh" && ! -x "$APP_DIR/bin/whisperhud-apple-translate" ]]; then
+    "$SCRIPT_DIR/scripts/build-apple-translate.sh" || true
+fi
+
+if [[ ! -f "$VENV_ACTIVATE" ]]; then
+    echo "WhisperHUD virtual environment not found."
+    echo "Run ./install.sh first, then try ./run.sh again."
+    exit 1
+fi
+
+source "$VENV_ACTIVATE"
+exec python -m whisper_hud.main
 LAUNCHER
 
     chmod +x "$LAUNCHER_PATH"
@@ -191,7 +224,7 @@ print_next_steps() {
     echo -e "${BOLD}${WHITE}╰───────────────────────────────────────────╯${RESET}"
     echo ""
     echo -e "  ${BOLD}Start WhisperHUD:${RESET}"
-    echo -e "    ${CYAN}cd whisper-hud && ./run.sh${RESET}"
+    echo -e "    ${CYAN}./run.sh${RESET}"
     echo ""
     echo -e "  ${BOLD}Or manually:${RESET}"
     echo -e "    ${DIM}cd whisper-hud${RESET}"
@@ -213,7 +246,8 @@ print_next_steps() {
     echo -e "${DIM}└─────────────────────────────────────────────────┘${RESET}"
     echo ""
     echo -e "  ${BOLD}Optional local engines:${RESET}"
-    echo -e "    ${DIM}cd whisper-hud && source venv/bin/activate${RESET}"
+    echo -e "    ${DIM}cd whisper-hud${RESET}"
+    echo -e "    ${DIM}source venv/bin/activate${RESET}"
     echo -e "    ${DIM}pip install -e \".[whisper-local]\"${RESET}"
     echo -e "    ${DIM}pip install -e \".[parakeet]\"${RESET}"
     echo ""

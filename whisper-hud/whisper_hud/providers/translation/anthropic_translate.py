@@ -2,10 +2,12 @@
 Anthropic translation provider for cloud-based translation.
 
 Uses Anthropic's Messages API for high-quality translation with streaming support.
-Claude 4.5 models provide fast, accurate translations.
 """
 
-from typing import Optional, Callable
+from __future__ import annotations
+
+from typing import Callable, Optional
+
 from .base import TranslationProvider, TranslationResult
 
 
@@ -15,8 +17,15 @@ class AnthropicTranslateProvider(TranslationProvider):
     name = "anthropic"
     display_name = "Anthropic Claude"
 
-    # Available models (February 2026)
+    DEFAULT_MODEL = "claude-sonnet-4-5"
+
+    # Available model aliases from Anthropic docs (February 2026)
     MODELS = {
+        "claude-opus-4-6": {
+            "name": "Claude Opus 4.6",
+            "description": "Highest quality, deeper reasoning",
+            "category": "quality",
+        },
         "claude-sonnet-4-5": {
             "name": "Claude Sonnet 4.5",
             "description": "Best all-around balance of quality and speed",
@@ -28,11 +37,15 @@ class AnthropicTranslateProvider(TranslationProvider):
             "description": "Fastest, most cost-efficient",
             "category": "speed",
         },
-        "claude-opus-4-5": {
-            "name": "Claude Opus 4.5",
-            "description": "Highest quality, deeper reasoning",
-            "category": "quality",
-        },
+    }
+
+    MODEL_ALIASES = {
+        # Historical config values -> current alias defaults
+        "claude-opus-4-1": "claude-opus-4-6",
+        "claude-opus-4-5": "claude-opus-4-6",
+        "claude-opus-4": "claude-opus-4-6",
+        "claude-sonnet-4": "claude-sonnet-4-5",
+        "claude-haiku-4": "claude-haiku-4-5",
     }
 
     # Supported languages (50+)
@@ -95,11 +108,59 @@ class AnthropicTranslateProvider(TranslationProvider):
         "zu": "Zulu",
     }
 
-    def __init__(self, model: str = "claude-sonnet-4-5"):
-        if model not in self.MODELS:
-            model = "claude-sonnet-4-5"
-        self.model = model
+    def __init__(self, model: str = DEFAULT_MODEL):
+        self.model = self.normalize_model_id(model)
         self._client = None
+
+    @classmethod
+    def normalize_model_id(cls, model_id: str) -> str:
+        """Normalize configured IDs to supported Anthropic model aliases."""
+        if model_id in cls.MODELS:
+            return model_id
+        mapped = cls.MODEL_ALIASES.get(model_id)
+        if mapped in cls.MODELS:
+            return mapped
+        return cls.DEFAULT_MODEL
+
+    @staticmethod
+    def _is_model_not_found_error(error: Exception) -> bool:
+        """Return True when the provider rejected the selected model ID."""
+        message = str(error).lower()
+        if "model" not in message:
+            return False
+        return any(token in message for token in ("not found", "invalid", "unsupported", "unknown"))
+
+    def _translate_once(self, model_id: str, system_prompt: str, user_message: str) -> str:
+        client = self._get_client()
+        response = client.messages.create(
+            model=model_id,
+            max_tokens=4096,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        return self._clean_response(response.content[0].text.strip())
+
+    def _translate_stream_once(
+        self,
+        model_id: str,
+        system_prompt: str,
+        user_message: str,
+        on_chunk: Callable[[str], None],
+    ) -> str:
+        client = self._get_client()
+        cumulative_text = ""
+        with client.messages.stream(
+            model=model_id,
+            max_tokens=4096,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        ) as stream:
+            for text_chunk in stream.text_stream:
+                cumulative_text += text_chunk
+                clean_text = self._clean_response(cumulative_text)
+                on_chunk(clean_text)
+
+        return self._clean_response(cumulative_text)
 
     def _get_client(self):
         """Get or create the Anthropic client."""
@@ -142,30 +203,28 @@ class AnthropicTranslateProvider(TranslationProvider):
                 model=self.model
             )
 
+        selected_model = self.model
         try:
-            client = self._get_client()
             system_prompt, user_message = self._build_messages(text, source_lang, target_lang)
-
-            response = client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_message}],
-            )
-
-            result_text = response.content[0].text.strip()
-            result_text = self._clean_response(result_text)
-
-            return TranslationResult(
-                text=result_text,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                provider=self.name,
-                model=self.model
-            )
-
+            result_text = self._translate_once(selected_model, system_prompt, user_message)
         except Exception as e:
-            raise RuntimeError(f"Anthropic translation failed: {e}")
+            if selected_model != self.DEFAULT_MODEL and self._is_model_not_found_error(e):
+                try:
+                    selected_model = self.DEFAULT_MODEL
+                    result_text = self._translate_once(selected_model, system_prompt, user_message)
+                    self.model = selected_model
+                except Exception as fallback_error:
+                    raise RuntimeError(f"Anthropic translation failed: {fallback_error}")
+            else:
+                raise RuntimeError(f"Anthropic translation failed: {e}")
+
+        return TranslationResult(
+            text=result_text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            provider=self.name,
+            model=selected_model
+        )
 
     def _build_messages(self, text: str, source_lang: str, target_lang: str) -> tuple[str, str]:
         """Build the system prompt and user message for translation."""
@@ -266,39 +325,43 @@ Rules:
                 model=self.model
             )
 
+        selected_model = self.model
         try:
-            client = self._get_client()
             system_prompt, user_message = self._build_messages(text, source_lang, target_lang)
-
-            cumulative_text = ""
-            with client.messages.stream(
-                model=self.model,
-                max_tokens=4096,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_message}],
-            ) as stream:
-                for text_chunk in stream.text_stream:
-                    cumulative_text += text_chunk
-                    clean_text = self._clean_response(cumulative_text)
-                    on_chunk(clean_text)
-
-            final_text = self._clean_response(cumulative_text)
-
-            return TranslationResult(
-                text=final_text,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                provider=self.name,
-                model=self.model
+            final_text = self._translate_stream_once(
+                selected_model,
+                system_prompt,
+                user_message,
+                on_chunk,
             )
-
         except Exception as e:
-            raise RuntimeError(f"Anthropic streaming translation failed: {e}")
+            if selected_model != self.DEFAULT_MODEL and self._is_model_not_found_error(e):
+                try:
+                    selected_model = self.DEFAULT_MODEL
+                    final_text = self._translate_stream_once(
+                        selected_model,
+                        system_prompt,
+                        user_message,
+                        on_chunk,
+                    )
+                    self.model = selected_model
+                except Exception as fallback_error:
+                    raise RuntimeError(f"Anthropic streaming translation failed: {fallback_error}")
+            else:
+                raise RuntimeError(f"Anthropic streaming translation failed: {e}")
+
+        return TranslationResult(
+            text=final_text,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            provider=self.name,
+            model=selected_model
+        )
 
     def set_model(self, model_id: str) -> None:
         """Change the active model."""
-        if model_id in self.MODELS:
-            self.model = model_id
+        self.model = self.normalize_model_id(model_id)
+        self._client = None
 
     def get_current_model(self) -> str:
         """Get the current model ID."""

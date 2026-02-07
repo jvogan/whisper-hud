@@ -28,11 +28,7 @@ struct Main {
             let request = try JSONDecoder().decode(Request.self, from: inputData)
             let sourceLang: Locale.Language
             if request.source == "auto" || request.source == "und" || request.source.isEmpty {
-                if let current = Locale.current.language {
-                    sourceLang = current
-                } else {
-                    sourceLang = Locale.Language(identifier: "en")
-                }
+                sourceLang = Locale.current.language
             } else {
                 sourceLang = Locale.Language(identifier: request.source)
             }

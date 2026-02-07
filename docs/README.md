@@ -19,14 +19,14 @@ Welcome to the WhisperHUD documentation!
 ## Getting Started
 
 1. **Install**: See the main [README](../README.md) for installation
-2. **Configure**: Run the setup wizard on first launch
+2. **Configure**: Run the setup wizard on first launch (quickest start: Local → Apple)
 3. **Use**: Hold your hotkey, speak, release to transcribe
 
 ## Configuration
 
 Settings are stored in `~/.config/whisper-hud/config.json`.
 
-API keys are securely stored in the macOS Keychain.
+API keys use the configured storage mode: passphrase-encrypted local store (default), macOS Keychain, or session-only memory.
 
 ## Optional Extras
 

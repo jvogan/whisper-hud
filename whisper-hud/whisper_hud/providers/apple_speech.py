@@ -124,8 +124,11 @@ class AppleSpeechProvider(TranscriptionProvider):
         Returns:
             TranscriptionResult with transcribed text
         """
+        import os
+        import tempfile
         import time
         start_time = time.time()
+        temp_file = None
 
         if not self._check_availability():
             raise RuntimeError(
@@ -135,8 +138,6 @@ class AppleSpeechProvider(TranscriptionProvider):
 
         try:
             from Foundation import NSURL
-            import os
-            import tempfile
 
             # Write audio to a unique temp file (Speech framework needs a file URL)
             # Use restrictive permissions (owner-only) and consistent prefix for cleanup
@@ -190,14 +191,7 @@ class AppleSpeechProvider(TranscriptionProvider):
             # Wait for completion (timeout after 60 seconds)
             if not semaphore.acquire(timeout=60):
                 task.cancel()
-                # Securely delete temp file before raising
-                from ..encryption import secure_delete
-                secure_delete(temp_file)
                 raise TimeoutError("Speech recognition timed out")
-
-            # Securely delete temp file (overwrite before unlink)
-            from ..encryption import secure_delete
-            secure_delete(temp_file)
 
             if recognition_error:
                 raise RuntimeError(f"Speech recognition error: {recognition_error}")
@@ -220,6 +214,17 @@ class AppleSpeechProvider(TranscriptionProvider):
             )
         except Exception as e:
             raise RuntimeError(f"Apple Speech transcription failed: {e}")
+        finally:
+            # Always clean up temp audio files, even on early failures.
+            if temp_file and os.path.exists(temp_file):
+                try:
+                    from ..encryption import secure_delete
+                    secure_delete(temp_file)
+                except Exception:
+                    try:
+                        os.unlink(temp_file)
+                    except Exception:
+                        pass
 
     def is_configured(self) -> bool:
         """

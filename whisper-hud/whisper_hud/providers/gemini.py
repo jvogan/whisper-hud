@@ -11,9 +11,7 @@ Models (February 2026):
 - gemini-2.5-flash-lite: Lowest latency/cost, supports audio input
 """
 
-import base64
 from typing import Callable
-import google.generativeai as genai
 from .base import TranscriptionProvider, TranscriptionResult
 from ..keychain import get_api_key
 
@@ -55,16 +53,24 @@ class GeminiProvider(TranscriptionProvider):
 
     def __init__(self, model: str = "gemini-3-flash-preview"):
         self.model = model
-        self._configured = False
+        self._client = None
 
-    def _configure(self):
-        """Configure Gemini API with stored key."""
-        if not self._configured:
+    def _get_client(self):
+        """Get or create the Gemini client."""
+        if self._client is None:
+            try:
+                from google import genai
+            except ImportError:
+                raise RuntimeError(
+                    "google-genai package not installed. Install with: pip install google-genai"
+                )
+
             api_key = get_api_key("gemini")
             if not api_key:
                 raise ValueError("Gemini API key not configured")
-            genai.configure(api_key=api_key)
-            self._configured = True
+            self._client = genai.Client(api_key=api_key)
+
+        return self._client
 
     def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
         """Transcribe audio using Gemini."""
@@ -77,19 +83,9 @@ class GeminiProvider(TranscriptionProvider):
                 model=self.model
             )
 
-        self._configure()
+        client = self._get_client()
 
-        # Encode audio as base64
-        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
-
-        # Create model instance
-        model = genai.GenerativeModel(self.model)
-
-        # Prepare audio part
-        audio_part = {
-            "mime_type": "audio/wav",
-            "data": audio_b64
-        }
+        from google.genai import types
 
         # Transcription prompt - optimized for accuracy
         prompt = """Transcribe this audio exactly as spoken.
@@ -98,7 +94,13 @@ Do not add any commentary, labels, or formatting.
 Preserve natural punctuation."""
 
         # Generate transcription
-        response = model.generate_content([prompt, audio_part])
+        response = client.models.generate_content(
+            model=self.model,
+            contents=[
+                prompt,
+                types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
+            ],
+        )
 
         # Get the model config for cost calculation
         model_config = next(
@@ -133,7 +135,7 @@ Preserve natural punctuation."""
         """Set the active model."""
         if any(m["id"] == model_id for m in self.MODELS):
             self.model = model_id
-            self._configured = False  # Reset configuration
+            self._client = None
 
     def get_current_model(self) -> str:
         """Get the current model ID."""
@@ -167,19 +169,8 @@ Preserve natural punctuation."""
                 model=self.model
             )
 
-        self._configure()
-
-        # Encode audio as base64
-        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
-
-        # Create model instance
-        model = genai.GenerativeModel(self.model)
-
-        # Prepare audio part
-        audio_part = {
-            "mime_type": "audio/wav",
-            "data": audio_b64
-        }
+        client = self._get_client()
+        from google.genai import types
 
         # Transcription prompt
         prompt = """Transcribe this audio exactly as spoken.
@@ -188,7 +179,13 @@ Do not add any commentary, labels, or formatting.
 Preserve natural punctuation."""
 
         # Generate with streaming
-        response = model.generate_content([prompt, audio_part], stream=True)
+        response = client.models.generate_content_stream(
+            model=self.model,
+            contents=[
+                prompt,
+                types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
+            ],
+        )
 
         cumulative_text = ""
         for chunk in response:

@@ -26,7 +26,7 @@ try:
         NSBackingStoreBuffered, NSScreen, NSTextField,
         NSMakeRect, NSButton, NSApplication,
         NSSecureTextField, NSProgressIndicator,
-        NSProgressIndicatorSpinningStyle,
+        NSProgressIndicatorSpinningStyle, NSPopUpButton,
         NSLeftTextAlignment
     )
     from PyObjCTools import AppHelper
@@ -75,10 +75,21 @@ class SetupWizard:
         self._content_view: Optional[NSView] = None
 
         # Collected data
-        self._transcription_mode = "cloud"  # "cloud" or "local"
-        self._selected_provider = "gemini"  # Cloud: gemini/openai, Local: apple/whisper_local/parakeet
+        # Default to easiest no-account path for first-time users.
+        self._transcription_mode = "local"  # "cloud" or "local"
+        self._selected_provider = "apple"  # Cloud: gemini/openai, Local: apple/whisper_local/parakeet
         self._api_key = ""
-        self._setup_translation = False
+        self._translation_enabled = False
+        self._translation_provider = "apple"
+        self._translation_target_language = "en"
+        self._translation_source_language = "auto"
+        self._translation_models = {
+            "apple": "system",
+            "ollama": "translategemma-4b",
+            "gemini": "gemini-3-flash-preview",
+            "openai": "gpt-5-mini",
+            "anthropic": "claude-sonnet-4-5",
+        }
         self._ollama_installed = False
         self._ollama_running = False
         self._model_downloaded = False
@@ -89,6 +100,43 @@ class SetupWizard:
         self._api_key_field = None
         self._progress_indicator = None
         self._status_label = None
+        self._translation_provider_popup = None
+        self._translation_model_popup = None
+        self._translation_target_popup = None
+        self._translation_source_popup = None
+        self._translation_enable_popup = None
+        self._translation_provider_choices = []
+        self._translation_model_choices = []
+        self._translation_target_choices = []
+        self._translation_source_choices = []
+
+        # Prefill from current config when rerunning setup.
+        try:
+            from .config import Config
+
+            existing = Config.load()
+            self._translation_enabled = bool(existing.translation_enabled)
+            self._translation_provider = getattr(existing, "translation_provider", "apple")
+            self._translation_target_language = getattr(existing, "target_language", "en")
+            self._translation_source_language = getattr(existing, "source_language", "auto")
+            self._translation_models["ollama"] = getattr(existing, "translation_model", self._translation_models["ollama"])
+            self._translation_models["gemini"] = getattr(
+                existing,
+                "gemini_translate_model",
+                self._translation_models["gemini"],
+            )
+            self._translation_models["openai"] = getattr(
+                existing,
+                "openai_translate_model",
+                self._translation_models["openai"],
+            )
+            self._translation_models["anthropic"] = getattr(
+                existing,
+                "anthropic_translate_model",
+                self._translation_models["anthropic"],
+            )
+        except Exception:
+            pass
 
     def show(self):
         """Show the setup wizard."""
@@ -176,7 +224,7 @@ class SetupWizard:
             "  1. Choose a transcription mode (Cloud or Local)\n"
             "  2. Configure your preferred provider\n"
             "  3. Optionally set up translation\n\n"
-            "Both cloud and local options are available!",
+            "Tip: Local (Apple) is the fastest way to start and needs no API key.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 120),
             font_size=14,
             align=NSLeftTextAlignment
@@ -186,8 +234,8 @@ class SetupWizard:
         # Quick info
         y -= 80
         info = self._create_label(
-            "Cloud: Fast, accurate, requires API key and internet\n"
-            "Local: Private, works offline, downloads a model (~800MB)",
+            "Cloud: Fast, accurate, requires API key + internet\n"
+            "Local: Private, works offline. Apple mode needs no download.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 60),
             font_size=12,
             color=NSColor.colorWithCalibratedRed_green_blue_alpha_(0.6, 0.8, 1.0, 1.0)
@@ -218,7 +266,7 @@ class SetupWizard:
         # Description
         y -= 30
         desc = self._create_label(
-            "How would you like to transcribe your speech?",
+            "How would you like to transcribe your speech? (You can change this anytime.)",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 24),
             font_size=14
         )
@@ -244,8 +292,8 @@ class SetupWizard:
         # Local mode button
         local_btn = self._create_mode_card(
             "Local",
-            "Private & Offline",
-            "Runs on your Mac\nNo data leaves device\nOne-time model download",
+            "Private & Easiest",
+            "Runs on your Mac\nNo API key needed for Apple\nOptional model download later",
             NSMakeRect(self.PADDING + btn_width + 20, y, btn_width, btn_height),
             selected=self._transcription_mode == "local",
             action=lambda: self._select_mode("local")
@@ -350,8 +398,16 @@ class SetupWizard:
 
         # Security note
         y -= 30
+        from .keychain import get_storage_mode
+        storage_mode = get_storage_mode()
+        if storage_mode == "passphrase":
+            security_text = "API keys use encrypted local storage (default)."
+        elif storage_mode == "keychain":
+            security_text = "API keys are saved in macOS Keychain."
+        else:
+            security_text = "Session-only mode: API keys clear on quit."
         security = self._create_label(
-            "Your API key is stored securely in macOS Keychain.",
+            security_text,
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 24),
             font_size=11,
             color=NSColor.colorWithCalibratedWhite_alpha_(0.5, 1.0)
@@ -459,8 +515,9 @@ class SetupWizard:
         )
 
     def _show_translation(self):
-        """Show translation setup step."""
+        """Show translation setup step with full first-run configuration."""
         from .providers.translation.ollama import OllamaTranslateProvider
+        from .keychain import get_storage_mode
 
         y = self.HEIGHT - self.PADDING
 
@@ -475,85 +532,225 @@ class SetupWizard:
         self._content_view.addSubview_(title)
 
         # Description
-        y -= 60
+        y -= 44
         desc = self._create_label(
-            "WhisperHUD can translate your transcriptions.\n"
-            "This is optional - you can skip and set it up later.",
-            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 50),
-            font_size=14
+            "Skip for the fastest first transcript, or enable now to auto-translate after each transcription.",
+            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 34),
+            font_size=13,
+            align=NSLeftTextAlignment
         )
         self._content_view.addSubview_(desc)
 
-        # Translation options
-        y -= 50
-
-        # If user has cloud API keys, suggest cloud translation
-        from .keychain import get_api_key
-        has_gemini = bool(get_api_key("gemini"))
-        has_openai = bool(get_api_key("openai"))
-
-        if has_gemini or has_openai:
-            info = self._create_label(
-                "Cloud translation is available with your existing API key!\n"
-                "You can also use Ollama for local translation.",
-                NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 40),
-                font_size=13,
-                color=NSColor.colorWithCalibratedRed_green_blue_alpha_(0.4, 0.9, 0.5, 1.0)
-            )
-        else:
-            info = self._create_label(
-                "Local translation requires Ollama.\n"
-                "Cloud translation works with your transcription API key.",
-                NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 40),
-                font_size=13
-            )
-        self._content_view.addSubview_(info)
-
-        # Check Ollama status
-        y -= 40
+        # Refresh local dependency status
         self._ollama_installed = OllamaTranslateProvider.is_ollama_installed()
+        self._ollama_running = self._check_ollama_running() if self._ollama_installed else False
 
-        status_text = "Ollama: "
-        if not self._ollama_installed:
-            status_text += "Not installed"
-            status_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.6, 0.4, 1.0)
-        else:
-            self._ollama_running = self._check_ollama_running()
-            if self._ollama_running:
-                status_text += "Running"
-                status_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.4, 0.9, 0.5, 1.0)
-            else:
-                status_text += "Installed, not running"
-                status_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(1.0, 0.8, 0.4, 1.0)
-
-        self._status_label = self._create_label(
-            status_text,
-            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 24),
-            font_size=14,
-            color=status_color
+        y -= 44
+        enable_label = self._create_label(
+            "Translation mode:",
+            NSMakeRect(self.PADDING, y, 180, 24),
+            font_size=13
         )
-        self._content_view.addSubview_(self._status_label)
+        self._content_view.addSubview_(enable_label)
 
-        # Action buttons for Ollama
-        y -= 50
-        if not self._ollama_installed:
-            install_btn = self._create_button(
-                "Install Ollama",
-                NSMakeRect(self.PADDING, y, 150, 32),
-                action=self._install_ollama
-            )
-            self._content_view.addSubview_(install_btn)
-        elif not self._ollama_running:
-            start_btn = self._create_button(
-                "Start Ollama",
-                NSMakeRect(self.PADDING, y, 150, 32),
-                action=self._start_ollama
-            )
-            self._content_view.addSubview_(start_btn)
+        self._translation_enable_popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+            NSMakeRect(self.PADDING + 160, y - 2, self.WIDTH - 2 * self.PADDING - 160, 26),
+            False,
+        )
+        self._translation_enable_popup.addItemsWithTitles_([
+            "Off (skip for now)",
+            "On (translate after transcription)",
+        ])
+        self._translation_enable_popup.selectItemAtIndex_(1 if self._translation_enabled else 0)
+        self._translation_enable_popup._wizard_action = self._on_translation_enable_changed
+        self._translation_enable_popup.setTarget_(self)
+        self._translation_enable_popup.setAction_("buttonClicked:")
+        self._content_view.addSubview_(self._translation_enable_popup)
 
-        # Progress indicator
+        provider_specs = self._get_translation_provider_specs()
+        provider_ids = [spec["id"] for spec in provider_specs]
+        if self._translation_provider not in provider_ids:
+            self._translation_provider = "apple"
+
+        y -= 40
+        provider_label = self._create_label(
+            "Provider:",
+            NSMakeRect(self.PADDING, y, 180, 24),
+            font_size=13
+        )
+        self._content_view.addSubview_(provider_label)
+
+        self._translation_provider_choices = []
+        provider_titles = []
+        for spec in provider_specs:
+            display = f"{spec['name']} — {spec['status']}"
+            provider_titles.append(display)
+            self._translation_provider_choices.append((spec["id"], display))
+
+        self._translation_provider_popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+            NSMakeRect(self.PADDING + 160, y - 2, self.WIDTH - 2 * self.PADDING - 160, 26),
+            False,
+        )
+        self._translation_provider_popup.addItemsWithTitles_(provider_titles)
+        selected_provider_index = provider_ids.index(self._translation_provider)
+        self._translation_provider_popup.selectItemAtIndex_(selected_provider_index)
+        self._translation_provider_popup._wizard_action = self._on_translation_provider_changed
+        self._translation_provider_popup.setTarget_(self)
+        self._translation_provider_popup.setAction_("buttonClicked:")
+        self._content_view.addSubview_(self._translation_provider_popup)
+
+        model_choices = self._get_translation_model_choices(self._translation_provider)
+        self._translation_model_choices = model_choices
+        if self._translation_provider not in self._translation_models:
+            self._translation_models[self._translation_provider] = model_choices[0][0]
+        if self._translation_models[self._translation_provider] not in {mid for mid, _ in model_choices}:
+            self._translation_models[self._translation_provider] = model_choices[0][0]
+
+        y -= 40
+        model_label = self._create_label(
+            "Model:",
+            NSMakeRect(self.PADDING, y, 180, 24),
+            font_size=13
+        )
+        self._content_view.addSubview_(model_label)
+
+        self._translation_model_popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+            NSMakeRect(self.PADDING + 160, y - 2, self.WIDTH - 2 * self.PADDING - 160, 26),
+            False,
+        )
+        self._translation_model_popup.addItemsWithTitles_([name for _, name in model_choices])
+        current_model = self._translation_models[self._translation_provider]
+        for idx, (model_id, _) in enumerate(model_choices):
+            if model_id == current_model:
+                self._translation_model_popup.selectItemAtIndex_(idx)
+                break
+        self._translation_model_popup._wizard_action = self._on_translation_model_changed
+        self._translation_model_popup.setTarget_(self)
+        self._translation_model_popup.setAction_("buttonClicked:")
+        self._content_view.addSubview_(self._translation_model_popup)
+
+        language_map = self._get_translation_language_map(self._translation_provider)
+        if self._translation_target_language not in language_map:
+            if "en" in language_map:
+                self._translation_target_language = "en"
+            elif "zh" in language_map:
+                self._translation_target_language = "zh"
+            else:
+                self._translation_target_language = sorted(language_map.keys())[0]
+        if self._translation_source_language != "auto" and self._translation_source_language not in language_map:
+            self._translation_source_language = "auto"
+
+        y -= 40
+        target_label = self._create_label(
+            "Target language:",
+            NSMakeRect(self.PADDING, y, 180, 24),
+            font_size=13
+        )
+        self._content_view.addSubview_(target_label)
+
+        self._translation_target_choices = self._ordered_language_codes(language_map, include_auto=False)
+        self._translation_target_popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+            NSMakeRect(self.PADDING + 160, y - 2, self.WIDTH - 2 * self.PADDING - 160, 26),
+            False,
+        )
+        self._translation_target_popup.addItemsWithTitles_(
+            [f"{language_map[code]} ({code})" for code in self._translation_target_choices]
+        )
+        self._translation_target_popup.selectItemAtIndex_(
+            self._translation_target_choices.index(self._translation_target_language)
+        )
+        self._translation_target_popup._wizard_action = self._on_translation_target_changed
+        self._translation_target_popup.setTarget_(self)
+        self._translation_target_popup.setAction_("buttonClicked:")
+        self._content_view.addSubview_(self._translation_target_popup)
+
+        y -= 40
+        source_label = self._create_label(
+            "Source language:",
+            NSMakeRect(self.PADDING, y, 180, 24),
+            font_size=13
+        )
+        self._content_view.addSubview_(source_label)
+
+        self._translation_source_choices = ["auto"] + self._ordered_language_codes(language_map, include_auto=False)
+        source_titles = ["Auto (detect)"] + [
+            f"{language_map[code]} ({code})" for code in self._translation_source_choices if code != "auto"
+        ]
+        self._translation_source_popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+            NSMakeRect(self.PADDING + 160, y - 2, self.WIDTH - 2 * self.PADDING - 160, 26),
+            False,
+        )
+        self._translation_source_popup.addItemsWithTitles_(source_titles)
+        self._translation_source_popup.selectItemAtIndex_(
+            self._translation_source_choices.index(self._translation_source_language)
+        )
+        self._translation_source_popup._wizard_action = self._on_translation_source_changed
+        self._translation_source_popup.setTarget_(self)
+        self._translation_source_popup.setAction_("buttonClicked:")
+        self._content_view.addSubview_(self._translation_source_popup)
+
+        y -= 54
+        storage_mode = get_storage_mode()
+        storage_hint = {
+            "passphrase": "API keys: encrypted local passphrase store",
+            "keychain": "API keys: macOS Keychain",
+            "none": "API keys: session-only (cleared on quit)",
+        }.get(storage_mode, "API keys: encrypted local passphrase store")
+        summary_lines = [storage_hint]
+        if not self._translation_enabled:
+            summary_lines.append("Translation is off for first run (you can enable anytime).")
+        else:
+            target_name = language_map.get(self._translation_target_language, self._translation_target_language)
+            source_name = (
+                "Auto detect"
+                if self._translation_source_language == "auto"
+                else language_map.get(self._translation_source_language, self._translation_source_language)
+            )
+            model_name = dict(model_choices).get(
+                self._translation_models[self._translation_provider],
+                self._translation_models[self._translation_provider],
+            )
+            provider_name = dict((spec["id"], spec["name"]) for spec in provider_specs).get(
+                self._translation_provider,
+                self._translation_provider,
+            )
+            summary_lines.append(
+                f"Translation on: {provider_name} • {model_name} • {source_name} -> {target_name}"
+            )
+            if self._translation_provider == "ollama" and not self._ollama_running:
+                summary_lines.append("Ollama is not running yet; start it now or later in app settings.")
+            if self._translation_provider in {"openai", "gemini", "anthropic"}:
+                summary_lines.append("Cloud translation needs a valid API key for that provider.")
+
+        summary_label = self._create_label(
+            "\n".join(summary_lines),
+            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 48),
+            font_size=11,
+            color=NSColor.colorWithCalibratedWhite_alpha_(0.75, 1.0),
+            align=NSLeftTextAlignment,
+        )
+        self._content_view.addSubview_(summary_label)
+
+        y -= 36
+        if self._translation_enabled and self._translation_provider == "ollama":
+            if not self._ollama_installed:
+                install_btn = self._create_button(
+                    "Install Ollama",
+                    NSMakeRect(self.PADDING, y, 150, 30),
+                    action=self._install_ollama,
+                )
+                self._content_view.addSubview_(install_btn)
+            elif not self._ollama_running:
+                start_btn = self._create_button(
+                    "Start Ollama",
+                    NSMakeRect(self.PADDING, y, 150, 30),
+                    action=self._start_ollama,
+                )
+                self._content_view.addSubview_(start_btn)
+
+        # Progress indicator for install/start actions
         self._progress_indicator = NSProgressIndicator.alloc().initWithFrame_(
-            NSMakeRect(self.PADDING + 170, y + 6, 20, 20)
+            NSMakeRect(self.PADDING + 170, y + 5, 20, 20)
         )
         self._progress_indicator.setStyle_(NSProgressIndicatorSpinningStyle)
         self._progress_indicator.setHidden_(True)
@@ -563,7 +760,7 @@ class SetupWizard:
         self._add_navigation_buttons(
             back_title="Back",
             back_action=self._go_back_from_translation,
-            next_title="Skip" if not (has_gemini or has_openai or self._ollama_running) else "Next",
+            next_title="Next",
             next_action=lambda: self._show_step(WizardStep.COMPLETE)
         )
 
@@ -582,7 +779,7 @@ class SetupWizard:
         self._content_view.addSubview_(title)
 
         # Summary
-        y -= 100
+        y -= 140
         mode_name = "Cloud" if self._transcription_mode == "cloud" else "Local"
         provider_names = {
             "gemini": "Google Gemini",
@@ -593,29 +790,63 @@ class SetupWizard:
         }
         provider_name = provider_names.get(self._selected_provider, self._selected_provider)
 
+        translation_provider_names = {
+            "apple": "Apple (Local)",
+            "ollama": "Ollama (Local)",
+            "gemini": "Gemini (Cloud)",
+            "openai": "OpenAI (Cloud)",
+            "anthropic": "Anthropic (Cloud)",
+        }
+        if self._translation_enabled:
+            t_provider = translation_provider_names.get(self._translation_provider, self._translation_provider)
+            t_model = self._translation_models.get(self._translation_provider, "default")
+            t_source = "Auto detect" if self._translation_source_language == "auto" else self._translation_source_language
+            t_target = self._translation_target_language
+            translation_line = (
+                f"Translation: ON ({t_provider}, {t_model}, {t_source} -> {t_target})"
+            )
+        else:
+            translation_line = "Translation: OFF (you can enable it anytime)"
+
+        remaining_items = []
+        if self._translation_enabled and self._translation_provider == "ollama" and not self._ollama_running:
+            remaining_items.append("Start Ollama before using local translation.")
+        if self._translation_enabled and self._translation_provider in {"openai", "gemini", "anthropic"}:
+            remaining_items.append("Make sure that cloud provider API key is configured.")
+        if self._selected_provider in {"whisper_local", "parakeet"}:
+            remaining_items.append("First use downloads local model files.")
+        remaining_text = (
+            "Remaining optional steps:\n  - " + "\n  - ".join(remaining_items)
+            if remaining_items
+            else "Remaining optional steps: none"
+        )
+
         summary = (
             f"You're all set to use WhisperHUD!\n\n"
             f"Mode: {mode_name}\n"
             f"Provider: {provider_name}\n"
-            f"API Key: {'Configured' if self._api_key else 'N/A (local)'}"
+            f"API Key: {'Configured' if self._transcription_mode == 'cloud' else 'Not required (local)'}\n"
+            f"{translation_line}\n\n"
+            f"{remaining_text}"
         )
         summary_label = self._create_label(
             summary,
-            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 100),
-            font_size=14,
+            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 140),
+            font_size=13,
             align=NSLeftTextAlignment
         )
         self._content_view.addSubview_(summary_label)
 
         # Usage tips
-        y -= 110
+        y -= 122
         tips = self._create_label(
             "Quick Start:\n"
             "  Hold Command+Shift+Space to record\n"
             "  Release to transcribe and paste\n"
+            "  Toggle translation from the Translation menu\n"
             "  Click the menu bar icon for settings\n\n"
             "You can re-run this wizard from the menu anytime.",
-            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 110),
+            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 112),
             font_size=13,
             color=NSColor.colorWithCalibratedWhite_alpha_(0.8, 1.0),
             align=NSLeftTextAlignment
@@ -779,6 +1010,185 @@ class SetupWizard:
             )
             self._content_view.addSubview_(next_btn)
 
+    def _prompt_secure_input(self, title: str, message: str) -> Optional[str]:
+        """Prompt for hidden input using AppleScript."""
+        import subprocess
+
+        message_escaped = message.replace('"', '\\"').replace('\n', '\\n')
+        title_escaped = title.replace('"', '\\"')
+        script = f'''
+        tell application "System Events"
+            activate
+            set userInput to display dialog "{message_escaped}" default answer "" with title "{title_escaped}" with hidden answer buttons {{"Cancel", "Save"}} default button "Save"
+            if button returned of userInput is "Save" then
+                return text returned of userInput
+            else
+                return ""
+            end if
+        end tell
+        '''
+
+        try:
+            result = subprocess.run(
+                ['osascript', '-e', script],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception as e:
+            logger.error(f"Secure input dialog error: {e}")
+
+        return None
+
+    def _get_translation_provider_specs(self) -> list[dict]:
+        """Return provider options shown in the translation step."""
+        return [
+            {
+                "id": "apple",
+                "name": "Apple (Local)",
+                "status": "ready now",
+            },
+            {
+                "id": "ollama",
+                "name": "Ollama (Local)",
+                "status": (
+                    "running"
+                    if self._ollama_running
+                    else ("installed, start needed" if self._ollama_installed else "install needed")
+                ),
+            },
+            {
+                "id": "gemini",
+                "name": "Gemini (Cloud)",
+                "status": "API key required",
+            },
+            {
+                "id": "openai",
+                "name": "OpenAI (Cloud)",
+                "status": "API key required",
+            },
+            {
+                "id": "anthropic",
+                "name": "Anthropic (Cloud)",
+                "status": "API key required",
+            },
+        ]
+
+    def _get_translation_model_choices(self, provider_id: str) -> list[tuple[str, str]]:
+        """Return (model_id, display_name) choices for a translation provider."""
+        if provider_id == "apple":
+            return [("system", "System default")]
+
+        try:
+            if provider_id == "ollama":
+                from .providers.translation.ollama import OllamaTranslateProvider as ProviderClass
+            elif provider_id == "gemini":
+                from .providers.translation.gemini_translate import GeminiTranslateProvider as ProviderClass
+            elif provider_id == "openai":
+                from .providers.translation.openai_translate import OpenAITranslateProvider as ProviderClass
+            elif provider_id == "anthropic":
+                from .providers.translation.anthropic_translate import AnthropicTranslateProvider as ProviderClass
+            else:
+                return [("system", "System default")]
+
+            provider = ProviderClass()
+            models = provider.get_models()
+            if not models:
+                return [("system", "System default")]
+
+            choices = []
+            for model in models:
+                model_id = str(model.get("id", ""))
+                name = str(model.get("name", model_id))
+                suffix = " ★" if model.get("recommended") else ""
+                choices.append((model_id, f"{name}{suffix}"))
+            return choices
+        except Exception:
+            logger.debug(f"Could not load translation models for provider {provider_id}")
+            return [("system", "System default")]
+
+    def _get_translation_language_map(self, provider_id: str) -> dict[str, str]:
+        """Return language map for selected translation provider."""
+        try:
+            if provider_id == "ollama":
+                from .providers.translation.ollama import OllamaTranslateProvider as ProviderClass
+            elif provider_id == "gemini":
+                from .providers.translation.gemini_translate import GeminiTranslateProvider as ProviderClass
+            elif provider_id == "openai":
+                from .providers.translation.openai_translate import OpenAITranslateProvider as ProviderClass
+            elif provider_id == "anthropic":
+                from .providers.translation.anthropic_translate import AnthropicTranslateProvider as ProviderClass
+            else:
+                from .providers.translation.apple_translate import AppleTranslateProvider as ProviderClass
+
+            return ProviderClass.get_supported_languages()
+        except Exception:
+            # Keep setup usable even if one provider metadata call fails.
+            return {
+                "en": "English",
+                "zh": "Chinese (Simplified)",
+                "es": "Spanish",
+                "fr": "French",
+                "de": "German",
+                "ja": "Japanese",
+            }
+
+    def _ordered_language_codes(self, languages: dict[str, str], include_auto: bool = False) -> list[str]:
+        """Return language codes with common languages first."""
+        common = ["en", "zh", "zh-TW", "es", "fr", "de", "it", "pt", "ja", "ko", "ar", "ru"]
+        ordered = [code for code in common if code in languages]
+        ordered.extend(
+            sorted(
+                [code for code in languages.keys() if code not in ordered],
+                key=lambda c: languages[c],
+            )
+        )
+        if include_auto:
+            return ["auto"] + ordered
+        return ordered
+
+    def _on_translation_enable_changed(self):
+        """Handle translation enable popup selection."""
+        self._translation_enabled = self._translation_enable_popup.indexOfSelectedItem() == 1
+        self._show_step(WizardStep.TRANSLATION)
+
+    def _on_translation_provider_changed(self):
+        """Handle translation provider popup selection."""
+        idx = self._translation_provider_popup.indexOfSelectedItem()
+        if 0 <= idx < len(self._translation_provider_choices):
+            provider_id = self._translation_provider_choices[idx][0]
+            self._translation_provider = provider_id
+            model_choices = self._get_translation_model_choices(provider_id)
+            if provider_id not in self._translation_models:
+                self._translation_models[provider_id] = model_choices[0][0]
+            if self._translation_models[provider_id] not in {mid for mid, _ in model_choices}:
+                self._translation_models[provider_id] = model_choices[0][0]
+        self._show_step(WizardStep.TRANSLATION)
+
+    def _on_translation_model_changed(self):
+        """Handle translation model popup selection."""
+        idx = self._translation_model_popup.indexOfSelectedItem()
+        if 0 <= idx < len(self._translation_model_choices):
+            model_id = self._translation_model_choices[idx][0]
+            self._translation_models[self._translation_provider] = model_id
+        self._show_step(WizardStep.TRANSLATION)
+
+    def _on_translation_target_changed(self):
+        """Handle translation target language popup selection."""
+        idx = self._translation_target_popup.indexOfSelectedItem()
+        if 0 <= idx < len(self._translation_target_choices):
+            self._translation_target_language = self._translation_target_choices[idx]
+        self._show_step(WizardStep.TRANSLATION)
+
+    def _on_translation_source_changed(self):
+        """Handle translation source language popup selection."""
+        idx = self._translation_source_popup.indexOfSelectedItem()
+        if 0 <= idx < len(self._translation_source_choices):
+            self._translation_source_language = self._translation_source_choices[idx]
+        self._show_step(WizardStep.TRANSLATION)
+
     # === Action Handlers ===
 
     def _select_mode(self, mode: str):
@@ -812,7 +1222,13 @@ class SetupWizard:
 
     def _validate_and_continue_cloud(self):
         """Validate cloud setup and continue."""
-        from .keychain import set_api_key
+        from .keychain import (
+            set_api_key,
+            get_storage_mode,
+            has_passphrase_store,
+            is_passphrase_unlocked,
+            unlock_passphrase_store,
+        )
 
         if self._api_key_field:
             self._api_key = self._api_key_field.stringValue()
@@ -826,8 +1242,41 @@ class SetupWizard:
             self._show_error("OpenAI keys should start with 'sk-'")
             return
 
+        if get_storage_mode() == "passphrase" and not is_passphrase_unlocked():
+            if has_passphrase_store():
+                passphrase = self._prompt_secure_input(
+                    "Unlock API Key Store",
+                    "Enter your API key storage passphrase."
+                )
+                if not passphrase:
+                    self._show_error("Passphrase required to save API key")
+                    return
+            else:
+                passphrase = self._prompt_secure_input(
+                    "Create API Key Passphrase",
+                    "Create a passphrase to encrypt API keys."
+                )
+                if not passphrase or len(passphrase) < 8:
+                    self._show_error("Passphrase must be at least 8 characters")
+                    return
+                confirm = self._prompt_secure_input(
+                    "Confirm Passphrase",
+                    "Re-enter your passphrase."
+                )
+                if passphrase != confirm:
+                    self._show_error("Passphrases do not match")
+                    return
+
+            ok, message = unlock_passphrase_store(passphrase)
+            if not ok:
+                self._show_error(message or "Failed to unlock API key storage")
+                return
+
         # Save the API key
-        set_api_key(self._selected_provider, self._api_key)
+        if not set_api_key(self._selected_provider, self._api_key):
+            self._show_error("Could not store API key. Check credential storage settings.")
+            return
+
         # Clear in-memory key after storing
         self._api_key = ""
         if self._api_key_field:
@@ -939,7 +1388,28 @@ class SetupWizard:
         config.default_provider = self._selected_provider
         config.setup_completed = True
 
-        if self._ollama_running:
+        # Translation setup choices
+        config.translation_enabled = bool(self._translation_enabled)
+        config.translation_provider = self._translation_provider
+        config.source_language = self._translation_source_language
+        config.target_language = self._translation_target_language
+
+        # Persist provider-specific translation model selections.
+        config.translation_model = self._translation_models.get("ollama", config.translation_model)
+        config.gemini_translate_model = self._translation_models.get(
+            "gemini",
+            config.gemini_translate_model,
+        )
+        config.openai_translate_model = self._translation_models.get(
+            "openai",
+            config.openai_translate_model,
+        )
+        config.anthropic_translate_model = self._translation_models.get(
+            "anthropic",
+            config.anthropic_translate_model,
+        )
+
+        if self._translation_enabled and self._translation_provider == "ollama" and self._ollama_running:
             config.ollama_auto_start = True
 
         config.save()
@@ -951,8 +1421,15 @@ class SetupWizard:
             self._on_complete({
                 "mode": self._transcription_mode,
                 "provider": self._selected_provider,
-                "api_key_set": bool(self._api_key),
-                "translation_ready": self._ollama_running
+                "api_key_set": self._transcription_mode == "cloud",
+                "translation_enabled": self._translation_enabled,
+                "translation_provider": self._translation_provider,
+                "translation_model": self._translation_models.get(self._translation_provider, "default"),
+                "translation_ready": (
+                    (self._translation_provider != "ollama")
+                    or self._ollama_running
+                    or not self._translation_enabled
+                ),
             })
 
     def _console_wizard(self):

@@ -33,7 +33,7 @@
 - **Auto-stop**: Optionally stop recording automatically after silence
 - **Translation**: Local (Apple/Ollama) or cloud (Gemini/OpenAI/Anthropic) translation into 50+ languages
 - **Streaming display**: See live text as it's transcribed and translated
-- **Secure**: API keys stored in macOS Keychain, never in files
+- **Secure**: API keys can use encrypted passphrase storage (default), macOS Keychain, or session-only mode
 - **Cost tracking**: See your usage and estimated costs in the menu
 
 ## Quick Start
@@ -58,9 +58,22 @@ pip install -e ".[parakeet]"        # Parakeet (Apple Silicon)
 
 The setup wizard will guide you through:
 1. Granting Accessibility permission (required for hotkey + paste)
-2. Adding your API key (optional if using local providers)
+2. Choosing providers and adding your API key (optional if using local providers)
+
+First-time easiest path: choose **Local → Apple (Built-in)** to start with no API key and no model download.
+
+If you use cloud providers, WhisperHUD defaults to encrypted passphrase storage for API keys.
 
 That's it! Hold `Cmd+Shift+Space` to record.
+
+### First-Run Experience (What You’ll See)
+
+1. **Setup wizard opens automatically**
+2. Choose **Local → Apple (Built-in)** for the fastest no-key start
+3. Hold `Cmd+Shift+Space`, speak, release to transcribe
+4. Optional: enable translation, choose provider/model/source/target language
+
+By default, translation source language is **Auto detect** for multilingual first runs.
 
 ## Permissions
 
@@ -132,9 +145,14 @@ Access settings from the menu bar icon:
 - **Play sound**: Audio feedback on completion
 - **Save history**: Store recent transcriptions locally (disabled by default)
 
+**Privacy & Security**
+- **API key storage**: Passphrase-encrypted local store (default), macOS Keychain, or session-only
+- **Passphrase lock/unlock**: Unlock once per app session when using passphrase mode
+
 **Translation** (Apple local, Ollama local, or cloud)
 - **Provider**: Apple (local), Ollama (local), Gemini, OpenAI, or Anthropic
 - **Enable translation**: Translate transcriptions before pasting
+- **Source language**: Auto detect (default) or explicit source language
 - **Target language**: Language to translate into (50+ supported)
 - **Translation model**: Choose an Ollama size (4B/12B/27B) or a cloud model
 
@@ -148,9 +166,9 @@ Local translation keeps data on-device; cloud translation sends text to the prov
 2. Select a provider:
    - **Apple (local)**: Uses Apple's Translation framework (macOS 26+). For dev builds, run `./scripts/build-apple-translate.sh` to compile the helper.
    - **Ollama (local)**: WhisperHUD can install/start Ollama and download a model (~3-18GB)
-   - **Gemini/OpenAI (cloud)**: Requires API key, no local model download
+   - **Gemini/OpenAI/Anthropic (cloud)**: Requires API key, no local model download
 3. Enable translation
-4. Select your target language
+4. Select source language (or keep **Auto detect**) and target language
 5. Transcribe as usual - text will be translated before pasting
 
 ### Ollama Translation Models
@@ -179,7 +197,7 @@ The panel auto-dismisses after text is pasted.
 | OpenAI | GPT-4o Transcribe | ~$0.006/min |
 | OpenAI | GPT-4o Mini Transcribe | ~$0.003/min |
 | OpenAI | Whisper v2 | ~$0.006/min |
-| Google | Gemini 2.0 Flash | ~$0.001/min |
+| Google | Gemini 3 Flash | ~$0.001/min |
 
 Typical usage (30 seconds of speech): $0.001 - $0.003
 
@@ -187,12 +205,20 @@ Typical usage (30 seconds of speech): $0.001 - $0.003
 
 ## Security
 
-- **API keys** are stored in macOS Keychain (encrypted, system-protected)
+- **API keys** support three storage modes:
+  - Passphrase-encrypted local file (default, unlock once per app session)
+  - macOS Keychain
+  - Session-only memory (cleared on quit)
+- **Prompt behavior is explicit**:
+  - Keychain prompts only happen in **macOS Keychain** mode
+  - Passphrase prompts only happen when cloud keys are needed and locked
+  - History encryption does **not** trigger Keychain prompts
 - **Audio** is processed in memory; local providers may write short‑lived temp files that are securely deleted
 - **Cloud providers** receive audio/text when selected (OpenAI/Gemini/Anthropic)
 - **Local providers** (Apple, Whisper Local, Parakeet, Ollama) keep data on-device
 - **History** is disabled by default; enabling it stores recent transcriptions locally in `~/.config/whisper-hud/` (optional encryption at rest)
-- **Settings** are stored locally in `~/.config/whisper-hud/` with user‑only permissions
+- **History encryption** uses passphrase-backed local key wrapping (not Keychain)
+- **Settings/credential files** are saved with user-only permissions (`0700` directory, `0600` files, meaning only your macOS user can read/write)
 - **No telemetry** or data collection
 - **Accessibility permission** is powerful; only grant it to trusted apps
 

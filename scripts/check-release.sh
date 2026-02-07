@@ -12,7 +12,7 @@ ERRORS=0
 echo "Checking version numbers..."
 INIT_VERSION=$(grep -o '__version__ = "[^"]*"' whisper-hud/whisper_hud/__init__.py | cut -d'"' -f2)
 PYPROJECT_VERSION=$(grep -o 'version = "[^"]*"' pyproject.toml | head -1 | cut -d'"' -f2)
-CHANGELOG_VERSION=$(grep -o '\[.*\]' CHANGELOG.md | head -1 | tr -d '[]')
+CHANGELOG_VERSION=$(grep -E '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md | head -1 | sed -E 's/^## \[([0-9]+\.[0-9]+\.[0-9]+)\].*/\1/')
 
 if [ "$INIT_VERSION" != "$PYPROJECT_VERSION" ]; then
     echo "❌ Version mismatch: __init__.py ($INIT_VERSION) vs pyproject.toml ($PYPROJECT_VERSION)"
@@ -21,7 +21,9 @@ else
     echo "✓ Versions match: $INIT_VERSION"
 fi
 
-if [ "$INIT_VERSION" != "$CHANGELOG_VERSION" ]; then
+if [ -z "$CHANGELOG_VERSION" ]; then
+    echo "⚠️  Could not detect a semantic version header in CHANGELOG.md"
+elif [ "$INIT_VERSION" != "$CHANGELOG_VERSION" ]; then
     echo "⚠️  CHANGELOG version ($CHANGELOG_VERSION) differs from code version ($INIT_VERSION)"
 fi
 
@@ -72,9 +74,22 @@ done
 echo ""
 echo "Checking for sensitive files..."
 SENSITIVE_PATTERNS=(".env" "*.pem" "*.key" "*credentials*" "*secret*")
+SENSITIVE_EXCLUDES=(
+    "./.git/*"
+    "./.github/*"
+    "./.venv/*"
+    "./venv/*"
+    "./whisper-hud/venv/*"
+    "./build/*"
+    "./dist/*"
+)
 FOUND_SENSITIVE=0
 for pattern in "${SENSITIVE_PATTERNS[@]}"; do
-    matches=$(find . -name "$pattern" -not -path "./.git/*" -not -path "./.venv/*" 2>/dev/null | head -5)
+    find_cmd=(find . -name "$pattern")
+    for exclude_path in "${SENSITIVE_EXCLUDES[@]}"; do
+        find_cmd+=(-not -path "$exclude_path")
+    done
+    matches=$("${find_cmd[@]}" 2>/dev/null | head -5)
     if [ -n "$matches" ]; then
         echo "⚠️  Potentially sensitive: $matches"
         FOUND_SENSITIVE=1

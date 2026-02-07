@@ -27,13 +27,35 @@ from .hud import create_hud
 from .paste import insert_text, check_accessibility_permission, get_accessibility_error_message, open_accessibility_settings
 from .paste_targets import PasteTargetManager, PasteTarget, TargetType
 from .config import Config
-from .keychain import set_api_key, get_api_key, get_configured_providers, mask_api_key, validate_api_key
+from .keychain import (
+    set_api_key,
+    get_api_key,
+    delete_api_key,
+    get_configured_providers,
+    mask_api_key,
+    validate_api_key,
+    get_storage_mode,
+    get_storage_mode_label,
+    has_passphrase_store,
+    is_passphrase_unlocked,
+    unlock_passphrase_store,
+    lock_passphrase_store,
+    change_passphrase,
+    export_api_keys,
+    import_api_keys,
+    clear_api_keys,
+)
 from .floating_widget import create_floating_widget
 from .streaming_panel import create_streaming_panel
 from .setup_wizard import show_setup_wizard
 from .branding import MenuBarIcons, APPEARANCE_THEMES, get_theme_colors, get_available_themes
 from .image_processor import ImageProcessor
 from .character_packs import CharacterPackManager
+from .encryption import (
+    ensure_history_encryption_unlocked,
+    is_history_encryption_unlocked,
+    lock_history_encryption,
+)
 
 logger = get_logger("app")
 
@@ -165,12 +187,350 @@ class WhisperHUDApp(rumps.App):
         if self.config.ollama_auto_start and self.config.translation_enabled:
             self._auto_start_ollama()
 
-        # Show setup wizard on first run (when no API keys configured and setup not completed)
-        configured = get_configured_providers()
-        if not configured and not self.config.setup_completed:
+        # Show setup wizard on first run without querying credential storage.
+        if not self.config.setup_completed:
             self._show_setup_wizard()
-        elif not configured:
-            self._show_setup_reminder()
+        else:
+            if self._should_query_keychain():
+                configured = self._get_configured_cloud_providers()
+                if not configured and not self._is_passphrase_store_locked():
+                    self._show_setup_reminder()
+
+    @staticmethod
+    def _is_cloud_transcription_provider(provider_id: str) -> bool:
+        """Return True for transcription providers that require API keys."""
+        return provider_id in {"openai", "gemini"}
+
+    @staticmethod
+    def _is_cloud_translation_provider(provider_id: str) -> bool:
+        """Return True for translation providers that require API keys."""
+        return provider_id in {"openai", "gemini", "anthropic"}
+
+    def _should_query_keychain(self) -> bool:
+        """
+        Only query keychain when cloud providers are actively selected.
+
+        This prevents startup/menu keychain prompts for local-only users.
+        """
+        if self._is_cloud_transcription_provider(self.config.default_provider):
+            return True
+        return (
+            self.config.translation_enabled
+            and self._is_cloud_translation_provider(self.config.translation_provider)
+        )
+
+    def _get_configured_cloud_providers(self) -> list[str]:
+        """Return configured cloud providers when keychain lookup is needed."""
+        if not self._should_query_keychain():
+            return []
+        return get_configured_providers()
+
+    def _credential_mode(self) -> str:
+        """Return active API key storage mode."""
+        return get_storage_mode(self.config)
+
+    def _is_passphrase_mode(self) -> bool:
+        return self._credential_mode() == "passphrase"
+
+    def _is_passphrase_store_locked(self) -> bool:
+        return self._is_passphrase_mode() and has_passphrase_store() and not is_passphrase_unlocked()
+
+    def _reset_cloud_clients(self) -> None:
+        """Reset provider clients so credential changes take effect immediately."""
+        for provider in ("openai", "gemini"):
+            self.transcriber.reset_provider(provider)
+        for provider in ("openai", "gemini", "anthropic"):
+            self.translator.reset_provider(provider)
+
+    def _requires_cloud_credentials(self) -> bool:
+        """Return True when current settings require cloud API key access."""
+        if self._is_cloud_transcription_provider(self.config.default_provider):
+            return True
+        return (
+            self.config.translation_enabled
+            and self._is_cloud_translation_provider(self.config.translation_provider)
+        )
+
+    def _ensure_cloud_credentials_ready(self, allow_create: bool = False) -> bool:
+        """
+        Just-in-time unlock for cloud operations.
+
+        This avoids startup prompts and only asks when the user does an action
+        that actually needs locked API keys.
+        """
+        if not self._is_passphrase_mode():
+            return True
+        if not self._requires_cloud_credentials():
+            return True
+        if not self._is_passphrase_store_locked():
+            return True
+        return self._ensure_passphrase_unlocked(allow_create=allow_create)
+
+    def _ensure_translation_provider_credentials(self, provider_id: str) -> bool:
+        """Ensure credentials are unlocked for a specific translation provider."""
+        if not self._is_passphrase_mode():
+            return True
+        if not self._is_cloud_translation_provider(provider_id):
+            return True
+        if not self._is_passphrase_store_locked():
+            return True
+        return self._ensure_passphrase_unlocked(allow_create=False)
+
+    def _ensure_history_encryption_session(
+        self,
+        create_if_missing: bool = False,
+        prompt_unlock: bool = False,
+    ) -> bool:
+        """Ensure history encryption key is unlocked for this app session."""
+        if not self.config.history_encrypted:
+            return True
+        if is_history_encryption_unlocked():
+            return True
+
+        ok, message = ensure_history_encryption_unlocked(create_if_missing=create_if_missing)
+        if ok:
+            return True
+
+        if (
+            prompt_unlock
+            and self._is_passphrase_mode()
+            and self._is_passphrase_store_locked()
+            and self._ensure_passphrase_unlocked(allow_create=False)
+        ):
+            ok, message = ensure_history_encryption_unlocked(create_if_missing=create_if_missing)
+            if ok:
+                return True
+
+        if prompt_unlock:
+            if not self._is_passphrase_mode():
+                message = (
+                    "History encryption uses passphrase-based unlock.\n\n"
+                    "Switch API Key Storage to 'Passphrase (Encrypted Local)', "
+                    "then unlock once in this session."
+                )
+            elif not message:
+                message = (
+                    "Unlock your passphrase in Privacy & Security, then try again."
+                )
+            rumps.alert(
+                title="History Encryption Locked",
+                message=message,
+            )
+        return False
+
+    def _ensure_passphrase_unlocked(self, allow_create: bool = True) -> bool:
+        """Ensure passphrase credential store is unlocked for this app session."""
+        if not self._is_passphrase_mode():
+            return True
+        if is_passphrase_unlocked():
+            return True
+
+        if has_passphrase_store():
+            passphrase = self._applescript_input_dialog(
+                "Unlock API Key Store",
+                "Enter your API key storage passphrase.",
+                hidden=True,
+            )
+            if not passphrase:
+                return False
+
+            ok, message = unlock_passphrase_store(passphrase)
+            if not ok:
+                rumps.alert(title="Unlock Failed", message=message)
+                return False
+
+            self._ensure_history_encryption_session(create_if_missing=False, prompt_unlock=False)
+            self._notify("WhisperHUD", "API Keys Unlocked", "Credential store unlocked for this session.")
+            self._schedule_menu_rebuild()
+            return True
+
+        if not allow_create:
+            rumps.alert(
+                title="Passphrase Required",
+                message="Create a passphrase first to store API keys securely."
+            )
+            return False
+
+        first = self._applescript_input_dialog(
+            "Create API Key Passphrase",
+            (
+                "Create a passphrase to encrypt API keys locally.\n\n"
+                "You'll enter this passphrase when you restart the app."
+            ),
+            hidden=True,
+        )
+        if not first:
+            return False
+
+        if len(first) < 8:
+            rumps.alert(
+                title="Passphrase Too Short",
+                message="Use at least 8 characters."
+            )
+            return False
+
+        second = self._applescript_input_dialog(
+            "Confirm Passphrase",
+            "Re-enter your passphrase.",
+            hidden=True,
+        )
+        if first != second:
+            rumps.alert(title="Passphrase Mismatch", message="The passphrases do not match.")
+            return False
+
+        ok, message = unlock_passphrase_store(first)
+        if not ok:
+            rumps.alert(title="Passphrase Setup Failed", message=message)
+            return False
+
+        self._ensure_history_encryption_session(create_if_missing=False, prompt_unlock=False)
+        self._notify("WhisperHUD", "Passphrase Ready", "API key storage is encrypted and unlocked.")
+        self._schedule_menu_rebuild()
+        return True
+
+    def _collect_api_keys_for_mode(self, mode: str) -> Optional[dict[str, str]]:
+        """Collect API keys from a specific storage mode for migration."""
+        ok, keys, message = export_api_keys(mode=mode)
+        if ok:
+            return keys
+
+        if mode == "passphrase" and "locked" in message.lower():
+            if not self._ensure_passphrase_unlocked():
+                return None
+            ok, keys, message = export_api_keys(mode=mode)
+            if ok:
+                return keys
+
+        rumps.alert(
+            title="Storage Error",
+            message=message or "Could not access existing API keys."
+        )
+        return None
+
+    def _set_credential_storage_mode(self, mode: str) -> None:
+        """Switch API key credential storage mode and migrate keys."""
+        target_mode = mode if mode in {"passphrase", "keychain", "none"} else "passphrase"
+        current_mode = self._credential_mode()
+        if target_mode == current_mode:
+            return
+
+        if target_mode != "passphrase" and self.config.history_encrypted:
+            response = rumps.alert(
+                title="History Encryption Uses Passphrase",
+                message=(
+                    "History encryption is tied to passphrase unlock for this app session.\n\n"
+                    "If you switch API key storage away from passphrase, encrypted history "
+                    "will stay locked until you switch back and unlock.\n\n"
+                    "Switch API key storage anyway?"
+                ),
+                ok="Switch Anyway",
+                cancel="Cancel",
+            )
+            if response != 1:
+                return
+
+        existing_keys = self._collect_api_keys_for_mode(current_mode)
+        if existing_keys is None:
+            return
+
+        self.config.credential_storage_mode = target_mode
+        self.config.save()
+
+        if target_mode == "passphrase" and not self._ensure_passphrase_unlocked():
+            self.config.credential_storage_mode = current_mode
+            self.config.save()
+            return
+
+        ok, message = import_api_keys(existing_keys, mode=target_mode, replace=True)
+        if not ok:
+            self.config.credential_storage_mode = current_mode
+            self.config.save()
+            rumps.alert(
+                title="Storage Switch Failed",
+                message=message or "Could not migrate API keys to the selected mode."
+            )
+            return
+
+        if current_mode != target_mode:
+            clear_api_keys(mode=current_mode)
+
+        if target_mode != "passphrase":
+            lock_passphrase_store()
+            lock_history_encryption()
+
+        self._reset_cloud_clients()
+        self._schedule_menu_rebuild()
+        self._notify(
+            "WhisperHUD",
+            "Credential Storage Updated",
+            f"Now using: {get_storage_mode_label(target_mode)}"
+        )
+
+    def _unlock_api_key_store(self, _):
+        """Unlock passphrase-based API key storage."""
+        if not self._is_passphrase_mode():
+            rumps.alert(title="Not Needed", message="Current storage mode does not require unlocking.")
+            return
+        self._ensure_passphrase_unlocked()
+
+    def _lock_api_key_store(self, _):
+        """Lock passphrase-based API key storage."""
+        if not self._is_passphrase_mode():
+            return
+        lock_passphrase_store()
+        lock_history_encryption()
+        self._reset_cloud_clients()
+        self._schedule_menu_rebuild()
+        self._notify("WhisperHUD", "API Keys Locked", "Passphrase store locked for this session.")
+
+    def _change_api_key_passphrase(self, _):
+        """Change passphrase used for encrypted API key storage."""
+        if not self._is_passphrase_mode():
+            rumps.alert(
+                title="Unavailable",
+                message="Switch to Passphrase storage mode first."
+            )
+            return
+
+        if not has_passphrase_store():
+            if not self._ensure_passphrase_unlocked(allow_create=True):
+                return
+            return
+
+        current = self._applescript_input_dialog(
+            "Current Passphrase",
+            "Enter your current passphrase.",
+            hidden=True,
+        )
+        if not current:
+            return
+
+        new_one = self._applescript_input_dialog(
+            "New Passphrase",
+            "Enter a new passphrase (8+ characters).",
+            hidden=True,
+        )
+        if not new_one:
+            return
+        if len(new_one) < 8:
+            rumps.alert(title="Passphrase Too Short", message="Use at least 8 characters.")
+            return
+
+        new_two = self._applescript_input_dialog(
+            "Confirm New Passphrase",
+            "Re-enter your new passphrase.",
+            hidden=True,
+        )
+        if new_one != new_two:
+            rumps.alert(title="Passphrase Mismatch", message="The passphrases do not match.")
+            return
+
+        ok, message = change_passphrase(current, new_one)
+        if ok:
+            self._notify("WhisperHUD", "Passphrase Updated", "API key storage passphrase has been changed.")
+            self._schedule_menu_rebuild()
+        else:
+            rumps.alert(title="Passphrase Update Failed", message=message)
 
     def _build_menu(self):
         """Build the menu bar menu."""
@@ -198,16 +558,25 @@ class WhisperHUDApp(rumps.App):
         self.menu.clear()
 
         # Status header with clear status icons
-        configured = get_configured_providers()
+        configured = self._get_configured_cloud_providers()
         provider_name = self._get_provider_display_name(self.config.default_provider)
         current_provider = self.transcriber.get_provider(self.config.default_provider)
+        provider_is_cloud = self._is_cloud_transcription_provider(self.config.default_provider)
+        cloud_keys_locked = provider_is_cloud and self._is_passphrase_store_locked()
+        provider_ready = (
+            self.config.default_provider in configured
+            if provider_is_cloud
+            else bool(current_provider and current_provider.is_configured())
+        )
 
         if self._is_downloading:
             status = "⬇️ Downloading model..."
-        elif current_provider and current_provider.is_configured():
+        elif cloud_keys_locked:
+            status = f"🔒 {provider_name} key locked"
+        elif provider_ready:
             status = f"✓ Ready • {provider_name}"
-        elif self.config.default_provider in configured:
-            status = f"✓ Ready • {provider_name}"
+        elif provider_is_cloud:
+            status = f"⚠️ {provider_name} needs setup"
         elif configured:
             # Has some providers but current one needs setup
             status = f"⚠️ {provider_name} needs setup"
@@ -226,7 +595,7 @@ class WhisperHUDApp(rumps.App):
 
         # === Combined Provider/Model Selection ===
         provider_menu = rumps.MenuItem("Provider")
-        providers = self.transcriber.get_available_providers()
+        providers = self.transcriber.get_available_providers(configured_providers=configured)
         current_provider_id = self.config.default_provider
         current_provider_obj = self.transcriber.get_provider(current_provider_id)
         current_model_id = current_provider_obj.get_current_model() if current_provider_obj else ""
@@ -359,30 +728,61 @@ class WhisperHUDApp(rumps.App):
 
         # === API Keys ===
         keys_menu = rumps.MenuItem("API Keys")
+        credential_mode = self._credential_mode()
+        keys_menu.add(rumps.MenuItem(f"Storage: {get_storage_mode_label(credential_mode)}", callback=None))
+        if credential_mode == "passphrase":
+            if self._is_passphrase_store_locked():
+                keys_menu.add(rumps.MenuItem("Unlock API key store...", callback=self._unlock_api_key_store))
+            elif is_passphrase_unlocked():
+                keys_menu.add(rumps.MenuItem("Lock API key store", callback=self._lock_api_key_store))
+            else:
+                keys_menu.add(rumps.MenuItem("Create passphrase...", callback=self._unlock_api_key_store))
+        keys_menu.add(rumps.separator)
+
+        passphrase_locked = self._is_passphrase_store_locked()
+        defer_keychain_reads = credential_mode == "keychain" and not self._should_query_keychain()
+
+        if defer_keychain_reads:
+            openai_status = "Deferred"
+            gemini_status = "Deferred"
+            anthropic_status = "Deferred"
+        else:
+            openai_key = None if passphrase_locked else get_api_key("openai")
+            openai_status = "Locked" if passphrase_locked else (mask_api_key(openai_key) if openai_key else "Not set")
+
+            gemini_key = None if passphrase_locked else get_api_key("gemini")
+            gemini_status = "Locked" if passphrase_locked else (mask_api_key(gemini_key) if gemini_key else "Not set")
+
+            anthropic_key = None if passphrase_locked else get_api_key("anthropic")
+            anthropic_status = "Locked" if passphrase_locked else (
+                mask_api_key(anthropic_key) if anthropic_key else "Not set"
+            )
 
         # OpenAI
-        openai_key = get_api_key("openai")
-        openai_status = mask_api_key(openai_key) if openai_key else "Not set"
         keys_menu.add(rumps.MenuItem(
             f"OpenAI: {openai_status}",
             callback=self._set_openai_key
         ))
 
         # Gemini
-        gemini_key = get_api_key("gemini")
-        gemini_status = mask_api_key(gemini_key) if gemini_key else "Not set"
         keys_menu.add(rumps.MenuItem(
             f"Gemini: {gemini_status}",
             callback=self._set_gemini_key
         ))
 
         # Anthropic
-        anthropic_key = get_api_key("anthropic")
-        anthropic_status = mask_api_key(anthropic_key) if anthropic_key else "Not set"
         keys_menu.add(rumps.MenuItem(
             f"Anthropic: {anthropic_status}",
             callback=self._set_anthropic_key
         ))
+
+        if defer_keychain_reads:
+            keys_menu.add(rumps.separator)
+            keys_menu.add(rumps.MenuItem("Keychain lookup deferred until cloud mode", callback=None))
+
+        if credential_mode == "none":
+            keys_menu.add(rumps.separator)
+            keys_menu.add(rumps.MenuItem("Session-only mode: keys are not saved to disk", callback=None))
 
         self.menu.add(keys_menu)
 
@@ -485,6 +885,35 @@ class WhisperHUDApp(rumps.App):
                 "   No transcriptions saved to disk",
                 callback=None
             ))
+
+        privacy_menu.add(rumps.separator)
+
+        # API key credential storage mode
+        storage_menu = rumps.MenuItem("API Key Storage")
+        current_storage_mode = self._credential_mode()
+        mode_items = [
+            ("passphrase", "Passphrase (Encrypted Local)"),
+            ("keychain", "macOS Keychain"),
+            ("none", "Session Only (No Persistence)"),
+        ]
+        for mode_id, mode_label in mode_items:
+            prefix = "● " if current_storage_mode == mode_id else "   "
+            storage_menu.add(rumps.MenuItem(
+                f"{prefix}{mode_label}",
+                callback=lambda s, m=mode_id: self._set_credential_storage_mode(m)
+            ))
+
+        if current_storage_mode == "passphrase":
+            storage_menu.add(rumps.separator)
+            if self._is_passphrase_store_locked():
+                storage_menu.add(rumps.MenuItem("Unlock...", callback=self._unlock_api_key_store))
+            elif is_passphrase_unlocked():
+                storage_menu.add(rumps.MenuItem("Lock now", callback=self._lock_api_key_store))
+                storage_menu.add(rumps.MenuItem("Change passphrase...", callback=self._change_api_key_passphrase))
+            else:
+                storage_menu.add(rumps.MenuItem("Create passphrase...", callback=self._unlock_api_key_store))
+
+        privacy_menu.add(storage_menu)
 
         privacy_menu.add(rumps.separator)
 
@@ -800,126 +1229,91 @@ class WhisperHUDApp(rumps.App):
 
         translation_menu.add(rumps.separator)
 
-        # Combined Provider/Model submenu - hovering shows models as submenu
-        trans_provider_menu = rumps.MenuItem("Provider")
-        trans_providers = self.translator.get_available_providers(
-            check_availability=False,
-            availability_override=self._translation_availability
-        )
-        provider_ids = [tp["id"] for tp in trans_providers]
         current_trans_provider = self.translator.get_current_provider()
         current_trans_model = self.translator.get_current_model()
+        current_trans_provider_name = self._get_provider_display_name(current_trans_provider)
 
-        # Refresh translation availability in background to avoid UI blocking
-        if not self._translation_availability_inflight:
-            now = time.time()
-            if now - self._translation_availability_last_checked > 10.0:
-                self._translation_availability_inflight = True
-                self._translation_availability_last_checked = now
+        if not self.config.translation_enabled:
+            translation_menu.add(rumps.MenuItem("Translation is currently off", callback=None))
+            translation_menu.add(rumps.MenuItem(
+                f"Current selection: {current_trans_provider_name} ({current_trans_model})",
+                callback=None,
+            ))
+            translation_menu.add(rumps.MenuItem(
+                "Enable translation to choose provider, model, and languages",
+                callback=None,
+            ))
+        else:
+            # Combined Provider/Model submenu - hovering shows models as submenu
+            trans_provider_menu = rumps.MenuItem("Provider & model")
+            trans_provider_menu.add(rumps.MenuItem("Legend: ✓ ready  ○ needs setup  … checking", callback=None))
+            trans_provider_menu.add(rumps.separator)
+            trans_providers = self.translator.get_available_providers(
+                check_availability=False,
+                availability_override=self._translation_availability
+            )
+            provider_ids = [tp["id"] for tp in trans_providers]
 
-                def _check_translation_availability():
-                    results = {}
-                    for pid in provider_ids:
-                        provider = self.translator.get_provider(pid)
+            # Refresh translation availability in background to avoid UI blocking
+            if not self._translation_availability_inflight:
+                now = time.time()
+                if now - self._translation_availability_last_checked > 10.0:
+                    self._translation_availability_inflight = True
+                    self._translation_availability_last_checked = now
+
+                    should_check_cloud_translation = (
+                        self.config.translation_enabled
+                        and self._is_cloud_translation_provider(current_trans_provider)
+                    )
+
+                    def _check_translation_availability():
+                        results = {}
+                        for pid in provider_ids:
+                            if (
+                                self._is_cloud_translation_provider(pid)
+                                and not should_check_cloud_translation
+                            ):
+                                continue
+                            provider = self.translator.get_provider(pid)
+                            try:
+                                results[pid] = provider.is_available() if provider else False
+                            except Exception:
+                                results[pid] = False
+
+                        def _apply():
+                            self._translation_availability.update(results)
+                            self._translation_availability_inflight = False
+                            # Don't rebuild menu here - it causes greying while menu is open
+                            # Menu will refresh with new availability next time it's opened
+
                         try:
-                            results[pid] = provider.is_available() if provider else False
+                            from PyObjCTools import AppHelper
+                            AppHelper.callAfter(_apply)
                         except Exception:
-                            results[pid] = False
+                            _apply()
 
-                    def _apply():
-                        self._translation_availability.update(results)
-                        self._translation_availability_inflight = False
-                        # Don't rebuild menu here - it causes greying while menu is open
-                        # Menu will refresh with new availability next time it's opened
+                    threading.Thread(target=_check_translation_availability, daemon=True).start()
 
-                    try:
-                        from PyObjCTools import AppHelper
-                        AppHelper.callAfter(_apply)
-                    except Exception:
-                        _apply()
+            # Local translation providers with model submenus
+            trans_provider_menu.add(rumps.MenuItem("── Local ──", callback=None))
+            for tp in trans_providers:
+                if tp["category"] != "local":
+                    continue
+                is_provider_selected = current_trans_provider == tp["id"]
+                is_available = tp["available"]
+                provider_prefix = "● " if is_provider_selected else "   "
+                if is_available is None:
+                    status = "…"
+                else:
+                    status = "✓" if is_available else "○"
 
-                threading.Thread(target=_check_translation_availability, daemon=True).start()
+                # Create provider submenu with its models
+                provider_submenu = rumps.MenuItem(f"{provider_prefix}{tp['name']} {status}")
 
-        # Local translation providers with model submenus
-        trans_provider_menu.add(rumps.MenuItem("── Local ──", callback=None))
-        for tp in trans_providers:
-            if tp["category"] != "local":
-                continue
-            is_provider_selected = current_trans_provider == tp["id"]
-            is_available = tp["available"]
-            provider_prefix = "● " if is_provider_selected else "   "
-            if is_available is None:
-                status = "…"
-            else:
-                status = "✓" if is_available else "○"
-
-            # Create provider submenu with its models
-            provider_submenu = rumps.MenuItem(f"{provider_prefix}{tp['name']} {status}")
-
-            # Add models as submenu items
-            provider_models = tp.get("models", [])
-            if provider_models:
-                for model_info in provider_models:
-                    is_model_selected = is_provider_selected and current_trans_model == model_info["id"]
-                    model_prefix = "● " if is_model_selected else "   "
-                    suffix = " ★" if model_info.get("recommended") else ""
-                    provider_submenu.add(rumps.MenuItem(
-                        f"{model_prefix}{model_info['name']}{suffix}",
-                        callback=lambda sender, pid=tp["id"], mid=model_info["id"]: self._set_translation_provider_and_model(pid, mid)
-                    ))
-            else:
-                # Provider with no model selection (e.g., Apple)
-                provider_submenu.add(rumps.MenuItem(
-                    "● Use this provider" if is_provider_selected else "   Use this provider",
-                    callback=lambda sender, pid=tp["id"]: self._set_translation_provider(pid)
-                ))
-
-            trans_provider_menu.add(provider_submenu)
-
-        trans_provider_menu.add(rumps.separator)
-
-        # Cloud translation providers with model submenus
-        trans_provider_menu.add(rumps.MenuItem("── Cloud ──", callback=None))
-        for tp in trans_providers:
-            if tp["category"] != "cloud":
-                continue
-            is_provider_selected = current_trans_provider == tp["id"]
-            is_available = tp["available"]
-            provider_prefix = "● " if is_provider_selected else "   "
-            if is_available is None:
-                status = "…"
-            else:
-                status = "✓" if is_available else "○"
-
-            # Create provider submenu with its models
-            provider_submenu = rumps.MenuItem(f"{provider_prefix}{tp['name']} {status}")
-
-            # Add models as submenu items, grouped by category
-            provider_models = tp.get("models", [])
-            if provider_models:
-                # Group models by category
-                categories = {"speed": [], "balanced": [], "quality": []}
-                for model_info in provider_models:
-                    cat = model_info.get("category", "balanced")
-                    if cat in categories:
-                        categories[cat].append(model_info)
-                    else:
-                        categories["balanced"].append(model_info)
-
-                category_labels = {
-                    "speed": "── Fast ──",
-                    "balanced": "── Balanced ──",
-                    "quality": "── Quality ──"
-                }
-
-                for cat_id in ["speed", "balanced", "quality"]:
-                    cat_models = categories[cat_id]
-                    if not cat_models:
-                        continue
-
-                    provider_submenu.add(rumps.MenuItem(category_labels[cat_id], callback=None))
-
-                    for model_info in cat_models:
+                # Add models as submenu items
+                provider_models = tp.get("models", [])
+                if provider_models:
+                    for model_info in provider_models:
                         is_model_selected = is_provider_selected and current_trans_model == model_info["id"]
                         model_prefix = "● " if is_model_selected else "   "
                         suffix = " ★" if model_info.get("recommended") else ""
@@ -927,141 +1321,201 @@ class WhisperHUDApp(rumps.App):
                             f"{model_prefix}{model_info['name']}{suffix}",
                             callback=lambda sender, pid=tp["id"], mid=model_info["id"]: self._set_translation_provider_and_model(pid, mid)
                         ))
-            else:
-                provider_submenu.add(rumps.MenuItem(
-                    "● Use this provider" if is_provider_selected else "   Use this provider",
-                    callback=lambda sender, pid=tp["id"]: self._set_translation_provider(pid)
-                ))
+                else:
+                    # Provider with no model selection (e.g., Apple)
+                    provider_submenu.add(rumps.MenuItem(
+                        "● Use this provider" if is_provider_selected else "   Use this provider",
+                        callback=lambda sender, pid=tp["id"]: self._set_translation_provider(pid)
+                    ))
 
-            trans_provider_menu.add(provider_submenu)
+                trans_provider_menu.add(provider_submenu)
 
-        translation_menu.add(trans_provider_menu)
+            trans_provider_menu.add(rumps.separator)
 
-        # Target language submenu (grouped by region)
-        lang_menu = rumps.MenuItem("Target language")
-        languages = self.translator.get_supported_languages()
+            # Cloud translation providers with model submenus
+            trans_provider_menu.add(rumps.MenuItem("── Cloud ──", callback=None))
+            for tp in trans_providers:
+                if tp["category"] != "cloud":
+                    continue
+                is_provider_selected = current_trans_provider == tp["id"]
+                is_available = tp["available"]
+                provider_prefix = "● " if is_provider_selected else "   "
+                if is_available is None:
+                    status = "…"
+                else:
+                    status = "✓" if is_available else "○"
 
-        # Group languages for easier navigation
-        common_langs = ["en", "zh", "zh-TW", "es", "fr", "de", "it", "pt", "ja", "ko", "ar", "ru"]
-        other_langs = sorted(
-            [k for k in languages.keys() if k not in common_langs],
-            key=lambda x: languages[x]
-        )
+                # Create provider submenu with its models
+                provider_submenu = rumps.MenuItem(f"{provider_prefix}{tp['name']} {status}")
 
-        # Recent languages first (if any)
-        recent_targets = [c for c in self.config.recent_target_languages if c in languages]
-        if recent_targets:
-            lang_menu.add(rumps.MenuItem("── Recent ──", callback=None))
-            for code in recent_targets:
-                is_selected = self.config.target_language == code
-                prefix = "● " if is_selected else "   "
-                lang_menu.add(rumps.MenuItem(
-                    f"{prefix}{languages[code]} ({code})",
-                    callback=lambda sender, c=code: self._set_target_language(c)
-                ))
+                # Add models as submenu items, grouped by category
+                provider_models = tp.get("models", [])
+                if provider_models:
+                    # Group models by category
+                    categories = {"speed": [], "balanced": [], "quality": []}
+                    for model_info in provider_models:
+                        cat = model_info.get("category", "balanced")
+                        if cat in categories:
+                            categories[cat].append(model_info)
+                        else:
+                            categories["balanced"].append(model_info)
+
+                    category_labels = {
+                        "speed": "── Fast ──",
+                        "balanced": "── Balanced ──",
+                        "quality": "── Quality ──"
+                    }
+
+                    for cat_id in ["speed", "balanced", "quality"]:
+                        cat_models = categories[cat_id]
+                        if not cat_models:
+                            continue
+
+                        provider_submenu.add(rumps.MenuItem(category_labels[cat_id], callback=None))
+
+                        for model_info in cat_models:
+                            is_model_selected = is_provider_selected and current_trans_model == model_info["id"]
+                            model_prefix = "● " if is_model_selected else "   "
+                            suffix = " ★" if model_info.get("recommended") else ""
+                            provider_submenu.add(rumps.MenuItem(
+                                f"{model_prefix}{model_info['name']}{suffix}",
+                                callback=lambda sender, pid=tp["id"], mid=model_info["id"]: self._set_translation_provider_and_model(pid, mid)
+                            ))
+                else:
+                    provider_submenu.add(rumps.MenuItem(
+                        "● Use this provider" if is_provider_selected else "   Use this provider",
+                        callback=lambda sender, pid=tp["id"]: self._set_translation_provider(pid)
+                    ))
+
+                trans_provider_menu.add(provider_submenu)
+
+            translation_menu.add(trans_provider_menu)
+
+            # Target language submenu (grouped by region)
+            lang_menu = rumps.MenuItem("Target language")
+            languages = self.translator.get_supported_languages()
+
+            # Group languages for easier navigation
+            common_langs = ["en", "zh", "zh-TW", "es", "fr", "de", "it", "pt", "ja", "ko", "ar", "ru"]
+            other_langs = sorted(
+                [k for k in languages.keys() if k not in common_langs],
+                key=lambda x: languages[x]
+            )
+
+            # Recent languages first (if any)
+            recent_targets = [c for c in self.config.recent_target_languages if c in languages]
+            if recent_targets:
+                lang_menu.add(rumps.MenuItem("── Recent ──", callback=None))
+                for code in recent_targets:
+                    is_selected = self.config.target_language == code
+                    prefix = "● " if is_selected else "   "
+                    lang_menu.add(rumps.MenuItem(
+                        f"{prefix}{languages[code]} ({code})",
+                        callback=lambda sender, c=code: self._set_target_language(c)
+                    ))
+                lang_menu.add(rumps.separator)
+
+            # Common languages
+            lang_menu.add(rumps.MenuItem("── Common ──", callback=None))
+            for code in common_langs:
+                if code in languages and code not in recent_targets:
+                    is_selected = self.config.target_language == code
+                    prefix = "● " if is_selected else "   "
+                    lang_menu.add(rumps.MenuItem(
+                        f"{prefix}{languages[code]} ({code})",
+                        callback=lambda sender, c=code: self._set_target_language(c)
+                    ))
+
             lang_menu.add(rumps.separator)
+            lang_menu.add(rumps.MenuItem("── All Languages ──", callback=None))
+            for code in other_langs:
+                if code not in recent_targets:  # Skip if already in recent
+                    is_selected = self.config.target_language == code
+                    prefix = "● " if is_selected else "   "
+                    lang_menu.add(rumps.MenuItem(
+                        f"{prefix}{languages[code]} ({code})",
+                        callback=lambda sender, c=code: self._set_target_language(c)
+                    ))
 
-        # Common languages
-        lang_menu.add(rumps.MenuItem("── Common ──", callback=None))
-        for code in common_langs:
-            if code in languages and code not in recent_targets:
-                is_selected = self.config.target_language == code
-                prefix = "● " if is_selected else "   "
-                lang_menu.add(rumps.MenuItem(
-                    f"{prefix}{languages[code]} ({code})",
-                    callback=lambda sender, c=code: self._set_target_language(c)
-                ))
+            translation_menu.add(lang_menu)
 
-        lang_menu.add(rumps.separator)
-        lang_menu.add(rumps.MenuItem("── All Languages ──", callback=None))
-        for code in other_langs:
-            if code not in recent_targets:  # Skip if already in recent
-                is_selected = self.config.target_language == code
-                prefix = "● " if is_selected else "   "
-                lang_menu.add(rumps.MenuItem(
-                    f"{prefix}{languages[code]} ({code})",
-                    callback=lambda sender, c=code: self._set_target_language(c)
-                ))
+            # Source language submenu (includes auto-detect)
+            source_menu = rumps.MenuItem("Source language")
+            source_common = ["en", "zh", "zh-TW", "es", "fr", "de", "it", "pt", "ja", "ko", "ar", "ru"]
 
-        translation_menu.add(lang_menu)
-
-        # Source language submenu (includes auto-detect)
-        source_menu = rumps.MenuItem("Source language")
-        source_common = ["en", "zh", "zh-TW", "es", "fr", "de", "it", "pt", "ja", "ko", "ar", "ru"]
-
-        # Auto-detect option always at top
-        src_prefix = "● " if self.config.source_language == "auto" else "   "
-        source_menu.add(rumps.MenuItem(
-            f"{src_prefix}Auto (detect)",
-            callback=lambda sender: self._set_source_language("auto")
-        ))
-        source_menu.add(rumps.separator)
-
-        # Recent languages (if any)
-        recent_sources = [c for c in self.config.recent_source_languages if c in languages]
-        if recent_sources:
-            source_menu.add(rumps.MenuItem("── Recent ──", callback=None))
-            for code in recent_sources:
-                is_selected = self.config.source_language == code
-                prefix = "● " if is_selected else "   "
-                source_menu.add(rumps.MenuItem(
-                    f"{prefix}{languages[code]} ({code})",
-                    callback=lambda sender, c=code: self._set_source_language(c)
-                ))
+            # Auto-detect option always at top
+            src_prefix = "● " if self.config.source_language == "auto" else "   "
+            source_menu.add(rumps.MenuItem(
+                f"{src_prefix}Auto (detect)",
+                callback=lambda sender: self._set_source_language("auto")
+            ))
             source_menu.add(rumps.separator)
 
-        # Common languages
-        source_menu.add(rumps.MenuItem("── Common ──", callback=None))
-        for code in source_common:
-            if code in languages and code not in recent_sources:
-                is_selected = self.config.source_language == code
-                prefix = "● " if is_selected else "   "
-                source_menu.add(rumps.MenuItem(
-                    f"{prefix}{languages[code]} ({code})",
-                    callback=lambda sender, c=code: self._set_source_language(c)
-                ))
+            # Recent languages (if any)
+            recent_sources = [c for c in self.config.recent_source_languages if c in languages]
+            if recent_sources:
+                source_menu.add(rumps.MenuItem("── Recent ──", callback=None))
+                for code in recent_sources:
+                    is_selected = self.config.source_language == code
+                    prefix = "● " if is_selected else "   "
+                    source_menu.add(rumps.MenuItem(
+                        f"{prefix}{languages[code]} ({code})",
+                        callback=lambda sender, c=code: self._set_source_language(c)
+                    ))
+                source_menu.add(rumps.separator)
 
-        source_menu.add(rumps.separator)
-        source_menu.add(rumps.MenuItem("── All Languages ──", callback=None))
-        source_other_langs = sorted(
-            [k for k in languages.keys() if k not in source_common],
-            key=lambda x: languages[x]
-        )
-        for code in source_other_langs:
-            if code not in recent_sources:  # Skip if already in recent
-                is_selected = self.config.source_language == code
-                prefix = "● " if is_selected else "   "
-                source_menu.add(rumps.MenuItem(
-                    f"{prefix}{languages[code]} ({code})",
-                    callback=lambda sender, c=code: self._set_source_language(c)
-                ))
+            # Common languages
+            source_menu.add(rumps.MenuItem("── Common ──", callback=None))
+            for code in source_common:
+                if code in languages and code not in recent_sources:
+                    is_selected = self.config.source_language == code
+                    prefix = "● " if is_selected else "   "
+                    source_menu.add(rumps.MenuItem(
+                        f"{prefix}{languages[code]} ({code})",
+                        callback=lambda sender, c=code: self._set_source_language(c)
+                    ))
 
-        translation_menu.add(source_menu)
+            source_menu.add(rumps.separator)
+            source_menu.add(rumps.MenuItem("── All Languages ──", callback=None))
+            source_other_langs = sorted(
+                [k for k in languages.keys() if k not in source_common],
+                key=lambda x: languages[x]
+            )
+            for code in source_other_langs:
+                if code not in recent_sources:  # Skip if already in recent
+                    is_selected = self.config.source_language == code
+                    prefix = "● " if is_selected else "   "
+                    source_menu.add(rumps.MenuItem(
+                        f"{prefix}{languages[code]} ({code})",
+                        callback=lambda sender, c=code: self._set_source_language(c)
+                    ))
 
-        # Quick swap for English/Chinese
-        translation_menu.add(rumps.MenuItem(
-            "Swap EN ↔ ZH",
-            callback=self._swap_translation_languages
-        ))
+            translation_menu.add(source_menu)
 
-        translation_menu.add(rumps.separator)
-
-        # Ollama-specific options (only show if Ollama is selected)
-        # Note: We avoid calling get_status() here as it makes blocking network calls
-        if self.translator.get_current_provider() == "ollama":
-            # Show generic setup option - detailed status checked when clicked
+            # Quick swap for English/Chinese
             translation_menu.add(rumps.MenuItem(
-                "Ollama Setup...",
-                callback=self._show_ollama_setup
+                "Swap EN ↔ ZH",
+                callback=self._swap_translation_languages
             ))
 
             translation_menu.add(rumps.separator)
 
-            # Auto-start Ollama toggle (doesn't need network call)
-            translation_menu.add(rumps.MenuItem(
-                f"{'✓ ' if self.config.ollama_auto_start else '   '}Auto-start Ollama",
-                callback=self._toggle_ollama_auto_start
-            ))
+            # Ollama-specific options (only show if Ollama is selected)
+            # Note: We avoid calling get_status() here as it makes blocking network calls
+            if self.translator.get_current_provider() == "ollama":
+                # Show generic setup option - detailed status checked when clicked
+                translation_menu.add(rumps.MenuItem(
+                    "Ollama Setup...",
+                    callback=self._show_ollama_setup
+                ))
+
+                translation_menu.add(rumps.separator)
+
+                # Auto-start Ollama toggle (doesn't need network call)
+                translation_menu.add(rumps.MenuItem(
+                    f"{'✓ ' if self.config.ollama_auto_start else '   '}Auto-start Ollama",
+                    callback=self._toggle_ollama_auto_start
+                ))
 
         self.menu.add(translation_menu)
 
@@ -1208,7 +1662,7 @@ class WhisperHUDApp(rumps.App):
 
         # Delete API keys submenu
         api_keys_menu = rumps.MenuItem("Delete API Keys")
-        configured_providers = get_configured_providers()
+        configured_providers = configured
         if configured_providers:
             for provider in configured_providers:
                 provider_name = self._get_provider_display_name(provider)
@@ -1222,7 +1676,17 @@ class WhisperHUDApp(rumps.App):
                 callback=self._delete_all_api_keys
             ))
         else:
-            api_keys_menu.add(rumps.MenuItem("No API keys configured", callback=None))
+            for provider in ["openai", "gemini", "anthropic"]:
+                provider_name = self._get_provider_display_name(provider)
+                api_keys_menu.add(rumps.MenuItem(
+                    f"Delete {provider_name} Key",
+                    callback=lambda s, p=provider: self._delete_api_key(p)
+                ))
+            api_keys_menu.add(rumps.separator)
+            api_keys_menu.add(rumps.MenuItem(
+                "Delete All API Keys",
+                callback=self._delete_all_api_keys
+            ))
         data_menu.add(api_keys_menu)
 
         data_menu.add(rumps.separator)
@@ -1722,6 +2186,18 @@ class WhisperHUDApp(rumps.App):
 
     def _start_recording(self):
         """Called when hotkey is pressed."""
+        if not self._ensure_cloud_credentials_ready(allow_create=False):
+            self._notify(
+                "WhisperHUD",
+                "Cloud Keys Locked",
+                "Unlock passphrase storage to use cloud providers, or switch to Apple local.",
+            )
+            return
+
+        # Keep encrypted history usable after unlock for the whole session.
+        if self.config.history_encrypted:
+            self._ensure_history_encryption_session(create_if_missing=False, prompt_unlock=False)
+
         # Use dedicated recording lock to prevent race conditions
         # when rapidly toggling or clicking widget while hotkey is held
         with self._recording_lock:
@@ -1956,7 +2432,10 @@ class WhisperHUDApp(rumps.App):
                 self._set_title(self.ICON_ERROR)
                 error_msg = str(e).lower()
                 if "api key" in error_msg or "not configured" in error_msg:
-                    display_error = "API key required"
+                    if self._is_passphrase_store_locked():
+                        display_error = "API keys locked"
+                    else:
+                        display_error = "API key required"
                 else:
                     display_error = str(e)[:25]
                 if self.config.show_hud:
@@ -1964,11 +2443,18 @@ class WhisperHUDApp(rumps.App):
                 if self.config.streaming_enabled:
                     self.streaming_panel.hide()
                 # Show notification with action
-                self._notify(
-                    "WhisperHUD",
-                    "Configuration Required",
-                    "Click the menu bar icon to add your API key."
-                )
+                if self._is_passphrase_store_locked():
+                    self._notify(
+                        "WhisperHUD",
+                        "Unlock Required",
+                        "Unlock API key storage in Privacy & Security."
+                    )
+                else:
+                    self._notify(
+                        "WhisperHUD",
+                        "Configuration Required",
+                        "Click the menu bar icon to add your API key."
+                    )
 
             except Exception as e:
                 error_str = str(e).lower()
@@ -2080,6 +2566,9 @@ class WhisperHUDApp(rumps.App):
 
     def _set_openai_key(self, _):
         """Prompt for OpenAI API key using AppleScript for proper paste support."""
+        if self._is_passphrase_mode() and not self._ensure_passphrase_unlocked():
+            return
+
         current = get_api_key("openai") or ""
         key = self._applescript_input_dialog(
             "OpenAI API Key",
@@ -2105,7 +2594,13 @@ class WhisperHUDApp(rumps.App):
             def do_validate():
                 is_valid, error = validate_api_key("openai", key)
                 if is_valid:
-                    set_api_key("openai", key)
+                    if not set_api_key("openai", key):
+                        self._notify(
+                            "WhisperHUD",
+                            "Could Not Save Key",
+                            "Unlock API key storage first in Privacy & Security."
+                        )
+                        return
                     # Reset cached clients so new key is used immediately
                     self.transcriber.reset_provider("openai")
                     self.translator.reset_provider("openai")
@@ -2126,6 +2621,9 @@ class WhisperHUDApp(rumps.App):
 
     def _set_gemini_key(self, _):
         """Prompt for Gemini API key using AppleScript for proper paste support."""
+        if self._is_passphrase_mode() and not self._ensure_passphrase_unlocked():
+            return
+
         current = get_api_key("gemini") or ""
         key = self._applescript_input_dialog(
             "Gemini API Key",
@@ -2144,7 +2642,13 @@ class WhisperHUDApp(rumps.App):
             def do_validate():
                 is_valid, error = validate_api_key("gemini", key)
                 if is_valid:
-                    set_api_key("gemini", key)
+                    if not set_api_key("gemini", key):
+                        self._notify(
+                            "WhisperHUD",
+                            "Could Not Save Key",
+                            "Unlock API key storage first in Privacy & Security."
+                        )
+                        return
                     # Reset cached clients so new key is used immediately
                     self.transcriber.reset_provider("gemini")
                     self.translator.reset_provider("gemini")
@@ -2165,6 +2669,9 @@ class WhisperHUDApp(rumps.App):
 
     def _set_anthropic_key(self, _):
         """Prompt for Anthropic API key using AppleScript for proper paste support."""
+        if self._is_passphrase_mode() and not self._ensure_passphrase_unlocked():
+            return
+
         current = get_api_key("anthropic") or ""
         key = self._applescript_input_dialog(
             "Anthropic API Key",
@@ -2190,7 +2697,13 @@ class WhisperHUDApp(rumps.App):
             def do_validate():
                 is_valid, error = validate_api_key("anthropic", key)
                 if is_valid:
-                    set_api_key("anthropic", key)
+                    if not set_api_key("anthropic", key):
+                        self._notify(
+                            "WhisperHUD",
+                            "Could Not Save Key",
+                            "Unlock API key storage first in Privacy & Security."
+                        )
+                        return
                     # Reset cached client so new key is used immediately
                     self.translator.reset_provider("anthropic")
                     self._schedule_menu_rebuild()
@@ -2208,7 +2721,13 @@ class WhisperHUDApp(rumps.App):
 
             threading.Thread(target=do_validate, daemon=True).start()
 
-    def _applescript_input_dialog(self, title: str, message: str, default: str = "") -> Optional[str]:
+    def _applescript_input_dialog(
+        self,
+        title: str,
+        message: str,
+        default: str = "",
+        hidden: bool = False,
+    ) -> Optional[str]:
         """Show an AppleScript input dialog that supports copy-paste."""
         import subprocess
 
@@ -2216,11 +2735,12 @@ class WhisperHUDApp(rumps.App):
         message_escaped = message.replace('"', '\\"').replace('\n', '\\n')
         default_escaped = default.replace('"', '\\"')
         title_escaped = title.replace('"', '\\"')
+        hidden_clause = " with hidden answer" if hidden else ""
 
         script = f'''
         tell application "System Events"
             activate
-            set userInput to display dialog "{message_escaped}" default answer "{default_escaped}" with title "{title_escaped}" buttons {{"Cancel", "Save"}} default button "Save"
+            set userInput to display dialog "{message_escaped}" default answer "{default_escaped}" with title "{title_escaped}" buttons {{"Cancel", "Save"}} default button "Save"{hidden_clause}
             if button returned of userInput is "Save" then
                 return text returned of userInput
             else
@@ -2377,8 +2897,8 @@ class WhisperHUDApp(rumps.App):
                 title="Turn Off Encryption?",
                 message=(
                     "New transcriptions will be saved without encryption.\n\n"
-                    "Your existing encrypted history will still be readable "
-                    "(the key stays in your Mac's Keychain)."
+                    "Previously encrypted items stay encrypted on disk.\n"
+                    "They are readable again after passphrase unlock."
                 ),
                 ok="Turn Off",
                 cancel="Keep Encrypted"
@@ -2392,17 +2912,37 @@ class WhisperHUDApp(rumps.App):
                     "New transcriptions will be saved unencrypted."
                 )
         else:
+            if self._credential_mode() != "passphrase":
+                rumps.alert(
+                    title="Passphrase Mode Required",
+                    message=(
+                        "History encryption uses passphrase-based unlock.\n\n"
+                        "Set API Key Storage to 'Passphrase (Encrypted Local)', "
+                        "then enable history encryption."
+                    ),
+                )
+                return
+
+            if not self._ensure_passphrase_unlocked(allow_create=True):
+                return
+
             # Enabling encryption - should already be installed if we get here
             success = self.config.enable_history_encryption()
             if success:
+                self._ensure_history_encryption_session(create_if_missing=False, prompt_unlock=False)
                 self._notify(
                     "WhisperHUD",
                     "🔐 Encryption On",
-                    "Your transcription history is now encrypted."
+                    "Your transcription history is encrypted for this session."
                 )
             else:
-                # Shouldn't happen, but handle gracefully
-                self._setup_encryption(sender)
+                rumps.alert(
+                    title="Could Not Enable Encryption",
+                    message=(
+                        "Unlock passphrase storage in Privacy & Security and try again.\n\n"
+                        "History encryption does not use macOS Keychain."
+                    ),
+                )
                 return
 
         self._schedule_menu_rebuild()
@@ -2410,6 +2950,16 @@ class WhisperHUDApp(rumps.App):
     def _setup_encryption(self, sender):
         """Set up encryption - installs cryptography if needed."""
         from .encryption import is_cryptography_installed
+
+        if self._credential_mode() != "passphrase":
+            rumps.alert(
+                title="Passphrase Mode Required",
+                message=(
+                    "History encryption uses passphrase-based unlock.\n\n"
+                    "Set API Key Storage to 'Passphrase (Encrypted Local)' first."
+                ),
+            )
+            return
 
         if is_cryptography_installed():
             # Already installed, just enable
@@ -2423,8 +2973,8 @@ class WhisperHUDApp(rumps.App):
                 "Encryption protects your saved transcriptions so only you "
                 "can read them—even if someone accesses your files.\n\n"
                 "A small download (~2MB) is needed for the first-time setup.\n\n"
-                "Your encryption key will be stored securely in your "
-                "Mac's Keychain."
+                "Your history key is stored locally and wrapped with your "
+                "passphrase session (no Keychain dependency)."
             ),
             ok="Set Up Now",
             cancel="Not Now"
@@ -2719,8 +3269,15 @@ class WhisperHUDApp(rumps.App):
             import platform
 
             # Get provider info
-            configured = get_configured_providers()
-            provider_status = ", ".join(configured) if configured else "None configured"
+            storage_mode = self._credential_mode()
+            storage_status = get_storage_mode_label(storage_mode)
+            if self._is_passphrase_store_locked():
+                provider_status = "Locked (unlock required)"
+            elif storage_mode == "keychain" and not self._should_query_keychain():
+                provider_status = "Deferred (local mode)"
+            else:
+                configured = get_configured_providers()
+                provider_status = ", ".join(configured) if configured else "None configured"
 
             # Get translation info
             trans_provider = self.translator.get_current_provider()
@@ -2737,6 +3294,7 @@ class WhisperHUDApp(rumps.App):
                     f"── Configuration ──\n"
                     f"Transcription: {self.config.default_provider}\n"
                     f"Translation: {trans_provider} ({trans_model})\n"
+                    f"API Key Storage: {storage_status}\n"
                     f"API Keys: {provider_status}\n\n"
                     f"── Stats ──\n"
                     f"Total transcriptions: {self.config.total_transcriptions}\n"
@@ -3269,7 +3827,9 @@ class WhisperHUDApp(rumps.App):
 
     def _delete_api_key(self, provider: str):
         """Delete a specific API key."""
-        from .keychain import delete_api_key
+        if self._is_passphrase_mode() and not self._ensure_passphrase_unlocked():
+            return
+
         provider_name = self._get_provider_display_name(provider)
         response = rumps.alert(
             title=f"Delete {provider_name} API Key",
@@ -3281,9 +3841,14 @@ class WhisperHUDApp(rumps.App):
             cancel="Cancel"
         )
         if response == 1:
-            delete_api_key(provider)
-            # Reset the provider to clear cached client
-            self.transcriber.reset_provider(provider)
+            if not delete_api_key(provider):
+                rumps.alert(
+                    title="Delete Failed",
+                    message="Could not delete API key. Unlock storage first if needed."
+                )
+                return
+
+            self._reset_cloud_clients()
             self._schedule_menu_rebuild()
             self._notify(
                 "WhisperHUD",
@@ -3293,7 +3858,9 @@ class WhisperHUDApp(rumps.App):
 
     def _delete_all_api_keys(self, sender):
         """Delete all API keys."""
-        from .keychain import delete_api_key, get_configured_providers
+        if self._is_passphrase_mode() and not self._ensure_passphrase_unlocked():
+            return
+
         configured = get_configured_providers()
         if not configured:
             rumps.alert(
@@ -3316,7 +3883,7 @@ class WhisperHUDApp(rumps.App):
         if response == 1:
             for provider in configured:
                 delete_api_key(provider)
-                self.transcriber.reset_provider(provider)
+            self._reset_cloud_clients()
             self._schedule_menu_rebuild()
             self._notify(
                 "WhisperHUD",
@@ -3326,7 +3893,6 @@ class WhisperHUDApp(rumps.App):
 
     def _reset_all_settings(self, sender):
         """Reset all settings to defaults."""
-        from .keychain import get_configured_providers
         from .image_processor import clear_cache
         from .config import Config
 
@@ -3346,9 +3912,6 @@ class WhisperHUDApp(rumps.App):
             cancel="Cancel"
         )
         if response == 1:
-            # Note: API keys are preserved (not deleted)
-            _ = get_configured_providers()  # Verify keychain access works
-
             # Reset to defaults
             fresh_config = Config()
 
@@ -3377,6 +3940,9 @@ class WhisperHUDApp(rumps.App):
         """Toggle translation on/off."""
         enabling = not self.config.translation_enabled
         logger.debug(f"_toggle_translation called, enabling={enabling}")
+
+        if enabling and not self._ensure_translation_provider_credentials(self.config.translation_provider):
+            return
 
         # Optimistically toggle on/off to keep the menu responsive
         self.config.translation_enabled = enabling
@@ -3427,11 +3993,15 @@ class WhisperHUDApp(rumps.App):
 
     def _set_translation_provider(self, provider_id: str):
         """Set the translation provider."""
+        if not self._ensure_translation_provider_credentials(provider_id):
+            return
         self.translator.set_provider(provider_id)
         self._schedule_menu_rebuild()
 
     def _set_translation_provider_and_model(self, provider_id: str, model_id: str):
         """Set both translation provider and model in one action."""
+        if not self._ensure_translation_provider_credentials(provider_id):
+            return
         self.translator.set_provider(provider_id)
         self.translator.set_model(model_id)
         self._schedule_menu_rebuild()
@@ -3445,7 +4015,10 @@ class WhisperHUDApp(rumps.App):
     def _set_source_language(self, lang_code: str):
         """Set the source translation language."""
         self.config.source_language = lang_code
-        self.config.add_recent_source_language(lang_code)
+        if lang_code == "auto":
+            self.config.save()
+        else:
+            self.config.add_recent_source_language(lang_code)
         self._schedule_menu_rebuild()
 
     def _swap_translation_languages(self, sender=None):
@@ -3881,7 +4454,7 @@ class WhisperHUDApp(rumps.App):
         self._notify(
             "WhisperHUD",
             "Welcome!",
-            "Click the menu bar icon to add your API key and start transcribing."
+            "Click the menu bar icon to add an API key, or switch to Apple (local) to start without one."
         )
 
     def _cleanup_orphaned_temp_files(self):
@@ -3896,6 +4469,8 @@ class WhisperHUDApp(rumps.App):
 
     def _quit(self, _):
         """Clean shutdown."""
+        lock_passphrase_store()
+        lock_history_encryption()
         self.hotkey_listener.stop()
         self.hud.hide()
         self.streaming_panel.hide()

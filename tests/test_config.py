@@ -20,6 +20,8 @@ class TestConfig:
             assert config.auto_paste is True
             assert config.show_hud is True
             assert config.translation_enabled is False
+            assert config.source_language == "auto"
+            assert config.target_language == "en"
             assert config.setup_completed is False
 
     def test_config_save_load(self):
@@ -70,3 +72,37 @@ class TestConfig:
             assert config.get_provider_model("gemini") == "gemini-3-flash-preview"
             assert config.get_provider_model("apple") == "en-US"
             assert config.get_provider_model("unknown") == ""
+
+    def test_load_preserves_existing_keychain_users_without_mode(self):
+        """Existing config without storage mode should stay on keychain."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            config_file = config_dir / "config.json"
+            config_file.write_text(
+                '{"default_provider":"apple","translation_enabled":false}',
+                encoding="utf-8",
+            )
+
+            with patch("whisper_hud.config.CONFIG_DIR", config_dir):
+                with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                    from whisper_hud.config import Config
+                    loaded = Config.load()
+
+            assert loaded.credential_storage_mode == "keychain"
+
+    def test_load_keeps_explicit_storage_mode(self):
+        """Explicit storage mode should not be overwritten during migration."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            config_file = config_dir / "config.json"
+            config_file.write_text(
+                '{"credential_storage_mode":"passphrase","source_language":"auto"}',
+                encoding="utf-8",
+            )
+
+            with patch("whisper_hud.config.CONFIG_DIR", config_dir):
+                with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                    from whisper_hud.config import Config
+                    loaded = Config.load()
+
+            assert loaded.credential_storage_mode == "passphrase"

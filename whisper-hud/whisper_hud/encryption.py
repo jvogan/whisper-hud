@@ -1,84 +1,283 @@
 """
 Encryption utilities for sensitive data.
 
-Provides AES-256 encryption via Fernet for securing transcription history,
-with keys stored securely in macOS Keychain.
+History encryption keys are passphrase-backed and unlocked for the current app
+session, matching the app's passphrase storage lifecycle and avoiding Keychain
+prompts for history encryption.
 
 Also includes secure file deletion for temp audio files.
 """
 
-import os
-from typing import Optional
+from __future__ import annotations
 
-import keyring
+import base64
+import json
+import os
+from pathlib import Path
+from typing import Optional
 
 from .logging_config import get_logger
 
 logger = get_logger("encryption")
 
-SERVICE_NAME = "whisper-hud"
-ENCRYPTION_KEY_NAME = f"{SERVICE_NAME}.encryption_key"
+HISTORY_KEY_FILE = "history_encryption.key"
+_session_history_key: Optional[bytes] = None
+
+
+def _history_key_file() -> Path:
+    from .config import CONFIG_DIR
+
+    return CONFIG_DIR / HISTORY_KEY_FILE
+
+
+def _ensure_history_key_permissions(path: Path) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(path.parent, 0o700)
+    except Exception:
+        pass
+    if path.exists():
+        try:
+            os.chmod(path, 0o600)
+        except Exception:
+            pass
+
+
+def _read_history_key_payload() -> Optional[dict]:
+    path = _history_key_file()
+    if not path.exists():
+        return None
+    _ensure_history_key_permissions(path)
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        return None
+    return None
+
+
+def _write_history_key_payload(payload: dict) -> bool:
+    path = _history_key_file()
+    _ensure_history_key_permissions(path)
+    try:
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        _ensure_history_key_permissions(path)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to write history encryption key payload: {e}")
+        return False
+
+
+def _derive_wrap_key(passphrase: str, salt: bytes) -> bytes:
+    from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+
+    kdf = Scrypt(
+        salt=salt,
+        length=32,
+        n=2**14,
+        r=8,
+        p=1,
+    )
+    return base64.urlsafe_b64encode(kdf.derive(passphrase.encode("utf-8")))
+
+
+def _unwrap_history_key(passphrase: str, salt: bytes, wrapped_key: str) -> bytes:
+    from cryptography.fernet import Fernet
+
+    wrap_fernet = Fernet(_derive_wrap_key(passphrase, salt))
+    raw = wrap_fernet.decrypt(wrapped_key.encode("utf-8"))
+    # Validate shape by instantiating Fernet with it.
+    Fernet(raw)
+    return raw
+
+
+def _wrap_history_key(passphrase: str, salt: bytes, history_key: bytes) -> str:
+    from cryptography.fernet import Fernet
+
+    wrap_fernet = Fernet(_derive_wrap_key(passphrase, salt))
+    return wrap_fernet.encrypt(history_key).decode("utf-8")
+
+
+def _get_unlocked_passphrase() -> Optional[str]:
+    try:
+        from .keychain import get_unlocked_passphrase
+
+        return get_unlocked_passphrase()
+    except Exception:
+        return None
+
+
+def is_history_encryption_unlocked() -> bool:
+    """Return True when the history encryption key is unlocked for this session."""
+    return _session_history_key is not None
+
+
+def lock_history_encryption() -> None:
+    """Clear in-memory history encryption material for this app session."""
+    global _session_history_key
+    _session_history_key = None
+
+
+def unlock_history_encryption(passphrase: str, create_if_missing: bool = True) -> tuple[bool, str]:
+    """
+    Unlock history encryption using the app passphrase.
+
+    Args:
+        passphrase: Current unlocked app passphrase.
+        create_if_missing: Create history key metadata when missing.
+    """
+    global _session_history_key
+
+    if not passphrase:
+        return False, "Passphrase is required to unlock history encryption"
+    if not is_cryptography_installed():
+        return False, "cryptography package is required for history encryption"
+
+    payload = _read_history_key_payload()
+
+    # First-time setup: generate a random data key and wrap it with passphrase.
+    if payload is None:
+        if not create_if_missing:
+            return False, "History encryption key is not set up yet"
+        try:
+            from cryptography.fernet import Fernet
+
+            salt = os.urandom(16)
+            history_key = Fernet.generate_key()
+            wrapped_key = _wrap_history_key(passphrase, salt, history_key)
+            payload = {
+                "version": 1,
+                "kdf": "scrypt",
+                "salt": base64.b64encode(salt).decode("utf-8"),
+                "wrapped_key": wrapped_key,
+            }
+            if not _write_history_key_payload(payload):
+                return False, "Failed to create history encryption key"
+            _session_history_key = history_key
+            return True, "History encryption key created and unlocked"
+        except Exception as e:
+            _session_history_key = None
+            return False, f"Failed to initialize history encryption: {str(e)[:120]}"
+
+    try:
+        salt_b64 = payload.get("salt")
+        wrapped_key = payload.get("wrapped_key")
+        if not isinstance(salt_b64, str) or not isinstance(wrapped_key, str):
+            return False, "History encryption key payload is invalid"
+
+        salt = base64.b64decode(salt_b64.encode("utf-8"))
+        _session_history_key = _unwrap_history_key(passphrase, salt, wrapped_key)
+        return True, "History encryption unlocked"
+    except Exception:
+        _session_history_key = None
+        return False, "Could not unlock history encryption key with current passphrase"
+
+
+def ensure_history_encryption_unlocked(create_if_missing: bool = False) -> tuple[bool, str]:
+    """
+    Unlock history encryption using the currently unlocked app passphrase.
+
+    This avoids additional prompts and keeps history encryption aligned with
+    passphrase-session lifecycle.
+    """
+    if is_history_encryption_unlocked():
+        return True, "History encryption already unlocked"
+
+    passphrase = _get_unlocked_passphrase()
+    if not passphrase:
+        return False, "Unlock API key passphrase first in Privacy & Security"
+
+    return unlock_history_encryption(passphrase, create_if_missing=create_if_missing)
 
 
 def get_or_create_key() -> bytes:
     """
-    Get encryption key from Keychain, or create one if it doesn't exist.
+    Get history encryption key for this app session, creating it if needed.
 
-    Returns:
-        bytes: The encryption key
+    Requires an unlocked passphrase session.
     """
-    key = keyring.get_password(SERVICE_NAME, ENCRYPTION_KEY_NAME)
-    if key is None:
-        # Import here to avoid loading cryptography unless needed
-        from cryptography.fernet import Fernet
-
-        key = Fernet.generate_key().decode()
-        keyring.set_password(SERVICE_NAME, ENCRYPTION_KEY_NAME, key)
-        logger.info("Created new encryption key in Keychain")
-    return key.encode()
+    ok, message = ensure_history_encryption_unlocked(create_if_missing=True)
+    if not ok or _session_history_key is None:
+        raise RuntimeError(message or "History encryption key is locked")
+    return _session_history_key
 
 
 def delete_key() -> bool:
     """
-    Delete encryption key from Keychain.
+    Delete history encryption key metadata and lock in-memory key.
 
-    Returns:
-        True if successful or key didn't exist
+    Existing encrypted history entries will no longer be decryptable afterward.
     """
-    try:
-        keyring.delete_password(SERVICE_NAME, ENCRYPTION_KEY_NAME)
-        logger.info("Deleted encryption key from Keychain")
+    lock_history_encryption()
+    path = _history_key_file()
+    if not path.exists():
         return True
-    except keyring.errors.PasswordDeleteError:
-        return True  # Key didn't exist, that's fine
+    try:
+        path.unlink()
+        return True
     except Exception as e:
-        logger.error(f"Failed to delete encryption key: {e}")
+        logger.error(f"Failed to delete history encryption key metadata: {e}")
         return False
 
 
 def has_encryption_key() -> bool:
-    """
-    Check if an encryption key exists in Keychain.
-
-    Returns:
-        True if key exists
-    """
-    try:
-        key = keyring.get_password(SERVICE_NAME, ENCRYPTION_KEY_NAME)
-        return key is not None
-    except Exception:
+    """Return True when a history encryption key payload exists on disk."""
+    payload = _read_history_key_payload()
+    if not payload:
         return False
+    return isinstance(payload.get("salt"), str) and isinstance(payload.get("wrapped_key"), str)
+
+
+def rewrap_history_key(current_passphrase: str, new_passphrase: str) -> tuple[bool, str]:
+    """
+    Re-encrypt the history data key under a new passphrase.
+
+    Called during passphrase change so encrypted history remains readable.
+    """
+    if not has_encryption_key():
+        return True, "No history encryption key to update"
+    if not current_passphrase or not new_passphrase:
+        return False, "Current and new passphrase are required"
+    if not is_cryptography_installed():
+        return False, "cryptography package is required for history encryption"
+
+    payload = _read_history_key_payload()
+    if not payload:
+        return False, "History encryption key payload is missing"
+
+    try:
+        salt_b64 = payload.get("salt")
+        wrapped_key = payload.get("wrapped_key")
+        if not isinstance(salt_b64, str) or not isinstance(wrapped_key, str):
+            return False, "History encryption key payload is invalid"
+
+        current_salt = base64.b64decode(salt_b64.encode("utf-8"))
+        history_key = _unwrap_history_key(current_passphrase, current_salt, wrapped_key)
+
+        new_salt = os.urandom(16)
+        new_wrapped_key = _wrap_history_key(new_passphrase, new_salt, history_key)
+        new_payload = {
+            "version": 1,
+            "kdf": "scrypt",
+            "salt": base64.b64encode(new_salt).decode("utf-8"),
+            "wrapped_key": new_wrapped_key,
+        }
+        if not _write_history_key_payload(new_payload):
+            return False, "Failed to persist updated history encryption key"
+        return True, "History encryption passphrase updated"
+    except Exception:
+        return False, "Could not re-encrypt history key with the new passphrase"
 
 
 def encrypt_text(text: str) -> Optional[str]:
     """
     Encrypt text using Fernet (AES-256).
 
-    Args:
-        text: Plain text to encrypt
-
     Returns:
-        Base64-encoded encrypted string, or None if encryption fails
+        Base64-encoded encrypted string, or None if encryption fails.
     """
     if not text:
         return None
@@ -86,10 +285,13 @@ def encrypt_text(text: str) -> Optional[str]:
     try:
         from cryptography.fernet import Fernet
 
-        key = get_or_create_key()
-        f = Fernet(key)
-        encrypted = f.encrypt(text.encode())
-        return encrypted.decode()
+        ok, _ = ensure_history_encryption_unlocked(create_if_missing=True)
+        if not ok or _session_history_key is None:
+            logger.warning("History encryption key is locked; cannot encrypt history")
+            return None
+        f = Fernet(_session_history_key)
+        encrypted = f.encrypt(text.encode("utf-8"))
+        return encrypted.decode("utf-8")
     except ImportError:
         logger.warning("cryptography not installed, cannot encrypt")
         return None
@@ -102,11 +304,8 @@ def decrypt_text(encrypted: str) -> Optional[str]:
     """
     Decrypt base64-encoded encrypted string back to plain text.
 
-    Args:
-        encrypted: Base64-encoded encrypted string
-
     Returns:
-        Decrypted plain text, or None if decryption fails
+        Decrypted plain text, or None if decryption fails.
     """
     if not encrypted:
         return None
@@ -114,15 +313,17 @@ def decrypt_text(encrypted: str) -> Optional[str]:
     try:
         from cryptography.fernet import Fernet
 
-        key = get_or_create_key()
-        f = Fernet(key)
-        decrypted = f.decrypt(encrypted.encode())
-        return decrypted.decode()
+        ok, _ = ensure_history_encryption_unlocked(create_if_missing=False)
+        if not ok or _session_history_key is None:
+            return None
+        f = Fernet(_session_history_key)
+        decrypted = f.decrypt(encrypted.encode("utf-8"))
+        return decrypted.decode("utf-8")
     except ImportError:
         logger.warning("cryptography not installed, cannot decrypt")
         return None
     except Exception as e:
-        logger.error(f"Decryption failed: {e}")
+        logger.debug(f"Decryption failed: {e}")
         return None
 
 

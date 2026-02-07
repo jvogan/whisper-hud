@@ -30,6 +30,12 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 DIST_DIR="$PROJECT_ROOT/dist"
 BUILD_DIR="$PROJECT_ROOT/build"
 APP_NAME="WhisperHUD"
+PROJECT_VENV_PYTHON="$PROJECT_ROOT/whisper-hud/venv/bin/python"
+
+is_python_311_plus() {
+    local candidate="$1"
+    "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1
+}
 
 # Parse arguments
 CLEAN=false
@@ -63,25 +69,81 @@ if [ "$CLEAN" = true ]; then
     echo -e "${YELLOW}Cleaning previous build artifacts...${NC}"
     rm -rf "$BUILD_DIR" "$DIST_DIR"
     rm -rf "$PROJECT_ROOT"/*.egg-info
+    rm -rf "$PROJECT_ROOT/whisper-hud/whisper_hud.egg-info"
     echo -e "${GREEN}✓ Cleaned${NC}"
+fi
+
+# Resolve Python binary (allow override with PYTHON_BIN)
+if [ -z "${PYTHON_BIN:-}" ]; then
+    if [ -x "$PROJECT_VENV_PYTHON" ] && is_python_311_plus "$PROJECT_VENV_PYTHON"; then
+        PYTHON_BIN="$PROJECT_VENV_PYTHON"
+    elif command -v python3.11 >/dev/null 2>&1 && is_python_311_plus "$(command -v python3.11)"; then
+        PYTHON_BIN="$(command -v python3.11)"
+    elif command -v python3 >/dev/null 2>&1 && is_python_311_plus "$(command -v python3)"; then
+        PYTHON_BIN="$(command -v python3)"
+    else
+        echo -e "${RED}Error: Python not found${NC}"
+        exit 1
+    fi
 fi
 
 # Check Python version
 echo -e "${CYAN}Checking Python version...${NC}"
-PYTHON_VERSION=$(python3 --version 2>&1 | cut -d' ' -f2 | cut -d'.' -f1,2)
-if [[ "$(echo "$PYTHON_VERSION >= 3.11" | bc)" -ne 1 ]]; then
+PYTHON_VERSION=$("$PYTHON_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'; then
     echo -e "${RED}Error: Python 3.11+ required, found $PYTHON_VERSION${NC}"
     exit 1
 fi
-echo -e "${GREEN}✓ Python $PYTHON_VERSION${NC}"
+echo -e "${GREEN}✓ Python $PYTHON_VERSION (${PYTHON_BIN})${NC}"
 
 # Check py2app
 echo -e "${CYAN}Checking py2app...${NC}"
-if ! python3 -c "import py2app" 2>/dev/null; then
+if ! "$PYTHON_BIN" -c "import py2app" 2>/dev/null; then
     echo -e "${YELLOW}Installing py2app...${NC}"
-    pip3 install py2app --quiet
+    if ! "$PYTHON_BIN" -m pip install py2app --quiet; then
+        echo -e "${RED}Error: Could not install py2app with ${PYTHON_BIN}${NC}"
+        echo -e "${YELLOW}Tip:${NC} Use the project virtualenv Python or set PYTHON_BIN explicitly."
+        echo -e "  ${CYAN}cd \"$PROJECT_ROOT/whisper-hud\" && python3.11 -m venv venv && source venv/bin/activate && pip install -r requirements.txt${NC}"
+        echo -e "  ${CYAN}PYTHON_BIN=\"$PROJECT_ROOT/whisper-hud/venv/bin/python\" ./scripts/build-app.sh --clean${NC}"
+        exit 1
+    fi
 fi
 echo -e "${GREEN}✓ py2app available${NC}"
+
+# Check runtime dependencies used by the app bundle
+echo -e "${CYAN}Checking app dependencies...${NC}"
+if ! "$PYTHON_BIN" - <<'PY'
+import importlib
+import sys
+
+required = [
+    "rumps",
+    "pynput",
+    "sounddevice",
+    "numpy",
+    "scipy",
+    "openai",
+    "anthropic",
+    "google.genai",
+    "keyring",
+    "pyperclip",
+]
+missing = []
+for mod in required:
+    try:
+        importlib.import_module(mod)
+    except Exception:
+        missing.append(mod)
+
+if missing:
+    print(",".join(missing))
+    raise SystemExit(1)
+PY
+then
+    echo -e "${YELLOW}Installing missing app dependencies...${NC}"
+    "$PYTHON_BIN" -m pip install -r "$PROJECT_ROOT/whisper-hud/requirements.txt"
+fi
+echo -e "${GREEN}✓ App dependencies available${NC}"
 
 # Check for Sparkle.framework
 SPARKLE_PATH=""
@@ -116,7 +178,7 @@ echo -e "${CYAN}Ensuring assets are up to date...${NC}"
 if [ ! -f "$PROJECT_ROOT/assets/icons/AppIcon.icns" ]; then
     echo -e "${YELLOW}Generating assets...${NC}"
     cd "$PROJECT_ROOT/assets"
-    python3 generate_assets.py --icons --svg
+    "$PYTHON_BIN" generate_assets.py --icons --svg
 fi
 echo -e "${GREEN}✓ Assets ready${NC}"
 
@@ -134,7 +196,7 @@ cd "$PROJECT_ROOT"
 export PYTHONPATH="$PROJECT_ROOT/whisper-hud:$PYTHONPATH"
 
 # Run py2app
-python3 setup_app.py py2app --dist-dir "$DIST_DIR" --bdist-base "$BUILD_DIR"
+"$PYTHON_BIN" setup_app.py py2app --dist-dir "$DIST_DIR" --bdist-base "$BUILD_DIR"
 
 # Verify app was created
 APP_PATH="$DIST_DIR/$APP_NAME.app"

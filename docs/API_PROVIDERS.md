@@ -197,8 +197,43 @@ ollama serve  # Start server (WhisperHUD can auto-start this)
 
 ### Cloud Translation
 
-Uses the same API keys as transcription where applicable (Gemini/OpenAI). Anthropic requires its own API key.
-Enable in settings and select target language.
+Cloud translation uses API keys and model-specific defaults with compatibility fallbacks.
+
+#### OpenAI Translation
+
+- API: **Responses API** (not Chat Completions)
+- Models:
+  - `gpt-5.2` (quality)
+  - `gpt-5-mini` (balanced, default)
+  - `gpt-5-nano` (speed)
+- Notes:
+  - Older aliases are normalized to supported defaults.
+  - If unavailable, WhisperHUD falls back to the configured default model.
+
+#### Gemini Translation
+
+- Models:
+  - `gemini-3-flash-preview` (balanced, preview-first default)
+  - `gemini-3-pro-preview` (quality)
+  - `gemini-2.5-flash` (stable fallback)
+  - `gemini-2.5-flash-lite` (speed)
+- Notes:
+  - Preview model IDs are tried first.
+  - If a preview ID is unavailable, WhisperHUD automatically retries with `gemini-2.5-flash`.
+
+#### Anthropic Translation
+
+- Models:
+  - `claude-sonnet-4-5` (balanced, default)
+  - `claude-haiku-4-5` (speed)
+  - `claude-opus-4-6` (quality)
+- Notes:
+  - Historical Opus IDs are normalized to current aliases.
+  - If a selected model alias is rejected, WhisperHUD retries with default Sonnet.
+
+Use the same API keys as transcription where applicable (Gemini/OpenAI). Anthropic requires its own API key.
+Enable translation in settings, then choose provider/model/source/target language.
+
 ### Apple (Local Translation)
 
 Uses Apple's Translation framework (macOS 26+). For dev builds, run:

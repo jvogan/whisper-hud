@@ -33,10 +33,54 @@ class TranslationManager:
         "cloud": ["gemini", "openai", "anthropic"],
     }
 
+    MODEL_CONFIG_FIELDS = {
+        "ollama": "translation_model",
+        "gemini": "gemini_translate_model",
+        "openai": "openai_translate_model",
+        "anthropic": "anthropic_translate_model",
+    }
+
     def __init__(self, config: Optional[Config] = None):
         self.config = config or Config.load()
         self._shared_config = config is not None
         self._providers: Dict[str, TranslationProvider] = {}
+        self._normalize_configured_models()
+
+    def _normalize_model_for_provider(self, provider_id: str, model_id: str) -> str:
+        """Normalize model IDs using provider-specific compatibility rules."""
+        provider_class = self.PROVIDER_CLASSES.get(provider_id)
+        if provider_class is None:
+            return model_id
+
+        normalize = getattr(provider_class, "normalize_model_id", None)
+        if callable(normalize):
+            try:
+                return str(normalize(model_id))
+            except Exception:
+                pass
+
+        models = getattr(provider_class, "MODELS", {})
+        if isinstance(models, dict) and model_id in models:
+            return model_id
+        if isinstance(models, dict) and models:
+            default_model = getattr(provider_class, "DEFAULT_MODEL", None)
+            if isinstance(default_model, str) and default_model in models:
+                return default_model
+            return next(iter(models.keys()))
+        return model_id
+
+    def _normalize_configured_models(self) -> None:
+        """Normalize configured translation models and persist if adjusted."""
+        changed = False
+        for provider_id, field_name in self.MODEL_CONFIG_FIELDS.items():
+            configured_model = getattr(self.config, field_name, "")
+            normalized_model = self._normalize_model_for_provider(provider_id, configured_model)
+            if configured_model != normalized_model:
+                setattr(self.config, field_name, normalized_model)
+                changed = True
+
+        if changed:
+            self.config.save()
 
     def get_provider(self, provider_id: str) -> Optional[TranslationProvider]:
         """Get or create a provider instance."""
@@ -54,17 +98,15 @@ class TranslationManager:
 
     def _get_provider_model(self, provider_id: str) -> str:
         """Get the configured model for a provider."""
-        if provider_id == "ollama":
-            return self.config.translation_model
-        elif provider_id == "gemini":
-            return getattr(self.config, 'gemini_translate_model', 'gemini-3-flash-preview')
-        elif provider_id == "openai":
-            return getattr(self.config, 'openai_translate_model', 'gpt-5-mini')
-        elif provider_id == "anthropic":
-            return getattr(self.config, 'anthropic_translate_model', 'claude-sonnet-4-5')
-        elif provider_id == "apple":
+        if provider_id == "apple":
             return "system"
-        return ""
+
+        field_name = self.MODEL_CONFIG_FIELDS.get(provider_id)
+        if field_name is None:
+            return ""
+
+        configured_model = getattr(self.config, field_name, "")
+        return self._normalize_model_for_provider(provider_id, configured_model)
 
     @property
     def provider(self) -> TranslationProvider:
@@ -198,16 +240,17 @@ class TranslationManager:
         """Change the translation model for the current provider."""
         provider_id = self.get_current_provider()
         self.provider.set_model(model_id)
+        normalized_model = self.provider.get_current_model()
 
         # Save to config
         if provider_id == "ollama":
-            self.config.translation_model = model_id
+            self.config.translation_model = normalized_model
         elif provider_id == "gemini":
-            self.config.gemini_translate_model = model_id
+            self.config.gemini_translate_model = normalized_model
         elif provider_id == "openai":
-            self.config.openai_translate_model = model_id
+            self.config.openai_translate_model = normalized_model
         elif provider_id == "anthropic":
-            self.config.anthropic_translate_model = model_id
+            self.config.anthropic_translate_model = normalized_model
 
         self.config.save()
 
@@ -257,6 +300,7 @@ class TranslationManager:
             self.config.update_from(new_config)
         else:
             self.config = new_config
+        self._normalize_configured_models()
         # Update provider models
         for provider_id, provider in self._providers.items():
             model = self._get_provider_model(provider_id)

@@ -39,14 +39,14 @@ class TranscriptionManager:
         self._shared_config = config is not None
         self._providers: Dict[str, TranscriptionProvider] = {}
 
-    def get_available_providers(self) -> list[dict]:
+    def get_available_providers(self, configured_providers: Optional[list[str]] = None) -> list[dict]:
         """
         Get list of available providers with their configured status.
 
         Returns:
             List of dicts with provider info, status, and category
         """
-        configured = get_configured_providers()
+        configured = configured_providers if configured_providers is not None else get_configured_providers()
 
         providers = []
 

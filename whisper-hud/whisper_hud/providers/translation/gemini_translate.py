@@ -7,7 +7,10 @@ high-quality, context-aware translation with streaming support.
 Supports 100+ languages with excellent handling of idioms and context.
 """
 
-from typing import Optional, Callable
+from __future__ import annotations
+
+from typing import Callable, Optional
+
 from .base import TranslationProvider, TranslationResult
 
 
@@ -16,6 +19,9 @@ class GeminiTranslateProvider(TranslationProvider):
 
     name = "gemini"
     display_name = "Gemini (Cloud)"
+
+    DEFAULT_MODEL = "gemini-3-flash-preview"
+    STABLE_FALLBACK_MODEL = "gemini-2.5-flash"
 
     # Available models (February 2026)
     MODELS = {
@@ -40,6 +46,12 @@ class GeminiTranslateProvider(TranslationProvider):
             "description": "Lowest latency/cost",
             "category": "speed",
         },
+    }
+
+    MODEL_ALIASES = {
+        "gemini-3-pro": "gemini-3-pro-preview",
+        "gemini-3-flash": "gemini-3-flash-preview",
+        "gemini-2.5-flash-preview": "gemini-2.5-flash",
     }
 
     # Supported languages (100+)
@@ -157,24 +169,44 @@ class GeminiTranslateProvider(TranslationProvider):
         "yo": "Yoruba",
     }
 
-    def __init__(self, model: str = "gemini-3-flash-preview"):
-        if model not in self.MODELS:
-            model = "gemini-3-flash-preview"
-        self.model = model
+    def __init__(self, model: str = DEFAULT_MODEL):
+        self.model = self.normalize_model_id(model)
         self._client = None
+
+    @classmethod
+    def normalize_model_id(cls, model_id: str) -> str:
+        """Normalize configured IDs to supported Gemini translation models."""
+        if model_id in cls.MODELS:
+            return model_id
+        mapped = cls.MODEL_ALIASES.get(model_id)
+        if mapped in cls.MODELS:
+            return mapped
+        return cls.DEFAULT_MODEL
+
+    @staticmethod
+    def _is_model_not_found_error(error: Exception) -> bool:
+        """Return True when Gemini rejects the selected model ID."""
+        message = str(error).lower()
+        if "model" not in message:
+            return False
+        return any(token in message for token in ("not found", "invalid", "unsupported", "unknown"))
 
     def _get_client(self):
         """Get or create the Gemini client."""
         if self._client is None:
             from ...keychain import get_api_key
-            import google.generativeai as genai
+            try:
+                from google import genai
+            except ImportError:
+                raise RuntimeError(
+                    "google-genai package not installed. Install with: pip install google-genai"
+                )
 
             api_key = get_api_key("gemini")
             if not api_key:
                 raise ValueError("Gemini API key not configured")
 
-            genai.configure(api_key=api_key)
-            self._client = genai.GenerativeModel(self.model)
+            self._client = genai.Client(api_key=api_key)
 
         return self._client
 
@@ -199,27 +231,52 @@ class GeminiTranslateProvider(TranslationProvider):
                 model=self.model
             )
 
+        attempt_models = [self.model]
+        if self.STABLE_FALLBACK_MODEL not in attempt_models:
+            attempt_models.append(self.STABLE_FALLBACK_MODEL)
+
         try:
             client = self._get_client()
             prompt = self._build_prompt(text, source_lang, target_lang)
+            from google.genai import types
 
-            response = client.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.1,
-                    "max_output_tokens": 4096,
-                }
-            )
+            result_text = ""
+            used_model = self.model
+            last_error: Optional[Exception] = None
+            for index, model_id in enumerate(attempt_models):
+                try:
+                    response = client.models.generate_content(
+                        model=model_id,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.1,
+                            max_output_tokens=4096,
+                        ),
+                    )
+                    result_text = self._clean_response((response.text or "").strip())
+                    used_model = model_id
+                    break
+                except Exception as e:
+                    last_error = e
+                    should_retry = (
+                        index < len(attempt_models) - 1
+                        and self._is_model_not_found_error(e)
+                    )
+                    if not should_retry:
+                        raise
 
-            result_text = response.text.strip()
-            result_text = self._clean_response(result_text)
+            if result_text == "" and last_error is not None:
+                raise last_error
+
+            if used_model != self.model:
+                self.model = used_model
 
             return TranslationResult(
                 text=result_text,
                 source_lang=source_lang,
                 target_lang=target_lang,
                 provider=self.name,
-                model=self.model
+                model=used_model
             )
 
         except Exception as e:
@@ -313,34 +370,60 @@ Text to translate:
                 model=self.model
             )
 
+        attempt_models = [self.model]
+        if self.STABLE_FALLBACK_MODEL not in attempt_models:
+            attempt_models.append(self.STABLE_FALLBACK_MODEL)
+
         try:
             client = self._get_client()
             prompt = self._build_prompt(text, source_lang, target_lang)
+            from google.genai import types
 
-            response = client.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.1,
-                    "max_output_tokens": 4096,
-                },
-                stream=True
-            )
+            final_text = ""
+            used_model = self.model
+            last_error: Optional[Exception] = None
+            for index, model_id in enumerate(attempt_models):
+                try:
+                    response = client.models.generate_content_stream(
+                        model=model_id,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.1,
+                            max_output_tokens=4096,
+                        ),
+                    )
 
-            cumulative_text = ""
-            for chunk in response:
-                if chunk.text:
-                    cumulative_text += chunk.text
-                    clean_text = self._clean_response(cumulative_text)
-                    on_chunk(clean_text)
+                    cumulative_text = ""
+                    for chunk in response:
+                        chunk_text = getattr(chunk, "text", None)
+                        if chunk_text:
+                            cumulative_text += chunk_text
+                            on_chunk(self._clean_response(cumulative_text))
 
-            final_text = self._clean_response(cumulative_text)
+                    final_text = self._clean_response(cumulative_text)
+                    used_model = model_id
+                    break
+                except Exception as e:
+                    last_error = e
+                    should_retry = (
+                        index < len(attempt_models) - 1
+                        and self._is_model_not_found_error(e)
+                    )
+                    if not should_retry:
+                        raise
+
+            if final_text == "" and last_error is not None:
+                raise last_error
+
+            if used_model != self.model:
+                self.model = used_model
 
             return TranslationResult(
                 text=final_text,
                 source_lang=source_lang,
                 target_lang=target_lang,
                 provider=self.name,
-                model=self.model
+                model=used_model
             )
 
         except Exception as e:
@@ -348,9 +431,8 @@ Text to translate:
 
     def set_model(self, model_id: str) -> None:
         """Change the active model."""
-        if model_id in self.MODELS:
-            self.model = model_id
-            self._client = None  # Reset client to use new model
+        self.model = self.normalize_model_id(model_id)
+        self._client = None  # Reset client to use new model
 
     def get_current_model(self) -> str:
         """Get the current model ID."""

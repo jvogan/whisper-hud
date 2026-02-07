@@ -2,7 +2,7 @@
 Configuration management.
 
 Stores user preferences in a JSON file.
-API keys are stored separately in Keychain (see keychain.py).
+API keys are stored separately via the configured credential storage mode (see keychain.py).
 """
 
 import json
@@ -73,6 +73,12 @@ class Config:
     audio_input_device: Optional[int] = None  # Audio input device ID (None = system default)
     launch_at_login: bool = False  # Launch app at login
 
+    # API key credential storage
+    # passphrase: encrypted local file unlocked for current app session
+    # keychain: macOS keychain via keyring
+    # none: in-memory only (lost on quit)
+    credential_storage_mode: str = "passphrase"
+
     # Translation settings
     translation_enabled: bool = False
     translation_provider: str = "apple"  # apple, ollama, gemini, openai
@@ -80,8 +86,8 @@ class Config:
     gemini_translate_model: str = "gemini-3-flash-preview"  # Gemini translation model
     openai_translate_model: str = "gpt-5-mini"  # OpenAI translation model
     anthropic_translate_model: str = "claude-sonnet-4-5"  # Anthropic translation model
-    target_language: str = "zh"  # Default: Chinese (Simplified)
-    source_language: str = "en"  # "auto" or specific ISO 639-1 code
+    target_language: str = "en"  # Default: English (neutral first-run choice)
+    source_language: str = "auto"  # "auto" or specific ISO 639-1 code
 
     # Stats
     total_transcriptions: int = 0
@@ -157,6 +163,11 @@ class Config:
                         f"Migrating silence_threshold from {old_val} to 0.005 "
                         "(old default was too high for typical microphones)"
                     )
+
+                # Migration: preserve existing installs on keychain mode.
+                # Fresh installs use passphrase mode by default.
+                if 'credential_storage_mode' not in data:
+                    data['credential_storage_mode'] = 'keychain'
 
                 # Handle missing fields gracefully
                 return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
@@ -343,7 +354,8 @@ class Config:
         """
         Enable history encryption.
 
-        Creates encryption key in Keychain if needed.
+        Creates a local history-encryption key wrapped by the active passphrase
+        session if needed.
 
         Returns:
             True if encryption was enabled successfully
@@ -369,7 +381,7 @@ class Config:
         Disable history encryption.
 
         Note: Existing encrypted entries will remain encrypted but
-        can still be read if the key is in Keychain.
+        can still be read while the matching history passphrase context is unlocked.
         """
         self.history_encrypted = False
         self.save()

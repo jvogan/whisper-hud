@@ -15,8 +15,10 @@ The resulting app will be in dist/WhisperHUD.app
 import os
 import sys
 from urllib.parse import urlparse
+from datetime import datetime
 from pathlib import Path
 from setuptools import setup
+from py2app.build_app import py2app as _py2app
 
 # Ensure we can import from the project
 sys.path.insert(0, str(Path(__file__).parent / "whisper-hud"))
@@ -39,6 +41,7 @@ PROJECT_ROOT = Path(__file__).parent
 ASSETS_DIR = PROJECT_ROOT / "assets"
 ICONS_DIR = ASSETS_DIR / "icons"
 APP_ICON = ICONS_DIR / "AppIcon.icns"
+CURRENT_YEAR = datetime.now().year
 
 # Optional Sparkle updater configuration (set via env)
 SPARKLE_FEED_URL = os.environ.get("WHISPERHUD_SPARKLE_FEED_URL")
@@ -51,28 +54,34 @@ if SPARKLE_FEED_URL:
     if not SPARKLE_PUBLIC_ED_KEY:
         raise ValueError("WHISPERHUD_SPARKLE_PUBLIC_ED_KEY is required when Sparkle updates are enabled")
 
+
+def _relpath(path: Path) -> str:
+    """Return setup.py-relative path string for py2app data_files."""
+    return str(path.relative_to(PROJECT_ROOT))
+
+
 # Data files to include in the app bundle
 DATA_FILES = [
     # Assets
     ("assets/icons", [
-        str(ICONS_DIR / "AppIcon.icns"),
-        str(ICONS_DIR / "icon.svg"),
+        _relpath(ICONS_DIR / "AppIcon.icns"),
+        _relpath(ICONS_DIR / "icon.svg"),
     ]),
     ("assets/icons/icon.iconset", [
-        str(p) for p in (ICONS_DIR / "icon.iconset").glob("*.png")
+        _relpath(p) for p in (ICONS_DIR / "icon.iconset").glob("*.png")
     ]),
     ("assets/dithered", [
-        str(p) for p in (ASSETS_DIR / "dithered").glob("*.png")
+        _relpath(p) for p in (ASSETS_DIR / "dithered").glob("*.png")
     ] if (ASSETS_DIR / "dithered").exists() else []),
     ("assets/ascii", [
-        str(p) for p in (ASSETS_DIR / "ascii").glob("*.txt")
+        _relpath(p) for p in (ASSETS_DIR / "ascii").glob("*.txt")
     ] if (ASSETS_DIR / "ascii").exists() else []),
 ]
 
 # Apple Translation helper (optional)
 APPLE_TRANSLATE_HELPER = PROJECT_ROOT / "whisper-hud" / "bin" / "whisperhud-apple-translate"
 if APPLE_TRANSLATE_HELPER.exists():
-    DATA_FILES.append(("bin", [str(APPLE_TRANSLATE_HELPER)]))
+    DATA_FILES.append(("bin", [_relpath(APPLE_TRANSLATE_HELPER)]))
 
 # Filter out empty entries
 DATA_FILES = [(dest, files) for dest, files in DATA_FILES if files]
@@ -114,7 +123,7 @@ plist = {
         ),
 
         # Copyright
-        "NSHumanReadableCopyright": f"Copyright 2024-2025 WhisperHUD. All rights reserved.",
+        "NSHumanReadableCopyright": f"Copyright 2024-{CURRENT_YEAR} WhisperHUD. All rights reserved.",
 
         # Document types (none for menu bar app)
         "CFBundleDocumentTypes": [],
@@ -166,6 +175,12 @@ OPTIONS = {
         "matplotlib",
         "pandas",
         "PIL",  # Only needed for asset generation
+        "setuptools",
+        "pkg_resources",
+        "pip",
+        "wheel",
+        "pytest",
+        "_pytest",
         "test",
         "tests",
         "unittest",
@@ -225,11 +240,22 @@ OPTIONS = {
     "semi_standalone": False,  # Full standalone (include Python framework)
 }
 
+
+class WhisperHUDPy2App(_py2app):
+    """py2app command that ignores project metadata install_requires."""
+
+    def finalize_options(self):
+        if getattr(self.distribution, "install_requires", None):
+            self.distribution.install_requires = []
+        super().finalize_options()
+
+
 setup(
     name=APP_NAME,
     version=APP_VERSION,
     app=[MAIN_SCRIPT],
     data_files=DATA_FILES,
     options={"py2app": OPTIONS},
+    cmdclass={"py2app": WhisperHUDPy2App},
     setup_requires=["py2app"],
 )

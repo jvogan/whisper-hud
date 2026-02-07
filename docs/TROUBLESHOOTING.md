@@ -88,6 +88,34 @@ Adjust silence detection settings:
 3. For OpenAI: Ensure you have credits/billing set up
 4. For Gemini: Ensure the Generative Language API is enabled
 
+#### "API keys locked" error
+
+1. Open WhisperHUD menu → **Privacy & Security** → **API Key Storage** → **Unlock...**
+2. Enter your API key passphrase
+3. The store stays unlocked for the app session (until quit or manual lock)
+
+WhisperHUD only asks for unlock when an operation actually needs cloud keys.
+Local Apple/Whisper/Parakeet flows do not require unlock.
+
+#### macOS asks for Keychain access
+
+This only happens when **API Key Storage** is set to **macOS Keychain**.
+
+To avoid Keychain prompts:
+1. Open WhisperHUD menu → **Privacy & Security** → **API Key Storage**
+2. Switch to **Passphrase (Encrypted Local)** (default) or **Session Only**
+3. Re-enter API keys if prompted after switching modes
+
+#### Python quit unexpectedly after denying Keychain access
+
+If this happened right after a Keychain prompt, switch off Keychain mode:
+1. Reopen WhisperHUD
+2. Go to **Privacy & Security → API Key Storage**
+3. Select **Passphrase (Encrypted Local)** (recommended) or **Session Only**
+4. Re-enter your API keys
+
+History encryption does not require Keychain.
+
 #### Transcription takes too long
 
 - Check your internet connection
@@ -126,9 +154,11 @@ Enable **Restore Clipboard** in settings to preserve your clipboard contents.
 
 #### Cloud translation not working
 
-- Ensure your OpenAI or Gemini API key is set in **API Keys**
+- Ensure your OpenAI, Gemini, or Anthropic API key is set in **API Keys**
+- If using passphrase storage, unlock API key storage in **Privacy & Security**
 - Verify the key is valid and has permissions
 - Check your internet connection
+- If a preview model is unavailable, re-open Translation settings and pick a stable model
 
 #### Ollama not found
 
@@ -163,6 +193,18 @@ ollama list
 - **Hotkey conflicts**: If another app uses the same shortcut, WhisperHUD won’t receive it.
 - **Large local models**: Whisper/Translate large models can be slow on older Macs.
 - **First‑use downloads**: Local providers download models on first use.
+
+---
+
+## Security Notes
+
+### What “0600 permissions” means
+
+Sensitive local files are created with user-only permissions:
+- `0700` on config directory (only your user can access)
+- `0600` on sensitive files (only your user can read/write)
+
+This reduces exposure on shared machines with multiple local user accounts.
 
 ---
 

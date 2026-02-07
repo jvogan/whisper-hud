@@ -48,32 +48,29 @@ class TestSecureDelete:
 class TestEncryption:
     """Tests for encryption/decryption functions."""
 
-    @pytest.fixture
-    def mock_keyring(self):
-        """Mock keyring to avoid actual keychain access."""
-        with patch('keyring.get_password') as mock_get:
-            with patch('keyring.set_password') as mock_set:
-                with patch('keyring.delete_password') as mock_delete:
-                    # Store key in memory for testing
-                    storage = {}
+    @pytest.fixture(autouse=True)
+    def _passphrase_session(self, temp_config_dir):
+        """Use passphrase-backed session unlock for history encryption tests."""
+        config_file = temp_config_dir / "config.json"
+        with patch("whisper_hud.config.CONFIG_DIR", temp_config_dir):
+            with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                from whisper_hud.keychain import lock_passphrase_store, unlock_passphrase_store
+                from whisper_hud.encryption import lock_history_encryption, delete_key
 
-                    def get_pw(service, key):
-                        return storage.get((service, key))
+                lock_passphrase_store()
+                lock_history_encryption()
+                delete_key()
 
-                    def set_pw(service, key, value):
-                        storage[(service, key)] = value
+                ok, message = unlock_passphrase_store("test-passphrase-123")
+                assert ok, message
 
-                    def del_pw(service, key):
-                        if (service, key) in storage:
-                            del storage[(service, key)]
+                yield
 
-                    mock_get.side_effect = get_pw
-                    mock_set.side_effect = set_pw
-                    mock_delete.side_effect = del_pw
+                lock_history_encryption()
+                lock_passphrase_store()
+                delete_key()
 
-                    yield storage
-
-    def test_encrypt_decrypt_roundtrip(self, mock_keyring):
+    def test_encrypt_decrypt_roundtrip(self):
         """Test that encryption and decryption work correctly."""
         pytest.importorskip("cryptography")
         from whisper_hud.encryption import encrypt_text, decrypt_text
@@ -87,7 +84,7 @@ class TestEncryption:
         decrypted = decrypt_text(encrypted)
         assert decrypted == original
 
-    def test_encrypt_empty_text(self, mock_keyring):
+    def test_encrypt_empty_text(self):
         """Test that encrypting empty text returns None."""
         pytest.importorskip("cryptography")
         from whisper_hud.encryption import encrypt_text
@@ -95,7 +92,7 @@ class TestEncryption:
         assert encrypt_text("") is None
         assert encrypt_text(None) is None
 
-    def test_decrypt_empty_text(self, mock_keyring):
+    def test_decrypt_empty_text(self):
         """Test that decrypting empty text returns None."""
         pytest.importorskip("cryptography")
         from whisper_hud.encryption import decrypt_text
@@ -103,7 +100,7 @@ class TestEncryption:
         assert decrypt_text("") is None
         assert decrypt_text(None) is None
 
-    def test_get_or_create_key(self, mock_keyring):
+    def test_get_or_create_key(self):
         """Test that key is created if not exists."""
         pytest.importorskip("cryptography")
         from whisper_hud.encryption import get_or_create_key
@@ -117,7 +114,7 @@ class TestEncryption:
         key2 = get_or_create_key()
         assert key1 == key2
 
-    def test_delete_key(self, mock_keyring):
+    def test_delete_key(self):
         """Test deleting encryption key."""
         pytest.importorskip("cryptography")
         from whisper_hud.encryption import get_or_create_key, delete_key, has_encryption_key
@@ -131,12 +128,27 @@ class TestEncryption:
         assert result is True
         assert not has_encryption_key()
 
-    def test_has_encryption_key(self, mock_keyring):
+    def test_has_encryption_key(self):
         """Test checking for encryption key."""
         from whisper_hud.encryption import has_encryption_key
 
         # Initially no key
         assert not has_encryption_key()
+
+    def test_history_encryption_does_not_use_keychain(self):
+        """History encryption should not call keyring APIs."""
+        pytest.importorskip("cryptography")
+        from whisper_hud.encryption import encrypt_text
+
+        with patch("keyring.get_password") as mock_get:
+            with patch("keyring.set_password") as mock_set:
+                with patch("keyring.delete_password") as mock_delete:
+                    encrypted = encrypt_text("hello")
+
+        assert encrypted is not None
+        mock_get.assert_not_called()
+        mock_set.assert_not_called()
+        mock_delete.assert_not_called()
 
 
 class TestCryptographyCheck:

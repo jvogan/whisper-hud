@@ -11,7 +11,7 @@ Use this checklist before making the repository public or cutting a release.
 - [ ] Dependency review passes (GitHub dependency-review action)
 
 ## Security & privacy
-- [x] API keys are stored only in Keychain (no hard-coded keys)
+- [x] API keys use configured credential storage (passphrase/keychain/session-only) with no hard-coded keys
 - [x] History is disabled by default; encryption at rest is optional and works
 - [x] Temp audio files are securely deleted after local transcription
 - [ ] Sparkle updates: HTTPS feed + signed (Ed25519) with `SUPublicEDKey`
