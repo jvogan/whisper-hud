@@ -5,7 +5,7 @@
 If you discover a security vulnerability in WhisperHUD, please report it by:
 
 1. **GitHub Issues** - For non-sensitive security issues, open a GitHub issue with the `security` label
-2. **Private Reporting** - For sensitive vulnerabilities, use GitHub's private vulnerability reporting feature if enabled, or contact the maintainer directly
+2. **Private Reporting** - For sensitive vulnerabilities, use [GitHub's private vulnerability reporting](https://github.com/jvogan/whisper-hud/security/advisories/new)
 
 Please include:
 - Description of the vulnerability

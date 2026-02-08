@@ -42,4 +42,4 @@ jobs:
 
       - name: Check Python syntax
         run: |
-          python -m py_compile whisper-hud/whisper_hud/*.py
+          find whisper-hud/whisper_hud -name '*.py' -exec python -m py_compile {} +
