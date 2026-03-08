@@ -43,11 +43,12 @@ class Config:
     """Application configuration."""
 
     # Default transcription provider
-    # Options: openai, gemini, apple, whisper_local, parakeet
+    # Options: openai, openai_realtime, gemini, apple, whisper_local, parakeet
     default_provider: str = "apple"
 
     # Default model for each transcription provider
     openai_model: str = "gpt-4o-transcribe"
+    openai_realtime_model: str = "gpt-4o-mini-transcribe"
     gemini_model: str = "gemini-3-flash-preview"
     apple_model: str = "en-US"
     whisper_local_model: str = "large-v3-turbo"
@@ -196,6 +197,7 @@ class Config:
         """Get the configured model for a provider."""
         model_map = {
             "openai": self.openai_model,
+            "openai_realtime": self.openai_realtime_model,
             "gemini": self.gemini_model,
             "apple": self.apple_model,
             "whisper_local": self.whisper_local_model,
@@ -207,6 +209,8 @@ class Config:
         """Set the model for a provider."""
         if provider == "openai":
             self.openai_model = model
+        elif provider == "openai_realtime":
+            self.openai_realtime_model = model
         elif provider == "gemini":
             self.gemini_model = model
         elif provider == "apple":

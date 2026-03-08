@@ -16,6 +16,7 @@ class TestConfig:
             config = Config()
 
             assert config.default_provider == "apple"
+            assert config.openai_realtime_model == "gpt-4o-mini-transcribe"
             assert config.hotkey_mode == "push_to_talk"
             assert config.auto_paste is True
             assert config.show_hud is True
@@ -69,9 +70,20 @@ class TestConfig:
             config = Config()
 
             assert config.get_provider_model("openai") == "gpt-4o-transcribe"
+            assert config.get_provider_model("openai_realtime") == "gpt-4o-mini-transcribe"
             assert config.get_provider_model("gemini") == "gemini-3-flash-preview"
             assert config.get_provider_model("apple") == "en-US"
             assert config.get_provider_model("unknown") == ""
+
+    def test_set_provider_model_supports_openai_realtime(self):
+        """Realtime provider model selection should persist like other providers."""
+        with patch('whisper_hud.config.CONFIG_FILE', Path('/tmp/test_config.json')):
+            from whisper_hud.config import Config
+
+            config = Config()
+            config.set_provider_model("openai_realtime", "gpt-4o-transcribe")
+
+            assert config.openai_realtime_model == "gpt-4o-transcribe"
 
     def test_load_preserves_existing_keychain_users_without_mode(self):
         """Existing config without storage mode should stay on keychain."""

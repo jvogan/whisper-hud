@@ -16,12 +16,15 @@ import rumps
 import threading
 import time
 import weakref
+from dataclasses import dataclass
+from enum import Enum
 from typing import Optional
 
 from .logging_config import get_logger
 from .recorder import AudioRecorder
 from .transcribe import TranscriptionManager
 from .translate import TranslationManager
+from .providers.base import LiveTranscriptionSession, TranscriptionResult
 from .hotkey import HotkeyListener, HotkeyCapture, format_hotkey_display, string_to_key
 from .hud import create_hud
 from .paste import insert_text, check_accessibility_permission, get_accessibility_error_message, open_accessibility_settings, _escape_applescript_string
@@ -58,6 +61,33 @@ from .encryption import (
 )
 
 logger = get_logger("app")
+
+
+class RecordingTurnPhase(Enum):
+    """Lifecycle states for one recording turn."""
+
+    IDLE = "idle"
+    STARTING = "starting"
+    STREAMING = "streaming"
+    DEGRADED_BATCH = "degraded_batch"
+    STOP_REQUESTED = "stop_requested"
+    FINALIZING = "finalizing"
+
+
+@dataclass
+class ActiveTranscriptionTurn:
+    """Per-turn runtime state shared across recorder, live provider, and UI callbacks."""
+
+    turn_id: int
+    provider_id: str
+    phase: RecordingTurnPhase = RecordingTurnPhase.STARTING
+    live_session: Optional[LiveTranscriptionSession] = None
+    connect_timer: Optional[threading.Timer] = None
+    finalize_timer: Optional[threading.Timer] = None
+    audio_bytes: bytes = b""
+    stop_reason: str = ""
+    batch_fallback_started: bool = False
+    result_processing_started: bool = False
 
 
 class WhisperHUDApp(rumps.App):
@@ -152,6 +182,8 @@ class WhisperHUDApp(rumps.App):
         self._is_downloading = False
         self._lock = threading.Lock()
         self._recording_lock = threading.Lock()  # Dedicated lock for recording operations
+        self._turn_counter = 0
+        self._active_turn: Optional[ActiveTranscriptionTurn] = None
         self._hotkey_capture: Optional[HotkeyCapture] = None
         self._is_capturing_hotkey = False
         self._setup_wizard = None
@@ -199,7 +231,14 @@ class WhisperHUDApp(rumps.App):
     @staticmethod
     def _is_cloud_transcription_provider(provider_id: str) -> bool:
         """Return True for transcription providers that require API keys."""
-        return provider_id in {"openai", "gemini"}
+        return provider_id in {"openai", "openai_realtime", "gemini"}
+
+    @staticmethod
+    def _transcription_credential_provider(provider_id: str) -> str:
+        """Map providers to the API key they rely on."""
+        if provider_id == "openai_realtime":
+            return "openai"
+        return provider_id
 
     @staticmethod
     def _is_cloud_translation_provider(provider_id: str) -> bool:
@@ -225,6 +264,14 @@ class WhisperHUDApp(rumps.App):
             return []
         return get_configured_providers()
 
+    def _is_transcription_provider_configured(self, provider_id: str, configured: list[str]) -> bool:
+        """Check cloud configuration using the provider's backing credential."""
+        if not self._is_cloud_transcription_provider(provider_id):
+            provider = self.transcriber.get_provider(provider_id)
+            return bool(provider and provider.is_configured())
+        credential_provider = self._transcription_credential_provider(provider_id)
+        return credential_provider in configured
+
     def _credential_mode(self) -> str:
         """Return active API key storage mode."""
         return get_storage_mode(self.config)
@@ -237,7 +284,7 @@ class WhisperHUDApp(rumps.App):
 
     def _reset_cloud_clients(self) -> None:
         """Reset provider clients so credential changes take effect immediately."""
-        for provider in ("openai", "gemini"):
+        for provider in ("openai", "openai_realtime", "gemini"):
             self.transcriber.reset_provider(provider)
         for provider in ("openai", "gemini", "anthropic"):
             self.translator.reset_provider(provider)
@@ -582,7 +629,7 @@ class WhisperHUDApp(rumps.App):
         provider_is_cloud = self._is_cloud_transcription_provider(self.config.default_provider)
         cloud_keys_locked = provider_is_cloud and self._is_passphrase_store_locked()
         provider_ready = (
-            self.config.default_provider in configured
+            self._is_transcription_provider_configured(self.config.default_provider, configured)
             if provider_is_cloud
             else bool(current_provider and current_provider.is_configured())
         )
@@ -2062,6 +2109,7 @@ class WhisperHUDApp(rumps.App):
         """Get display name for a provider."""
         names = {
             "openai": "OpenAI",
+            "openai_realtime": "OpenAI Realtime",
             "gemini": "Gemini",
             "anthropic": "Anthropic",
             "apple": "Apple",
@@ -2202,160 +2250,202 @@ class WhisperHUDApp(rumps.App):
         else:
             self._select_model(model_id)
 
-    def _start_recording(self):
-        """Called when hotkey is pressed."""
-        if not self._ensure_cloud_credentials_ready(allow_create=False):
-            self._notify(
-                "WhisperHUD",
-                "Cloud Keys Locked",
-                "Unlock passphrase storage to use cloud providers, or switch to Apple local.",
-            )
-            return
+    def _get_active_turn(self, turn_id: int) -> Optional[ActiveTranscriptionTurn]:
+        """Return the active turn when the callback still belongs to it."""
+        turn = self._active_turn
+        if turn and turn.turn_id == turn_id:
+            return turn
+        return None
 
-        # Keep encrypted history usable after unlock for the whole session.
-        if self.config.history_encrypted:
-            self._ensure_history_encryption_session(create_if_missing=False, prompt_unlock=False)
+    def _cancel_turn_timers(self, turn: ActiveTranscriptionTurn) -> None:
+        """Cancel any outstanding timers for a turn."""
+        for attr in ("connect_timer", "finalize_timer"):
+            timer = getattr(turn, attr)
+            if timer:
+                timer.cancel()
+                setattr(turn, attr, None)
 
-        # Use dedicated recording lock to prevent race conditions
-        # when rapidly toggling or clicking widget while hotkey is held
-        with self._recording_lock:
-            with self._lock:
-                if self._is_recording:
-                    return
-                self._is_recording = True
-
-            self._set_title(self.ICON_RECORDING)
-
-            if self.config.show_hud:
-                self.hud.show_recording()
-
-            if self.widget:
-                self.widget.set_recording()
-
-            # Configure silence detection
+    def _close_live_session(self, turn: ActiveTranscriptionTurn) -> None:
+        """Close an active live session without raising into the app thread."""
+        live_session = turn.live_session
+        turn.live_session = None
+        if live_session:
             try:
-                if self.config.auto_stop:
-                    self.recorder.set_silence_settings(
-                        enabled=True,
-                        silence_duration=self.config.silence_duration,
-                        silence_threshold=self.config.silence_threshold
-                    )
-                    self.recorder.start(on_silence=self._on_silence_detected)
-                else:
-                    self.recorder.start()
-                    # Start max duration timer as safety when auto-stop is off
-                    self._start_max_duration_timer()
-            except Exception as e:
-                logger.error(f"Failed to start recording: {e}")
-                with self._lock:
-                    self._is_recording = False
-                self._set_title(self._get_idle_icon())
-                if self.config.show_hud:
-                    self.hud.show_error("Microphone error")
-                if self.widget:
-                    self.widget.set_idle()
-                self._notify(
-                    "WhisperHUD",
-                    "Recording Failed",
-                    "Check microphone permissions and device availability."
-                )
+                live_session.close()
+            except Exception:
+                logger.debug("Failed to close live transcription session", exc_info=True)
+
+    def _selected_live_language(self) -> Optional[str]:
+        """Use explicit source language only; let Realtime detect when set to auto."""
+        return None if self.config.source_language == "auto" else self.config.source_language
+
+    def _get_batch_provider_id(self, provider_id: str) -> str:
+        """Map live providers to their synchronous fallback provider."""
+        if provider_id == "openai_realtime":
+            return "openai"
+        return provider_id
+
+    def _start_live_connect_timer(self, turn_id: int) -> threading.Timer:
+        """Downgrade to batch if the live provider never becomes ready."""
+        def on_timeout():
+            turn = self._get_active_turn(turn_id)
+            if not turn or turn.phase != RecordingTurnPhase.STARTING:
                 return
+            logger.warning("OpenAI Realtime connect timeout for turn %s", turn_id)
+            self._degrade_turn_to_batch(turn_id, "OpenAI Realtime connect timeout")
 
-            # Start audio level monitoring for HUD and streaming panel
-            self._start_level_monitor()
+        timer = threading.Timer(1.5, on_timeout)
+        timer.daemon = True
+        timer.start()
+        return timer
 
-    def _start_level_monitor(self):
-        """Start monitoring audio levels for HUD and streaming panel display."""
-        def monitor_levels():
-            while self._is_recording:
-                level = self.recorder.get_audio_level()
-                # Update HUD if enabled
-                if self.config.show_hud:
-                    self.hud.update_audio_level(level)
-                # Update streaming panel if it has level support
-                if self.streaming_panel and hasattr(self.streaming_panel, 'update_audio_level'):
-                    self.streaming_panel.update_audio_level(level)
-                time.sleep(0.05)  # ~20 updates per second
+    def _start_live_finalize_timer(self, turn_id: int) -> threading.Timer:
+        """Downgrade to batch if the final transcript never arrives after commit."""
+        def on_timeout():
+            turn = self._get_active_turn(turn_id)
+            if not turn or turn.result_processing_started:
+                return
+            logger.warning("OpenAI Realtime finalization timeout for turn %s", turn_id)
+            self._degrade_turn_to_batch(turn_id, "OpenAI Realtime finalization timeout")
 
-        self._level_monitor_thread = threading.Thread(target=monitor_levels, daemon=True)
-        self._level_monitor_thread.start()
+        timer = threading.Timer(8.0, on_timeout)
+        timer.daemon = True
+        timer.start()
+        return timer
 
-    def _start_max_duration_timer(self):
-        """Start a timer to auto-stop after max duration (safety when auto-stop is off)."""
-        max_duration = self.config.max_recording_duration
+    def _on_live_audio_chunk(self, turn_id: int, audio_chunk, sample_rate: int) -> None:
+        """Forward recorder chunks to the active live session when available."""
+        turn = self._get_active_turn(turn_id)
+        if not turn or turn.phase in {RecordingTurnPhase.DEGRADED_BATCH, RecordingTurnPhase.FINALIZING}:
+            return
+        if turn.live_session:
+            turn.live_session.push_audio(audio_chunk, sample_rate)
 
-        def check_duration():
-            import time as time_module
-            start = time_module.time()
-            while self._is_recording:
-                if time_module.time() - start >= max_duration:
-                    logger.info(f"Max recording duration ({max_duration}s) reached, auto-stopping")
-                    self._stop_recording()
-                    break
-                time_module.sleep(1)
+    def _on_live_session_ready(self, turn_id: int) -> None:
+        """Mark the live session ready for this turn if it is still current."""
+        turn = self._get_active_turn(turn_id)
+        if not turn:
+            return
+        self._cancel_turn_timers(turn)
+        if turn.phase != RecordingTurnPhase.STARTING:
+            self._close_live_session(turn)
+            return
+        turn.phase = RecordingTurnPhase.STREAMING
 
-        self._max_duration_thread = threading.Thread(target=check_duration, daemon=True)
-        self._max_duration_thread.start()
+    def _on_live_session_partial(self, turn_id: int, text: str) -> None:
+        """Update the streaming panel with live partial transcript text."""
+        turn = self._get_active_turn(turn_id)
+        if not turn or turn.phase == RecordingTurnPhase.DEGRADED_BATCH:
+            return
+        if self.config.streaming_enabled and text:
+            self.streaming_panel.update_transcription(text)
 
-    def _on_silence_detected(self):
-        """Called when silence is detected after speech."""
-        # Auto-stop recording
-        self._stop_recording()
+    def _on_live_session_final(self, turn_id: int, result: TranscriptionResult) -> None:
+        """Complete the turn from the final live transcript."""
+        turn = self._get_active_turn(turn_id)
+        if not turn:
+            return
+        self._cancel_turn_timers(turn)
+        self._process_turn_result(
+            turn_id,
+            result,
+            use_streaming=self.config.streaming_enabled,
+            stats_already_recorded=False,
+        )
 
-    def _stop_recording(self):
-        """Called when hotkey is released."""
-        # Use dedicated recording lock to prevent race conditions
-        # when rapidly toggling or clicking widget while hotkey is held
-        with self._recording_lock:
-            with self._lock:
-                if not self._is_recording:
-                    return
-                self._is_recording = False
+    def _on_live_session_error(self, turn_id: int, error: Exception) -> None:
+        """Downgrade to batch when a live session fails."""
+        logger.warning("Live transcription error on turn %s: %s", turn_id, error)
+        self._degrade_turn_to_batch(turn_id, str(error))
 
-            self._set_title(self.ICON_PROCESSING)
-
-            if self.config.show_hud:
-                self.hud.show_processing()
-
-            if self.widget:
-                self.widget.set_processing()
-
-            # Get audio data
-            audio_bytes = self.recorder.stop()
-
-        if not audio_bytes or len(audio_bytes) < 1000:  # Too short
-            self.hud.hide()
-            self._set_title(self._get_idle_icon())
-            if self.widget:
-                self.widget.set_idle()
+    def _degrade_turn_to_batch(self, turn_id: int, reason: str) -> None:
+        """Stop using live transcription and fall back to batch for this turn."""
+        turn = self._get_active_turn(turn_id)
+        if not turn:
             return
 
-        # Transcribe in background thread
+        self._cancel_turn_timers(turn)
+        self._close_live_session(turn)
+
+        if turn.result_processing_started:
+            return
+
+        turn.phase = RecordingTurnPhase.DEGRADED_BATCH
+        if self._is_recording and self.config.streaming_enabled:
+            self.streaming_panel.hide()
+
+        if turn.audio_bytes and not turn.batch_fallback_started:
+            turn.batch_fallback_started = True
+            self._start_batch_transcription(turn_id)
+
+        if reason:
+            logger.info("Turn %s falling back to batch transcription: %s", turn_id, reason)
+
+    def _start_batch_transcription(self, turn_id: int) -> None:
+        """Run synchronous transcription for the active turn in a background thread."""
+        turn = self._get_active_turn(turn_id)
+        if not turn or not turn.audio_bytes:
+            return
+
+        audio_bytes = turn.audio_bytes
+        provider_id = self._get_batch_provider_id(turn.provider_id)
+        use_streaming = self.config.streaming_enabled
+
         def do_transcribe():
             try:
-                # Check if streaming is enabled
-                use_streaming = self.config.streaming_enabled
-
                 if use_streaming:
-                    # Show streaming panel
                     self.streaming_panel.show_transcribing(
                         show_translation=self.config.translation_enabled
                     )
-
-                    # Transcribe with streaming
                     result = self.transcriber.transcribe_streaming(
                         audio_bytes,
-                        on_chunk=self.streaming_panel.update_transcription
+                        on_chunk=self.streaming_panel.update_transcription,
+                        provider_id=provider_id,
                     )
                 else:
-                    # Regular non-streaming transcription
-                    result = self.transcriber.transcribe(audio_bytes)
+                    result = self.transcriber.transcribe(audio_bytes, provider_id=provider_id)
+
+                self._process_turn_result(
+                    turn_id,
+                    result,
+                    use_streaming=use_streaming,
+                    stats_already_recorded=True,
+                )
+            except Exception as e:
+                self._handle_transcription_error(turn_id, e, use_streaming)
+
+        threading.Thread(target=do_transcribe, daemon=True).start()
+
+    def _process_turn_result(
+        self,
+        turn_id: int,
+        result: TranscriptionResult,
+        *,
+        use_streaming: bool,
+        stats_already_recorded: bool,
+    ) -> None:
+        """Process the final transcript once, even if multiple callbacks race."""
+        turn = self._get_active_turn(turn_id)
+        if not turn or turn.result_processing_started:
+            return
+
+        turn.result_processing_started = True
+        turn.phase = RecordingTurnPhase.FINALIZING
+        self._cancel_turn_timers(turn)
+        self._close_live_session(turn)
+
+        def finalize_result():
+            try:
+                if not stats_already_recorded:
+                    self.config.add_transcription_stats(result.cost_estimate)
+
+                if use_streaming and result.text:
+                    self.streaming_panel.update_transcription(result.text)
 
                 if result.text:
                     final_text = result.text
                     did_translate = False
 
-                    # Translate if enabled
                     if self.config.translation_enabled:
                         try:
                             if self.config.show_hud:
@@ -2364,7 +2454,6 @@ class WhisperHUDApp(rumps.App):
                             if use_streaming:
                                 self.streaming_panel.show_translating()
 
-                            # Check if translation provider supports streaming
                             use_translation_streaming = (
                                 use_streaming
                                 and self.translator.supports_streaming()
@@ -2393,19 +2482,16 @@ class WhisperHUDApp(rumps.App):
                             final_text = translation.text
                             did_translate = True
 
-                            # Get target language name for display
                             lang_name = self.translator.get_supported_languages().get(
                                 self.config.target_language,
                                 self.config.target_language
                             )
                             word_count = len(final_text.split())
                             self._set_title(self.ICON_SUCCESS)
-
                             if self.config.show_hud:
                                 self.hud.show_success(f"✓ {word_count} words → {lang_name}")
 
                         except Exception as e:
-                            # Translation failed, use original text
                             logger.warning(f"Translation failed: {e}")
                             final_text = result.text
                             word_count = len(final_text.split())
@@ -2413,20 +2499,16 @@ class WhisperHUDApp(rumps.App):
                             if self.config.show_hud:
                                 self.hud.show_success(f"✓ {word_count} words (translation failed)")
                     else:
-                        # No translation, just show word count
                         word_count = len(final_text.split())
                         self._set_title(self.ICON_SUCCESS)
                         if self.config.show_hud:
                             self.hud.show_success(f"✓ {word_count} words")
 
-                    # Play completion sound if enabled
                     self._play_completion_sound()
 
-                    # Show completion on streaming panel
                     if use_streaming:
                         self.streaming_panel.show_complete()
 
-                    # Save to history
                     self.config.add_to_history(
                         text=final_text,
                         provider=result.provider,
@@ -2434,9 +2516,8 @@ class WhisperHUDApp(rumps.App):
                         original_text=result.text if did_translate else ""
                     )
 
-                    # Auto-paste if enabled
                     if self.config.auto_paste:
-                        time.sleep(0.1)  # Brief delay
+                        time.sleep(0.1)
                         self._paste_to_target(final_text)
                 else:
                     self._set_title(self.ICON_ERROR)
@@ -2444,88 +2525,299 @@ class WhisperHUDApp(rumps.App):
                         self.hud.show_error("No speech detected")
                     if use_streaming:
                         self.streaming_panel.hide()
-
-            except ValueError as e:
-                # Configuration error (no API key)
-                self._set_title(self.ICON_ERROR)
-                error_msg = str(e).lower()
-                if "api key" in error_msg or "not configured" in error_msg:
-                    if self._is_passphrase_store_locked():
-                        display_error = "API keys locked"
-                    else:
-                        display_error = "API key required"
-                else:
-                    display_error = str(e)[:25]
-                if self.config.show_hud:
-                    self.hud.show_error(display_error)
-                if self.config.streaming_enabled:
-                    self.streaming_panel.hide()
-                # Show notification with action
-                if self._is_passphrase_store_locked():
-                    self._notify(
-                        "WhisperHUD",
-                        "Unlock Required",
-                        "Unlock API key storage in Privacy & Security."
-                    )
-                else:
-                    self._notify(
-                        "WhisperHUD",
-                        "Configuration Required",
-                        "Click the menu bar icon to add your API key."
-                    )
-
             except Exception as e:
-                error_str = str(e).lower()
-                logger.error(f"Transcription error: {e}")
-                self._set_title(self.ICON_ERROR)
+                self._handle_transcription_error(turn_id, e, use_streaming, already_finalizing=True)
+                return
 
-                # Provide specific, helpful error messages
-                if "timeout" in error_str or "timed out" in error_str:
-                    display_error = "Connection timeout"
-                    detail = "Check your internet connection"
-                elif "connection" in error_str or "network" in error_str:
-                    display_error = "Network error"
-                    detail = "Check your internet connection"
-                elif "401" in error_str or "unauthorized" in error_str or "invalid" in error_str:
-                    display_error = "Invalid API key"
-                    detail = "Update your API key in settings"
-                elif "403" in error_str or "forbidden" in error_str:
-                    display_error = "Access denied"
-                    detail = "Check API key permissions"
-                elif "429" in error_str or "rate" in error_str:
-                    display_error = "Rate limited"
-                    detail = "Too many requests, wait a moment"
-                elif "500" in error_str or "502" in error_str or "503" in error_str:
-                    display_error = "Server error"
-                    detail = "API service temporarily unavailable"
-                elif "microphone" in error_str or "audio" in error_str:
-                    display_error = "Mic access denied"
-                    detail = "Check microphone permissions"
-                else:
-                    display_error = "Transcription failed"
-                    detail = str(e)[:50]
+            self._finish_turn_cleanup(turn_id)
 
-                if self.config.show_hud:
-                    self.hud.show_error(display_error)
-                if self.config.streaming_enabled:
-                    self.streaming_panel.hide()
+        threading.Thread(target=finalize_result, daemon=True).start()
 
-                # Show detailed notification
+    def _handle_transcription_error(
+        self,
+        turn_id: int,
+        error: Exception,
+        use_streaming: bool,
+        *,
+        already_finalizing: bool = False,
+    ) -> None:
+        """Show a terminal transcription error and clean up if the turn is still current."""
+        turn = self._get_active_turn(turn_id)
+        if not turn:
+            return
+
+        if not already_finalizing:
+            if turn.result_processing_started:
+                return
+            turn.result_processing_started = True
+            turn.phase = RecordingTurnPhase.FINALIZING
+
+        self._cancel_turn_timers(turn)
+        self._close_live_session(turn)
+
+        error_str = str(error).lower()
+        logger.error(f"Transcription error: {error}")
+        self._set_title(self.ICON_ERROR)
+
+        if "timeout" in error_str or "timed out" in error_str:
+            display_error = "Connection timeout"
+            detail = "Check your internet connection"
+        elif "connection" in error_str or "network" in error_str:
+            display_error = "Network error"
+            detail = "Check your internet connection"
+        elif "401" in error_str or "unauthorized" in error_str or "invalid" in error_str:
+            display_error = "Invalid API key"
+            detail = "Update your API key in settings"
+        elif "403" in error_str or "forbidden" in error_str:
+            display_error = "Access denied"
+            detail = "Check API key permissions"
+        elif "429" in error_str or "rate" in error_str:
+            display_error = "Rate limited"
+            detail = "Too many requests, wait a moment"
+        elif "500" in error_str or "502" in error_str or "503" in error_str:
+            display_error = "Server error"
+            detail = "API service temporarily unavailable"
+        elif "microphone" in error_str or "audio" in error_str:
+            display_error = "Mic access denied"
+            detail = "Check microphone permissions"
+        elif isinstance(error, ValueError):
+            if "api key" in error_str or "not configured" in error_str:
+                display_error = "API keys locked" if self._is_passphrase_store_locked() else "API key required"
+                detail = "Unlock API key storage in Privacy & Security." if self._is_passphrase_store_locked() else "Click the menu bar icon to add your API key."
+            else:
+                display_error = str(error)[:25]
+                detail = str(error)[:50]
+        else:
+            display_error = "Transcription failed"
+            detail = str(error)[:50]
+
+        if self.config.show_hud:
+            self.hud.show_error(display_error)
+        if use_streaming:
+            self.streaming_panel.hide()
+
+        if isinstance(error, ValueError) and ("api key" in error_str or "not configured" in error_str):
+            if self._is_passphrase_store_locked():
                 self._notify(
                     "WhisperHUD",
-                    display_error,
-                    detail
+                    "Unlock Required",
+                    "Unlock API key storage in Privacy & Security."
                 )
+            else:
+                self._notify(
+                    "WhisperHUD",
+                    "Configuration Required",
+                    "Click the menu bar icon to add your API key."
+                )
+        else:
+            self._notify(
+                "WhisperHUD",
+                display_error,
+                detail
+            )
 
-            finally:
-                # Reset icon after a brief delay
-                time.sleep(1.5)
+        self._finish_turn_cleanup(turn_id)
+
+    def _finish_turn_cleanup(self, turn_id: int) -> None:
+        """Reset UI for the finished turn without clobbering a newer one."""
+        time.sleep(1.5)
+        turn = self._get_active_turn(turn_id)
+        if not turn:
+            return
+
+        self._cancel_turn_timers(turn)
+        self._close_live_session(turn)
+        self._active_turn = None
+        self._set_title(self._get_idle_icon())
+        if self.widget:
+            self.widget.set_idle()
+        self._schedule_menu_rebuild()
+
+    def _start_recording(self):
+        """Called when hotkey is pressed."""
+        if not self._ensure_cloud_credentials_ready(allow_create=False):
+            self._notify(
+                "WhisperHUD",
+                "Cloud Keys Locked",
+                "Unlock passphrase storage to use cloud providers, or switch to Apple local.",
+            )
+            return
+
+        if self.config.history_encrypted:
+            self._ensure_history_encryption_session(create_if_missing=False, prompt_unlock=False)
+
+        with self._recording_lock:
+            with self._lock:
+                if self._is_recording:
+                    return
+                self._is_recording = True
+                self._turn_counter += 1
+                turn = ActiveTranscriptionTurn(
+                    turn_id=self._turn_counter,
+                    provider_id=self.config.default_provider,
+                )
+                self._active_turn = turn
+
+            self._set_title(self.ICON_RECORDING)
+
+            if self.config.show_hud:
+                self.hud.show_recording()
+
+            if self.widget:
+                self.widget.set_recording()
+
+            on_audio_chunk = None
+            try:
+                if self.transcriber.supports_live_input(turn.provider_id):
+                    turn.live_session = self.transcriber.create_live_session(
+                        provider_id=turn.provider_id,
+                        on_partial=lambda text, tid=turn.turn_id: self._on_live_session_partial(tid, text),
+                        on_final=lambda result, tid=turn.turn_id: self._on_live_session_final(tid, result),
+                        on_error=lambda error, tid=turn.turn_id: self._on_live_session_error(tid, error),
+                        on_ready=lambda tid=turn.turn_id: self._on_live_session_ready(tid),
+                        language=self._selected_live_language(),
+                    )
+                    on_audio_chunk = lambda chunk, rate, tid=turn.turn_id: self._on_live_audio_chunk(tid, chunk, rate)
+            except Exception as e:
+                logger.error(f"Failed to prepare live transcription session: {e}")
+                with self._lock:
+                    self._is_recording = False
+                    self._active_turn = None
                 self._set_title(self._get_idle_icon())
+                if self.config.show_hud:
+                    self.hud.show_error("Provider setup required")
                 if self.widget:
                     self.widget.set_idle()
-                self._schedule_menu_rebuild()  # Refresh menu to update stats
+                self._notify(
+                    "WhisperHUD",
+                    "Configuration Required",
+                    "Add or unlock your OpenAI API key before using OpenAI Realtime."
+                )
+                return
 
-        threading.Thread(target=do_transcribe, daemon=True).start()
+            try:
+                if self.config.auto_stop:
+                    self.recorder.set_silence_settings(
+                        enabled=True,
+                        silence_duration=self.config.silence_duration,
+                        silence_threshold=self.config.silence_threshold
+                    )
+                    self.recorder.start(
+                        on_silence=self._on_silence_detected,
+                        on_audio_chunk=on_audio_chunk,
+                    )
+                else:
+                    self.recorder.start(on_audio_chunk=on_audio_chunk)
+            except Exception as e:
+                logger.error(f"Failed to start recording: {e}")
+                with self._lock:
+                    self._is_recording = False
+                    self._active_turn = None
+                if turn.live_session:
+                    self._close_live_session(turn)
+                self._set_title(self._get_idle_icon())
+                if self.config.show_hud:
+                    self.hud.show_error("Microphone error")
+                if self.widget:
+                    self.widget.set_idle()
+                self._notify(
+                    "WhisperHUD",
+                    "Recording Failed",
+                    "Check microphone permissions and device availability."
+                )
+                return
+
+            if turn.live_session:
+                if self.config.streaming_enabled:
+                    self.streaming_panel.show_transcribing(
+                        show_translation=self.config.translation_enabled
+                    )
+                turn.connect_timer = self._start_live_connect_timer(turn.turn_id)
+                turn.live_session.start()
+
+            self._start_level_monitor(turn.turn_id)
+            self._start_max_duration_timer(turn.turn_id)
+
+    def _start_level_monitor(self, turn_id: int):
+        """Start monitoring audio levels for the current turn."""
+        def monitor_levels():
+            while self._is_recording and self._get_active_turn(turn_id):
+                level = self.recorder.get_audio_level()
+                if self.config.show_hud:
+                    self.hud.update_audio_level(level)
+                if self.streaming_panel and hasattr(self.streaming_panel, 'update_audio_level'):
+                    self.streaming_panel.update_audio_level(level)
+                time.sleep(0.05)
+
+        self._level_monitor_thread = threading.Thread(target=monitor_levels, daemon=True)
+        self._level_monitor_thread.start()
+
+    def _start_max_duration_timer(self, turn_id: int):
+        """Auto-stop a turn after the configured maximum duration."""
+        max_duration = self.config.max_recording_duration
+
+        def check_duration():
+            start = time.time()
+            while self._is_recording and self._get_active_turn(turn_id):
+                if time.time() - start >= max_duration:
+                    logger.info("Max recording duration (%ss) reached, auto-stopping", max_duration)
+                    self._request_stop("max_duration")
+                    break
+                time.sleep(1)
+
+        self._max_duration_thread = threading.Thread(target=check_duration, daemon=True)
+        self._max_duration_thread.start()
+
+    def _on_silence_detected(self):
+        """Called when silence is detected after speech."""
+        self._request_stop("silence")
+
+    def _request_stop(self, reason: str) -> None:
+        """Stop recording and choose live finalization or batch fallback once."""
+        with self._recording_lock:
+            with self._lock:
+                turn = self._active_turn
+                if not self._is_recording or not turn:
+                    return
+                self._is_recording = False
+                if turn.phase in {RecordingTurnPhase.STOP_REQUESTED, RecordingTurnPhase.FINALIZING}:
+                    return
+                turn.phase = RecordingTurnPhase.STOP_REQUESTED
+                turn.stop_reason = reason
+
+            self._set_title(self.ICON_PROCESSING)
+
+            if self.config.show_hud:
+                self.hud.show_processing()
+
+            if self.widget:
+                self.widget.set_processing()
+
+            turn.audio_bytes = self.recorder.stop()
+
+        if not turn.audio_bytes or len(turn.audio_bytes) < 1000:
+            self._cancel_turn_timers(turn)
+            self._close_live_session(turn)
+            self.hud.hide()
+            if self.config.streaming_enabled:
+                self.streaming_panel.hide()
+            self._active_turn = None
+            self._set_title(self._get_idle_icon())
+            if self.widget:
+                self.widget.set_idle()
+            return
+
+        if turn.live_session and turn.live_session.is_ready():
+            turn.finalize_timer = self._start_live_finalize_timer(turn.turn_id)
+            turn.live_session.request_stop()
+            return
+
+        turn.batch_fallback_started = True
+        self._degrade_turn_to_batch(turn.turn_id, f"Stop requested before live session ready ({reason})")
+
+    def _stop_recording(self):
+        """Called when hotkey is released."""
+        self._request_stop("manual_release")
 
     def _show_apple_setup_help(self):
         """Show setup help for Apple Speech Recognition."""
@@ -2622,6 +2914,7 @@ class WhisperHUDApp(rumps.App):
                         return
                     # Reset cached clients so new key is used immediately
                     self.transcriber.reset_provider("openai")
+                    self.transcriber.reset_provider("openai_realtime")
                     self.translator.reset_provider("openai")
                     self._schedule_menu_rebuild()
                     self._notify(
@@ -4220,8 +4513,6 @@ class WhisperHUDApp(rumps.App):
     def _widget_start_recording(self):
         """Called when widget is clicked to start recording."""
         self._start_recording()
-        if self.widget:
-            self.widget.set_recording()
 
     def _widget_stop_recording(self):
         """Called when widget is clicked to stop recording."""

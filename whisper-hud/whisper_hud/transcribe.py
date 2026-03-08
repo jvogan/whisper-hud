@@ -6,8 +6,9 @@ Supports both cloud (OpenAI, Gemini) and local (Apple Speech, Whisper, Parakeet)
 """
 
 from typing import Optional, Dict, Type, Callable
-from .providers.base import TranscriptionProvider, TranscriptionResult
+from .providers.base import TranscriptionProvider, TranscriptionResult, LiveTranscriptionSession
 from .providers.openai_whisper import OpenAITranscribeProvider
+from .providers.openai_realtime import OpenAIRealtimeProvider
 from .providers.gemini import GeminiProvider
 from .providers.apple_speech import AppleSpeechProvider
 from .providers.whisper_local import WhisperLocalProvider
@@ -22,6 +23,7 @@ class TranscriptionManager:
     # Registry of available providers
     PROVIDER_CLASSES: Dict[str, Type[TranscriptionProvider]] = {
         "openai": OpenAITranscribeProvider,
+        "openai_realtime": OpenAIRealtimeProvider,
         "gemini": GeminiProvider,
         "apple": AppleSpeechProvider,
         "whisper_local": WhisperLocalProvider,
@@ -30,7 +32,7 @@ class TranscriptionManager:
 
     # Provider categories for UI organization
     PROVIDER_CATEGORIES = {
-        "cloud": ["openai", "gemini"],
+        "cloud": ["openai", "openai_realtime", "gemini"],
         "local": ["apple", "whisper_local", "parakeet"],
     }
 
@@ -59,6 +61,15 @@ class TranscriptionManager:
             "category": "cloud",
             "requires_download": False,
             "models": OpenAITranscribeProvider().get_models()
+        })
+        providers.append({
+            "id": "openai_realtime",
+            "name": "OpenAI Realtime",
+            "display_name": "OpenAI Realtime",
+            "configured": "openai" in configured,
+            "category": "cloud",
+            "requires_download": False,
+            "models": OpenAIRealtimeProvider().get_models()
         })
         providers.append({
             "id": "gemini",
@@ -178,6 +189,42 @@ class TranscriptionManager:
         self.config.add_transcription_stats(result.cost_estimate)
 
         return result
+
+    def supports_live_input(self, provider_id: Optional[str] = None) -> bool:
+        """Check whether a provider supports live microphone input."""
+        provider_id = provider_id or self.config.default_provider
+        provider = self.get_provider(provider_id)
+        return bool(provider and provider.supports_live_input())
+
+    def create_live_session(
+        self,
+        *,
+        on_partial: Callable[[str], None],
+        on_final: Callable[[TranscriptionResult], None],
+        on_error: Callable[[Exception], None],
+        on_ready: Optional[Callable[[], None]] = None,
+        provider_id: Optional[str] = None,
+        language: Optional[str] = None,
+        prompt: Optional[str] = None,
+    ) -> LiveTranscriptionSession:
+        """Create a live transcription session for the selected provider."""
+        provider_id = provider_id or self.config.default_provider
+        provider = self.get_provider(provider_id)
+        if not provider:
+            raise ValueError(f"Unknown provider: {provider_id}")
+        if not provider.supports_live_input():
+            raise ValueError(f"Provider '{provider_id}' does not support live input.")
+        if not provider.is_configured():
+            raise ValueError(f"Provider '{provider_id}' is not configured.")
+
+        return provider.create_live_session(
+            on_partial=on_partial,
+            on_final=on_final,
+            on_error=on_error,
+            on_ready=on_ready,
+            language=language,
+            prompt=prompt,
+        )
 
     def _find_fallback_provider(self, current_provider: str) -> Optional[TranscriptionProvider]:
         """Find a fallback provider if the current one isn't configured."""

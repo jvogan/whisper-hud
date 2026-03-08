@@ -112,6 +112,41 @@ class TestAudioRecorder:
             assert recorder.recording is False
             assert recorder._stream is None
 
+    def test_start_emits_live_audio_chunks(self):
+        """Recorder should forward chunks to the optional live callback."""
+
+        class FakeInputStream:
+            last_instance = None
+
+            def __init__(self, **kwargs):
+                self.callback = kwargs["callback"]
+                FakeInputStream.last_instance = self
+
+            def start(self):
+                return None
+
+            def stop(self):
+                return None
+
+            def close(self):
+                return None
+
+        with patch('sounddevice.InputStream', FakeInputStream):
+            with patch('whisper_hud.recorder.is_valid_input_device', return_value=True):
+                from whisper_hud.recorder import AudioRecorder
+
+                recorder = AudioRecorder(sample_rate=16000)
+                chunks = []
+                recorder.start(on_audio_chunk=lambda chunk, rate: chunks.append((chunk.copy(), rate)))
+
+                audio_chunk = np.ones((256, 1), dtype=np.float32) * 0.25
+                FakeInputStream.last_instance.callback(audio_chunk, 256, None, None)
+                recorder.stop()
+
+                assert len(chunks) == 1
+                np.testing.assert_allclose(chunks[0][0], audio_chunk)
+                assert chunks[0][1] == 16000
+
 
 class TestInputDevices:
     """Tests for input device discovery."""

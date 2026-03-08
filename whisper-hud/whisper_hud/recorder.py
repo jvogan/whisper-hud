@@ -7,13 +7,14 @@ suitable for API upload to OpenAI or Gemini.
 Includes silence detection for auto-stop functionality.
 """
 
-import sounddevice as sd
-import numpy as np
-from scipy.io import wavfile
 import io
 import threading
 import time
 from typing import Optional, Callable
+
+import numpy as np
+import sounddevice as sd
+from scipy.io import wavfile
 
 from .logging_config import get_logger
 
@@ -64,6 +65,7 @@ class AudioRecorder:
         self._speech_detected = False
         self._silence_start: Optional[float] = None
         self._on_silence: Optional[Callable[[], None]] = None
+        self._on_audio_chunk: Optional[Callable[[np.ndarray, int], None]] = None
         self._silence_triggered = False
 
         # Audio level monitoring
@@ -90,13 +92,18 @@ class AudioRecorder:
         # Set speech threshold slightly above silence threshold for reliable detection
         self._speech_threshold = silence_threshold * 1.5
 
-    def start(self, on_silence: Optional[Callable[[], None]] = None) -> None:
+    def start(
+        self,
+        on_silence: Optional[Callable[[], None]] = None,
+        on_audio_chunk: Optional[Callable[[np.ndarray, int], None]] = None,
+    ) -> None:
         """
         Start recording.
 
         Args:
             on_silence: Optional callback when silence is detected after speech.
                         If provided, enables auto-stop on silence.
+            on_audio_chunk: Optional callback for live audio chunk delivery.
         """
         with self._lock:
             if self.recording:
@@ -120,6 +127,7 @@ class AudioRecorder:
             self._speech_detected = False
             self._silence_start = None
             self._on_silence = on_silence
+            self._on_audio_chunk = on_audio_chunk
             self._silence_triggered = False
             self._recording_start = time.time()
             self._current_level = 0.0
@@ -134,6 +142,12 @@ class AudioRecorder:
                     return
 
                 self.audio_data.append(indata.copy())
+
+                if self._on_audio_chunk:
+                    try:
+                        self._on_audio_chunk(indata.copy(), self.sample_rate)
+                    except Exception:
+                        logger.debug("Live audio chunk callback failed", exc_info=True)
 
                 # Calculate RMS level for monitoring
                 rms = float(np.sqrt(np.mean(indata ** 2)))
@@ -279,6 +293,7 @@ class AudioRecorder:
         with self._lock:
             self.recording = False
             self._on_silence = None
+            self._on_audio_chunk = None
 
             if self._stream:
                 try:
