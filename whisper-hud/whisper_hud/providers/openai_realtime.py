@@ -190,7 +190,7 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
                 return
 
             current = self._partial_transcripts.get(item_id, "")
-            updated = delta if self._model == "whisper-1" else current + delta
+            updated = current + delta
             if item_id:
                 self._partial_transcripts[item_id] = updated
             self._on_partial(updated)
@@ -354,9 +354,6 @@ class OpenAIRealtimeProvider(TranscriptionProvider):
     name = "openai_realtime"
     display_name = "OpenAI Realtime"
     DEFAULT_MODEL = "gpt-4o-mini-transcribe"
-    BATCH_FALLBACK_MODELS = {
-        "gpt-4o-transcribe-latest": "gpt-4o-transcribe",
-    }
 
     MODELS = [
         {
@@ -367,21 +364,9 @@ class OpenAIRealtimeProvider(TranscriptionProvider):
             "recommended": True,
         },
         {
-            "id": "gpt-4o-transcribe-latest",
-            "name": "GPT-4o Transcribe Latest",
-            "description": "Floating alias for the current high-accuracy OpenAI Realtime transcription model",
-            "cost_per_minute": 0.006,
-        },
-        {
             "id": "gpt-4o-transcribe",
             "name": "GPT-4o Transcribe",
             "description": "Higher-accuracy live dictation for noisy or complex speech",
-            "cost_per_minute": 0.006,
-        },
-        {
-            "id": "whisper-1",
-            "name": "Whisper v2",
-            "description": "Classic Whisper transcription model over a live Realtime session",
             "cost_per_minute": 0.006,
         },
     ]
@@ -391,8 +376,7 @@ class OpenAIRealtimeProvider(TranscriptionProvider):
 
     def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
         """Fallback one-shot transcription if the app calls this provider synchronously."""
-        batch_model = self.BATCH_FALLBACK_MODELS.get(self.model, self.model)
-        batch_provider = OpenAITranscribeProvider(model=batch_model)
+        batch_provider = OpenAITranscribeProvider(model=self.model)
         result = batch_provider.transcribe(audio_bytes)
         return TranscriptionResult(
             text=result.text,

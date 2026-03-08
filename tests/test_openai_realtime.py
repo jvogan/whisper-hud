@@ -151,29 +151,6 @@ def test_session_ignores_completed_events_for_other_items_and_falls_back_to_part
     assert finals[0].text == "hello"
 
 
-def test_whisper_delta_replaces_partial_text_instead_of_appending():
-    """Whisper delta events contain the full turn transcript, not incremental fragments."""
-    session, partials, _, _, _ = _build_session(model="whisper-1")
-
-    session._handle_event(
-        SimpleNamespace(
-            type="conversation.item.input_audio_transcription.delta",
-            item_id="item-1",
-            delta="hello",
-        )
-    )
-    session._handle_event(
-        SimpleNamespace(
-            type="conversation.item.input_audio_transcription.delta",
-            item_id="item-1",
-            delta="hello there",
-        )
-    )
-
-    assert partials == ["hello", "hello there"]
-    assert session._partial_transcripts["item-1"] == "hello there"
-
-
 def test_encode_audio_chunk_resamples_stereo_audio_to_24khz_pcm16():
     """Live audio chunks should be resampled and encoded as mono PCM16."""
     stereo = np.ones((480, 2), dtype=np.float32)
@@ -186,14 +163,13 @@ def test_encode_audio_chunk_resamples_stereo_audio_to_24khz_pcm16():
     assert pcm_bytes.shape == (240,)
 
 
-def test_provider_normalizes_models_and_uses_batch_fallback_for_latest():
-    """The realtime provider should expose supported models and map unsupported batch fallbacks."""
+def test_provider_normalizes_models_and_uses_batch_fallback_for_supported_model():
+    """The realtime provider should stay within the v1 two-model scope and batch fallback should mirror it."""
     default_provider = OpenAIRealtimeProvider(model="unsupported")
     assert default_provider.get_current_model() == "gpt-4o-mini-transcribe"
 
     model_ids = [model["id"] for model in default_provider.get_models()]
-    assert "gpt-4o-transcribe-latest" in model_ids
-    assert "whisper-1" in model_ids
+    assert model_ids == ["gpt-4o-mini-transcribe", "gpt-4o-transcribe"]
 
     with patch("whisper_hud.providers.openai_realtime.OpenAITranscribeProvider") as batch_cls:
         batch_cls.return_value.transcribe.return_value = SimpleNamespace(
@@ -203,7 +179,7 @@ def test_provider_normalizes_models_and_uses_batch_fallback_for_latest():
             model="gpt-4o-transcribe",
             language="en",
         )
-        provider = OpenAIRealtimeProvider(model="gpt-4o-transcribe-latest")
+        provider = OpenAIRealtimeProvider(model="gpt-4o-transcribe")
         result = provider.transcribe(b"wav")
 
     batch_cls.assert_called_once_with(model="gpt-4o-transcribe")
@@ -219,7 +195,7 @@ def test_provider_create_live_session_uses_openai_key_and_selected_model():
             expected_session = object()
             session_cls.return_value = expected_session
 
-            provider = OpenAIRealtimeProvider(model="gpt-4o-transcribe-latest")
+            provider = OpenAIRealtimeProvider(model="gpt-4o-transcribe")
             session = provider.create_live_session(
                 on_partial=lambda _: None,
                 on_final=lambda _: None,
@@ -233,7 +209,7 @@ def test_provider_create_live_session_uses_openai_key_and_selected_model():
     session_cls.assert_called_once()
     kwargs = session_cls.call_args.kwargs
     assert kwargs["api_key"] == "sk-test"
-    assert kwargs["model"] == "gpt-4o-transcribe-latest"
+    assert kwargs["model"] == "gpt-4o-transcribe"
     assert kwargs["cost_per_minute"] == pytest.approx(0.006)
     assert kwargs["language"] == "en"
     assert kwargs["prompt"] == "Use punctuation."
