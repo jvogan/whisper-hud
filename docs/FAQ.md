@@ -2,8 +2,10 @@
 
 ## Do I need an API key?
 
-Only if you use cloud providers (OpenAI, Gemini, or Anthropic).  
+Only if you use cloud providers (OpenAI batch, OpenAI Realtime, Gemini, or Anthropic).  
 Local providers (Apple, Whisper Local, Parakeet, Ollama translation) work without API keys.
+
+OpenAI Realtime reuses the same OpenAI API key as the batch OpenAI provider.
 
 ## What is the easiest first-time setup?
 

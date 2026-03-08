@@ -77,7 +77,7 @@ class SetupWizard:
         # Collected data
         # Default to easiest no-account path for first-time users.
         self._transcription_mode = "local"  # "cloud" or "local"
-        self._selected_provider = "apple"  # Cloud: gemini/openai, Local: apple/whisper_local/parakeet
+        self._selected_provider = "apple"  # Cloud: gemini/openai/openai_realtime, Local: apple/whisper_local/parakeet
         self._api_key = ""
         self._translation_enabled = False
         self._translation_provider = "apple"
@@ -343,31 +343,27 @@ class SetupWizard:
         self._content_view.addSubview_(provider_label)
 
         # Provider buttons
-        y -= 45
-        btn_width = (self.WIDTH - 2 * self.PADDING - 20) / 2
+        y -= 44
+        provider_specs = [
+            ("gemini", "Gemini", "Free tier available"),
+            ("openai", "OpenAI", "Batch upload transcription"),
+            ("openai_realtime", "OpenAI Realtime", "Low-latency live dictation"),
+        ]
 
-        gemini_btn = self._create_provider_button(
-            "Gemini",
-            "Free tier available!",
-            NSMakeRect(self.PADDING, y, btn_width, 40),
-            selected=self._selected_provider == "gemini",
-            action=lambda: self._select_provider("gemini")
-        )
-        self._content_view.addSubview_(gemini_btn)
-        self._provider_buttons["gemini"] = gemini_btn
-
-        openai_btn = self._create_provider_button(
-            "OpenAI",
-            "Pay per use",
-            NSMakeRect(self.PADDING + btn_width + 20, y, btn_width, 40),
-            selected=self._selected_provider == "openai",
-            action=lambda: self._select_provider("openai")
-        )
-        self._content_view.addSubview_(openai_btn)
-        self._provider_buttons["openai"] = openai_btn
+        for provider_id, title_text, subtitle in provider_specs:
+            button = self._create_provider_button(
+                title_text,
+                subtitle,
+                NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 40),
+                selected=self._selected_provider == provider_id,
+                action=lambda pid=provider_id: self._select_provider(pid)
+            )
+            self._content_view.addSubview_(button)
+            self._provider_buttons[provider_id] = button
+            y -= 48
 
         # API key input
-        y -= 40
+        y -= 8
         key_label = self._create_label(
             "Enter your API key:",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 24),
@@ -385,11 +381,11 @@ class SetupWizard:
         self._content_view.addSubview_(self._api_key_field)
 
         # Help text with links
-        y -= 60
+        y -= 56
         help_text = self._create_label(
             "Get your API key:\n"
             "  Gemini: aistudio.google.com/apikey (free tier!)\n"
-            "  OpenAI: platform.openai.com/api-keys",
+            "  OpenAI + OpenAI Realtime: platform.openai.com/api-keys",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 50),
             font_size=12,
             color=NSColor.colorWithCalibratedRed_green_blue_alpha_(0.6, 0.8, 1.0, 1.0)
@@ -784,6 +780,7 @@ class SetupWizard:
         provider_names = {
             "gemini": "Google Gemini",
             "openai": "OpenAI",
+            "openai_realtime": "OpenAI Realtime",
             "apple": "Apple Speech",
             "whisper_local": "Whisper Local",
             "parakeet": "Parakeet"
@@ -1238,7 +1235,7 @@ class SetupWizard:
             return
 
         # Basic validation
-        if self._selected_provider == "openai" and not self._api_key.startswith("sk-"):
+        if self._selected_provider in {"openai", "openai_realtime"} and not self._api_key.startswith("sk-"):
             self._show_error("OpenAI keys should start with 'sk-'")
             return
 
@@ -1273,7 +1270,8 @@ class SetupWizard:
                 return
 
         # Save the API key
-        if not set_api_key(self._selected_provider, self._api_key):
+        key_provider = "openai" if self._selected_provider == "openai_realtime" else self._selected_provider
+        if not set_api_key(key_provider, self._api_key):
             self._show_error("Could not store API key. Check credential storage settings.")
             return
 

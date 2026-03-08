@@ -7,6 +7,7 @@ WhisperHUD supports multiple transcription providers, each with different trade-
 | Provider | Speed | Accuracy | Privacy | Cost | Setup |
 |----------|-------|----------|---------|------|-------|
 | **OpenAI** | Fast | Excellent | Cloud | ~$0.006/min | API key |
+| **OpenAI Realtime** | Very Fast | Excellent | Cloud | OpenAI Realtime pricing | Same OpenAI API key |
 | **Gemini** | Very Fast | Excellent | Cloud | Free tier available | API key |
 | **Apple** | Fast | Good | On-device | Free | None |
 | **Whisper Local** | Slow | Excellent | On-device | Free | Model download |
@@ -16,7 +17,7 @@ WhisperHUD supports multiple transcription providers, each with different trade-
 
 ## Cloud Providers
 
-### OpenAI Whisper
+### OpenAI (Batch)
 
 **Models available:**
 - `gpt-4o-transcribe` - Best quality, faster (recommended)
@@ -39,6 +40,34 @@ WhisperHUD supports multiple transcription providers, each with different trade-
 - Requires internet
 - Audio sent to cloud
 - Costs money
+
+---
+
+### OpenAI Realtime
+
+Uses OpenAI's Realtime WebSocket transcription flow for low-latency dictation.
+
+**Models available:**
+- `gpt-4o-mini-transcribe` - Fastest live dictation option (default)
+- `gpt-4o-transcribe` - Higher accuracy live dictation
+
+**Setup:**
+1. Get API key from [platform.openai.com](https://platform.openai.com/api-keys)
+2. Enter key in WhisperHUD → API Keys → OpenAI
+3. Select **OpenAI Realtime** as your transcription provider
+
+**Pricing:** Uses OpenAI Realtime transcription pricing rather than the batch minute estimates above.
+
+**Pros:**
+- True live partial transcripts while you are still speaking
+- Uses the same OpenAI key as batch transcription
+- Good fit for push-to-talk dictation
+
+**Cons:**
+- Requires internet
+- Audio sent to cloud
+- More moving parts than batch upload
+- v1 focuses on transcription only; no diarization or cleanup pass
 
 ---
 
@@ -154,13 +183,13 @@ Then select **Parakeet** in WhisperHUD. The model downloads on first use.
 ## Choosing a Provider
 
 ### For best accuracy
-→ **OpenAI** (`gpt-4o-transcribe`) or **Local Whisper** (`large-v3-turbo`)
+→ **OpenAI** (`gpt-4o-transcribe`), **OpenAI Realtime** (`gpt-4o-transcribe`), or **Local Whisper** (`large-v3-turbo`)
 
 ### For privacy
 → **Apple** or **Local Whisper**
 
 ### For speed
-→ **Gemini** or **Apple**
+→ **OpenAI Realtime**, **Gemini**, or **Apple**
 
 ### For free usage
 → **Apple** (unlimited) or **Gemini** (free tier) or **Local Whisper**

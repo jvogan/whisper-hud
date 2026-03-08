@@ -12,7 +12,8 @@
 
 | Provider | Requires | Notes |
 |---------|----------|-------|
-| OpenAI | API key | Cloud transcription |
+| OpenAI | OpenAI API key | Cloud batch transcription |
+| OpenAI Realtime | OpenAI API key | Cloud live dictation, true partials while recording |
 | Gemini | API key | Cloud transcription |
 | Apple Speech | macOS 12+ | On‑device |
 | Whisper Local | `faster-whisper`, model download | On‑device |

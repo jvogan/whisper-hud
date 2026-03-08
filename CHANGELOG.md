@@ -10,6 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add entries under **Unreleased** during development.
 - Include a date when you cut a release.
 
+## [Unreleased]
+
+### Added
+
+- Added **OpenAI Realtime** as a separate transcription provider for low-latency live dictation.
+- Added live microphone chunk forwarding, Realtime session handling, and batch OpenAI fallback for failed Realtime turns.
+- Added targeted tests for Realtime provider wiring, recorder chunk callbacks, and turn-state regressions.
+
+### Changed
+
+- Updated provider menus, setup flow, and docs to distinguish **OpenAI (batch)** from **OpenAI Realtime**.
+- Raised the declared OpenAI SDK floor to the Realtime-capable generation and documented the required WebSocket dependency.
+- Updated cloud-provider copy to clarify that OpenAI Realtime reuses the existing OpenAI API key.
+
 ## [1.0.0] - 2026-02-07
 
 ### Added

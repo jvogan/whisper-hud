@@ -27,7 +27,7 @@
 ## Features
 
 - **Hold-to-record**: Press `Cmd+Shift+Space` anywhere to start recording
-- **Auto-transcribe**: Use cloud or local providers (OpenAI, Gemini, Apple, Whisper Local, Parakeet)
+- **Auto-transcribe**: Use cloud or local providers (OpenAI batch, OpenAI Realtime, Gemini, Apple, Whisper Local, Parakeet)
 - **Auto-paste**: Transcribed text appears instantly at your cursor
 - **Visual feedback**: Menu bar icon and optional HUD show recording/processing status
 - **Auto-stop**: Optionally stop recording automatically after silence
@@ -84,7 +84,7 @@ WhisperHUD needs two macOS permissions to work properly:
 
 ## Getting API Keys
 
-Only needed if you use cloud providers (OpenAI/Gemini/Anthropic).
+Only needed if you use cloud providers (OpenAI, OpenAI Realtime, Gemini, or Anthropic).
 
 ### Google Gemini (Free tier available)
 1. Go to [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
@@ -95,6 +95,8 @@ Only needed if you use cloud providers (OpenAI/Gemini/Anthropic).
 1. Go to [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 2. Create a new API key
 3. Add billing/credits to your account
+
+OpenAI Realtime uses the same OpenAI API key as batch OpenAI transcription.
 
 ### Anthropic
 1. Go to [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys)
@@ -126,7 +128,7 @@ The transcribed text is automatically pasted wherever your cursor is.
 Access settings from the menu bar icon:
 
 **Transcription**
-- **Provider**: Choose cloud or local providers (OpenAI, Gemini, Apple, Whisper Local, Parakeet)
+- **Provider**: Choose cloud or local providers (OpenAI, OpenAI Realtime, Gemini, Apple, Whisper Local, Parakeet)
 - **Model**: Select transcription model (affects accuracy and cost)
 
 **Recording**
@@ -189,6 +191,7 @@ Enable "Streaming display" in Settings to see a live panel showing:
 - Translation text as it's generated (when translation enabled)
 
 The panel auto-dismisses after text is pasted.
+With **OpenAI Realtime**, the transcription panel updates while you are still speaking. Other providers continue to stream after recording stops.
 
 ## Estimated Costs
 
@@ -201,6 +204,7 @@ The panel auto-dismisses after text is pasted.
 
 Typical usage (30 seconds of speech): $0.001 - $0.003
 
+**OpenAI Realtime** uses OpenAI's Realtime transcription pricing rather than the batch minute estimates above.
 **Local translation is free** (Ollama). Cloud translation uses your provider's pricing.
 
 ## Security
@@ -214,7 +218,7 @@ Typical usage (30 seconds of speech): $0.001 - $0.003
   - Passphrase prompts only happen when cloud keys are needed and locked
   - History encryption does **not** trigger Keychain prompts
 - **Audio** is processed in memory; local providers may write short‑lived temp files that are securely deleted
-- **Cloud providers** receive audio/text when selected (OpenAI/Gemini/Anthropic)
+- **Cloud providers** receive audio/text when selected (OpenAI batch, OpenAI Realtime, Gemini, Anthropic)
 - **Local providers** (Apple, Whisper Local, Parakeet, Ollama) keep data on-device
 - **History** is disabled by default; enabling it stores recent transcriptions locally in `~/.config/whisper-hud/` (optional encryption at rest)
 - **History encryption** uses passphrase-backed local key wrapping (not Keychain)
@@ -230,7 +234,7 @@ If you use any third-party assets in `assets/`, list sources and licenses in `as
 
 - macOS 12+ (Monterey or later; Apple Translation requires macOS 26+)
 - Python 3.11+
-- OpenAI/Gemini/Anthropic API key if you use cloud providers (not required for local providers)
+- OpenAI/Gemini/Anthropic API key if you use cloud providers (OpenAI Realtime reuses the OpenAI key; not required for local providers)
 - Homebrew (optional, for Ollama translation)
 
 ## Release
