@@ -435,8 +435,13 @@ def clear_api_keys(mode: Optional[str] = None) -> tuple[bool, str]:
         return True, ""
 
     # keychain
+    failed_providers: list[str] = []
     for provider in PROVIDERS:
-        _keychain_delete_api_key(provider)
+        if not _keychain_delete_api_key(provider):
+            failed_providers.append(provider)
+    if failed_providers:
+        providers = ", ".join(sorted(failed_providers))
+        return False, f"Failed to remove keychain entries for: {providers}"
     return True, ""
 
 

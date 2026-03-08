@@ -106,3 +106,114 @@ class TestConfig:
                     loaded = Config.load()
 
             assert loaded.credential_storage_mode == "passphrase"
+
+    def test_enable_history_encryption_migrates_existing_entries(self):
+        """Enabling history encryption should re-encrypt existing plaintext entries."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            config_file = config_dir / "config.json"
+
+            with patch("whisper_hud.config.CONFIG_DIR", config_dir):
+                with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                    from whisper_hud.config import Config
+
+                    config = Config()
+                    config.history_enabled = True
+                    config.history = [
+                        {
+                            "text": "plain",
+                            "original_text": "source",
+                            "timestamp": 1,
+                            "provider": "openai",
+                            "translated": True,
+                        },
+                        {
+                            "text": "ENC:already",
+                            "timestamp": 2,
+                            "provider": "gemini",
+                            "translated": False,
+                            "encrypted": True,
+                        },
+                    ]
+
+                    with patch("whisper_hud.encryption.is_cryptography_installed", return_value=True):
+                        with patch("whisper_hud.encryption.get_or_create_key", return_value=b"key"):
+                            with patch(
+                                "whisper_hud.encryption.encrypt_text",
+                                side_effect=lambda value: f"ENC:{value}" if value else None,
+                            ):
+                                assert config.enable_history_encryption() is True
+
+                    assert config.history_encrypted is True
+                    assert config.history[0]["text"] == "ENC:plain"
+                    assert config.history[0]["original_text"] == "ENC:source"
+                    assert config.history[0]["encrypted"] is True
+                    assert config.history[1]["text"] == "ENC:already"
+                    assert config.history[1]["encrypted"] is True
+
+    def test_enable_history_encryption_leaves_history_unchanged_on_failure(self):
+        """Failed encryption migration should not partially rewrite saved history."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            config_file = config_dir / "config.json"
+
+            with patch("whisper_hud.config.CONFIG_DIR", config_dir):
+                with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                    from whisper_hud.config import Config
+
+                    config = Config()
+                    config.history_enabled = True
+                    config.history = [
+                        {
+                            "text": "plain",
+                            "timestamp": 1,
+                            "provider": "openai",
+                            "translated": False,
+                        }
+                    ]
+                    original_history = [item.copy() for item in config.history]
+
+                    with patch("whisper_hud.encryption.is_cryptography_installed", return_value=True):
+                        with patch("whisper_hud.encryption.get_or_create_key", return_value=b"key"):
+                            with patch("whisper_hud.encryption.encrypt_text", return_value=None):
+                                assert config.enable_history_encryption() is False
+
+                    assert config.history_encrypted is False
+                    assert config.history == original_history
+
+    def test_merge_imported_config_clears_history_for_private_mode(self):
+        """Importing private mode should clear existing saved history."""
+        with patch('whisper_hud.config.CONFIG_FILE', Path('/tmp/test_config.json')):
+            from whisper_hud.config import Config
+
+            current = Config()
+            current.history = [{"text": "saved", "timestamp": 1}]
+            current.total_transcriptions = 12
+            current.total_cost = 4.5
+
+            imported = Config(private_mode=True, history_enabled=True)
+            merged = current.merge_imported_config(imported)
+
+            assert merged.private_mode is True
+            assert merged.history == []
+            assert merged.history_enabled is False
+            assert merged.total_transcriptions == 12
+            assert merged.total_cost == 4.5
+
+    def test_merge_imported_config_preserves_history_when_not_private(self):
+        """Importing regular settings should preserve existing history and stats."""
+        with patch('whisper_hud.config.CONFIG_FILE', Path('/tmp/test_config.json')):
+            from whisper_hud.config import Config
+
+            current = Config()
+            current.history = [{"text": "saved", "timestamp": 1}]
+            current.total_transcriptions = 7
+            current.total_cost = 1.25
+
+            imported = Config(private_mode=False, history_enabled=True)
+            merged = current.merge_imported_config(imported)
+
+            assert merged.history == current.history
+            assert merged.history_enabled is True
+            assert merged.total_transcriptions == 7
+            assert merged.total_cost == 1.25

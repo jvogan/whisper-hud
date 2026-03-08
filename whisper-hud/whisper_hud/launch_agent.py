@@ -4,6 +4,7 @@ Launch at login management for macOS.
 Uses launchd Launch Agents to start WhisperHUD at login.
 """
 
+import os
 import plistlib
 import subprocess
 import sys
@@ -19,27 +20,31 @@ LAUNCH_AGENT_PLIST = LAUNCH_AGENT_DIR / f"{BUNDLE_ID}.plist"
 
 
 def get_app_executable() -> str:
-    """Get the path to the WhisperHUD executable."""
-    # Check if running from a .app bundle
-    if hasattr(sys, '_MEIPASS'):
-        # PyInstaller bundle
-        return sys.executable
-
-    # Check if running as installed package
-    # Try to find whisper-hud in PATH
+    """Get the trusted path to the current WhisperHUD executable or interpreter."""
+    executable = Path(sys.executable).expanduser()
     try:
-        result = subprocess.run(
-            ["which", "whisper-hud"],
-            capture_output=True,
-            text=True
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
+        executable = executable.resolve()
     except Exception:
-        pass
+        executable = executable.absolute()
+    return str(executable)
 
-    # Fallback: use Python to run the module
-    return sys.executable
+
+def _is_standalone_executable(executable: str) -> bool:
+    """Return True when launchd should run the executable directly."""
+    if hasattr(sys, "_MEIPASS") or getattr(sys, "frozen", False):
+        return True
+
+    try:
+        resolved = Path(executable).resolve()
+    except Exception:
+        resolved = Path(executable)
+
+    return (
+        resolved.parent.name == "MacOS"
+        and resolved.parent.parent.name == "Contents"
+        and resolved.parent.parent.parent.suffix == ".app"
+        and os.access(resolved, os.X_OK)
+    )
 
 
 def get_launch_agent_plist() -> dict:
@@ -47,7 +52,7 @@ def get_launch_agent_plist() -> dict:
     executable = get_app_executable()
 
     # Determine how to launch
-    if executable == sys.executable and not hasattr(sys, '_MEIPASS'):
+    if not _is_standalone_executable(executable):
         # Running as Python module
         program_args = [executable, "-m", "whisper_hud"]
     else:

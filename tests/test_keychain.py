@@ -51,6 +51,18 @@ class TestKeychainMode:
             result = get_configured_providers()
             assert "openai" in result
 
+    def test_clear_api_keys_reports_keychain_cleanup_failures(self, mock_keychain):
+        """clear_api_keys should surface backend delete failures in keychain mode."""
+        from whisper_hud.keychain import clear_api_keys
+
+        mock_keychain["delete"].side_effect = [None, RuntimeError("denied"), None]
+
+        with patch("whisper_hud.keychain.get_storage_mode", return_value="keychain"):
+            ok, message = clear_api_keys()
+
+        assert not ok
+        assert "gemini" in message
+
 
 class TestSessionOnlyMode:
     """Tests for in-memory session-only mode."""

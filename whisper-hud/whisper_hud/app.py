@@ -451,8 +451,10 @@ class WhisperHUDApp(rumps.App):
             )
             return
 
+        cleanup_ok = True
+        cleanup_message = ""
         if current_mode != target_mode:
-            clear_api_keys(mode=current_mode)
+            cleanup_ok, cleanup_message = clear_api_keys(mode=current_mode)
 
         if target_mode != "passphrase":
             lock_passphrase_store()
@@ -460,6 +462,22 @@ class WhisperHUDApp(rumps.App):
 
         self._reset_cloud_clients()
         self._schedule_menu_rebuild()
+        if not cleanup_ok:
+            logger.warning(
+                "Credential storage switched to %s, but cleanup of %s failed: %s",
+                target_mode,
+                current_mode,
+                cleanup_message,
+            )
+            rumps.alert(
+                title="Previous Keys Still Stored",
+                message=(
+                    "WhisperHUD switched to the new storage mode and copied your API keys, "
+                    "but it could not remove the old copies.\n\n"
+                    f"Previous storage: {get_storage_mode_label(current_mode)}\n"
+                    f"Details: {cleanup_message}"
+                ),
+            )
         self._notify(
             "WhisperHUD",
             "Credential Storage Updated",
@@ -2569,11 +2587,12 @@ class WhisperHUDApp(rumps.App):
         if self._is_passphrase_mode() and not self._ensure_passphrase_unlocked():
             return
 
-        current = get_api_key("openai") or ""
+        message = "Enter your OpenAI API key.\n\nGet your key at: platform.openai.com/api-keys"
+        if get_api_key("openai"):
+            message += "\n\nA key is already saved. Enter a new key to replace it."
         key = self._applescript_input_dialog(
             "OpenAI API Key",
-            "Enter your OpenAI API key.\n\nGet your key at: platform.openai.com/api-keys",
-            current
+            message,
         )
 
         if key:
@@ -2624,11 +2643,12 @@ class WhisperHUDApp(rumps.App):
         if self._is_passphrase_mode() and not self._ensure_passphrase_unlocked():
             return
 
-        current = get_api_key("gemini") or ""
+        message = "Enter your Google AI API key.\n\nGet your key at: aistudio.google.com/apikey"
+        if get_api_key("gemini"):
+            message += "\n\nA key is already saved. Enter a new key to replace it."
         key = self._applescript_input_dialog(
             "Gemini API Key",
-            "Enter your Google AI API key.\n\nGet your key at: aistudio.google.com/apikey",
-            current
+            message,
         )
 
         if key:
@@ -2672,11 +2692,15 @@ class WhisperHUDApp(rumps.App):
         if self._is_passphrase_mode() and not self._ensure_passphrase_unlocked():
             return
 
-        current = get_api_key("anthropic") or ""
+        message = (
+            "Enter your Anthropic API key.\n\n"
+            "Get your key at: console.anthropic.com/settings/keys"
+        )
+        if get_api_key("anthropic"):
+            message += "\n\nA key is already saved. Enter a new key to replace it."
         key = self._applescript_input_dialog(
             "Anthropic API Key",
-            "Enter your Anthropic API key.\n\nGet your key at: console.anthropic.com/settings/keys",
-            current
+            message,
         )
 
         if key:
@@ -2948,7 +2972,7 @@ class WhisperHUDApp(rumps.App):
         self._schedule_menu_rebuild()
 
     def _setup_encryption(self, sender):
-        """Set up encryption - installs cryptography if needed."""
+        """Set up encryption if the required dependency is already available."""
         from .encryption import is_cryptography_installed
 
         if self._credential_mode() != "passphrase":
@@ -2966,122 +2990,25 @@ class WhisperHUDApp(rumps.App):
             self._toggle_history_encryption(sender)
             return
 
-        # Explain and offer to install
-        response = rumps.alert(
-            title="Set Up Encryption",
-            message=(
-                "Encryption protects your saved transcriptions so only you "
-                "can read them—even if someone accesses your files.\n\n"
-                "A small download (~2MB) is needed for the first-time setup.\n\n"
-                "Your history key is stored locally and wrapped with your "
-                "passphrase session (no Keychain dependency)."
-            ),
-            ok="Set Up Now",
-            cancel="Not Now"
-        )
+        self._show_encryption_setup_help()
 
-        if response != 1:
-            return
-
-        # Start installation
-        self._install_cryptography()
-
-    def _install_cryptography(self):
-        """Install cryptography package in the background."""
+    def _show_encryption_setup_help(self):
+        """Explain how to enable encryption without installing code at runtime."""
         import sys
-        import subprocess
 
-        self._notify(
-            "WhisperHUD",
-            "Setting Up Encryption",
-            "Installing... this takes a moment."
+        install_cmd = f'"{sys.executable}" -m pip install "cryptography>=43.0.0"'
+        rumps.alert(
+            title="Encryption Setup Required",
+            message=(
+                "This WhisperHUD install is missing the encryption dependency.\n\n"
+                "For safety, WhisperHUD does not download or run new code at runtime.\n\n"
+                "To enable encrypted history:\n"
+                "1. Reinstall or update WhisperHUD, or\n"
+                "2. If you're running from source, install the dependency in this environment:\n"
+                f"{install_cmd}\n\n"
+                "Then restart WhisperHUD and enable encryption again."
+            ),
         )
-
-        def do_install():
-            try:
-                # Use the same Python that's running this app
-                python_path = sys.executable
-
-                # Install cryptography
-                result = subprocess.run(
-                    [python_path, "-m", "pip", "install", "cryptography>=41.0.0"],
-                    capture_output=True,
-                    text=True,
-                    timeout=120
-                )
-
-                if result.returncode == 0:
-                    # Verify it installed correctly
-                    verify = subprocess.run(
-                        [python_path, "-c", "import cryptography; print('ok')"],
-                        capture_output=True,
-                        text=True,
-                        timeout=10
-                    )
-
-                    if verify.returncode == 0 and "ok" in verify.stdout:
-                        # Force reimport of cryptography in this process
-                        import importlib
-                        try:
-                            import cryptography
-                            importlib.reload(cryptography)
-                        except ImportError:
-                            # First import after install
-                            pass
-
-                        # Reimport our encryption module to pick up cryptography
-                        from . import encryption
-                        importlib.reload(encryption)
-
-                        # Now enable encryption
-                        success = self.config.enable_history_encryption()
-                        if success:
-                            self._notify(
-                                "WhisperHUD",
-                                "🔐 Encryption Ready",
-                                "Your transcription history is now encrypted."
-                            )
-                            self._schedule_menu_rebuild()
-                            return
-
-                # Installation failed
-                logger.error(f"Cryptography install failed: {result.stderr}")
-                self._show_manual_install_help(result.stderr)
-
-            except subprocess.TimeoutExpired:
-                self._show_manual_install_help("Installation timed out. Please try again.")
-            except Exception as e:
-                logger.error(f"Cryptography install error: {e}")
-                self._show_manual_install_help(str(e))
-
-        threading.Thread(target=do_install, daemon=True).start()
-
-    def _show_manual_install_help(self, error_detail: str = ""):
-        """Show manual installation instructions when auto-install fails."""
-        # Run on main thread for UI
-        def show_alert():
-            detail = ""
-            if error_detail and len(error_detail) < 200:
-                detail = f"\n\nError: {error_detail}"
-
-            rumps.alert(
-                title="Setup Needs Your Help",
-                message=(
-                    "Automatic setup didn't work. You can set up encryption "
-                    "manually:\n\n"
-                    "1. Open Terminal\n"
-                    "2. Run: pip install cryptography\n"
-                    "3. Restart WhisperHUD\n\n"
-                    "Then encryption will be available in the Privacy menu."
-                    f"{detail}"
-                )
-            )
-
-        try:
-            from PyObjCTools import AppHelper
-            AppHelper.callAfter(show_alert)
-        except Exception:
-            show_alert()
 
     def _toggle_notifications(self, sender):
         """Toggle system notifications."""
@@ -3198,10 +3125,7 @@ class WhisperHUDApp(rumps.App):
                     )
 
                     if response == 1:
-                        # Preserve history and stats
-                        imported_config.history = self.config.history
-                        imported_config.total_transcriptions = self.config.total_transcriptions
-                        imported_config.total_cost = self.config.total_cost
+                        imported_config = self.config.merge_imported_config(imported_config)
 
                         self.config.update_from(imported_config)
                         self.config.save()

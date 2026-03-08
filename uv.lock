@@ -2769,9 +2769,6 @@ dev = [
     { name = "pre-commit" },
     { name = "pytest" },
 ]
-encryption = [
-    { name = "cryptography" },
-]
 parakeet = [
     { name = "parakeet-mlx" },
 ]
@@ -2787,8 +2784,7 @@ whisper-local = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.76.0" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.3.0" },
-    { name = "cryptography", specifier = ">=41.0.0" },
-    { name = "cryptography", marker = "extra == 'encryption'", specifier = ">=41.0.0" },
+    { name = "cryptography", specifier = ">=43.0.0" },
     { name = "faster-whisper", marker = "extra == 'whisper-local'", specifier = ">=1.0.0" },
     { name = "flake8", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "google-genai", specifier = ">=1.62.0" },
@@ -2812,7 +2808,7 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.13.0" },
     { name = "sounddevice", specifier = ">=0.5.0" },
 ]
-provides-extras = ["dev", "encryption", "custom-icons", "vision", "whisper-local", "parakeet"]
+provides-extras = ["dev", "custom-icons", "vision", "whisper-local", "parakeet"]
 
 [[package]]
 name = "zipp"

@@ -369,12 +369,65 @@ class Config:
         # This will create the key if it doesn't exist
         try:
             get_or_create_key()
+            migrated_history = self._encrypt_history_entries(self.history)
+            if migrated_history is None:
+                logger.error("Failed to migrate existing history during encryption enable")
+                return False
+            self.history = migrated_history
             self.history_encrypted = True
             self.save()
             return True
         except Exception as e:
             logger.error(f"Failed to enable encryption: {e}")
             return False
+
+    def _encrypt_history_entries(self, entries: List[dict]) -> Optional[List[dict]]:
+        """Encrypt plaintext history entries without mutating the original list on failure."""
+        from .encryption import encrypt_text
+
+        migrated: List[dict] = []
+        for item in entries:
+            updated = item.copy()
+            if updated.get("encrypted", False):
+                migrated.append(updated)
+                continue
+
+            text = updated.get("text")
+            if isinstance(text, str) and text:
+                encrypted_text = encrypt_text(text)
+                if not encrypted_text:
+                    return None
+                updated["text"] = encrypted_text
+
+            original_text = updated.get("original_text")
+            if isinstance(original_text, str) and original_text:
+                encrypted_original = encrypt_text(original_text)
+                if not encrypted_original:
+                    return None
+                updated["original_text"] = encrypted_original
+
+            updated["encrypted"] = True
+            updated.pop("_decryption_failed", None)
+            migrated.append(updated)
+
+        return migrated
+
+    def merge_imported_config(self, imported: "Config") -> "Config":
+        """
+        Merge imported settings with runtime-only state preserved from the current config.
+
+        API keys are not part of Config and are handled separately by credential storage.
+        """
+        imported.total_transcriptions = self.total_transcriptions
+        imported.total_cost = self.total_cost
+
+        if imported.private_mode:
+            imported.history = []
+            imported.history_enabled = False
+        else:
+            imported.history = list(self.history)
+
+        return imported
 
     def disable_history_encryption(self) -> None:
         """

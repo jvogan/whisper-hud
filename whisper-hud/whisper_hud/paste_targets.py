@@ -338,7 +338,9 @@ class PasteTargetManager:
             if restore_clipboard and original_clipboard is not None:
                 time.sleep(0.1)
                 try:
-                    pyperclip.copy(original_clipboard)
+                    current_clipboard = pyperclip.paste()
+                    if current_clipboard == text:
+                        pyperclip.copy(original_clipboard)
                 except Exception:
                     pass
 
@@ -486,7 +488,9 @@ class PasteTargetManager:
             if original_clipboard is not None:
                 time.sleep(0.1)
                 try:
-                    pyperclip.copy(original_clipboard)
+                    current_clipboard = pyperclip.paste()
+                    if current_clipboard == text:
+                        pyperclip.copy(original_clipboard)
                 except Exception:
                     pass
 
