@@ -56,6 +56,7 @@ dev = [
     "black>=24.3.0",
     "pre-commit>=3.6.0",
     "pytest>=8.0.0",
+    "pytest-cov>=6.0.0",
 ]
 custom-icons = [
     "Pillow>=10.0.0",
@@ -106,3 +107,15 @@ extend-ignore = "E501,W503"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
+
+[tool.coverage.run]
+source = ["whisper_hud"]
+omit = [
+    "tests/*",
+    "*/__main__.py",
+]
+
+[tool.coverage.report]
+fail_under = 0
+show_missing = true
+skip_covered = false
