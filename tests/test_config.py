@@ -1,5 +1,6 @@
 """Tests for configuration management."""
 
+import json
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -44,6 +45,85 @@ class TestConfig:
                     loaded = Config.load()
                     assert loaded.default_provider == "gemini"
                     assert loaded.translation_enabled is True
+
+    def test_load_valid_json(self):
+        """Valid config JSON should load normally."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            config_file = config_dir / "config.json"
+            config_file.write_text(
+                json.dumps({"default_provider": "gemini", "translation_enabled": True}),
+                encoding="utf-8",
+            )
+
+            with patch("whisper_hud.config.CONFIG_DIR", config_dir):
+                with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                    from whisper_hud.config import Config
+                    loaded = Config.load()
+
+            assert loaded.default_provider == "gemini"
+            assert loaded.translation_enabled is True
+
+    def test_load_missing_file_returns_defaults(self):
+        """Missing config file should fall back to defaults."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            config_file = config_dir / "config.json"
+
+            with patch("whisper_hud.config.CONFIG_DIR", config_dir):
+                with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                    from whisper_hud.config import Config
+                    loaded = Config.load()
+
+            assert loaded.default_provider == "apple"
+            assert config_file.exists() is False
+
+    def test_load_empty_file_resets_to_defaults_and_backs_up_file(self):
+        """Empty config file should be backed up and replaced with defaults."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            config_file = config_dir / "config.json"
+            config_file.write_text("", encoding="utf-8")
+
+            with patch("whisper_hud.config.CONFIG_DIR", config_dir):
+                with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                    from whisper_hud.config import Config
+                    loaded = Config.load()
+
+            backups = sorted(config_dir.glob("config.json.bak.*"))
+            assert loaded.default_provider == "apple"
+            assert config_file.exists() is False
+            assert len(backups) == 1
+            assert backups[0].read_text(encoding="utf-8") == ""
+
+    def test_load_corrupted_json_resets_to_defaults_and_preserves_existing_backup(self):
+        """Corrupted config JSON should be backed up without overwriting an existing backup."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            config_file = config_dir / "config.json"
+            config_file.write_text('{"default_provider":', encoding="utf-8")
+
+            existing_backup = config_dir / "config.json.bak.20260315010101"
+            existing_backup.write_text("existing-backup", encoding="utf-8")
+
+            with patch("whisper_hud.config.CONFIG_DIR", config_dir):
+                with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                    with patch("whisper_hud.config.datetime") as mock_datetime:
+                        from whisper_hud.config import Config
+
+                        mock_datetime.now.return_value.strftime.return_value = "20260315010101"
+                        loaded = Config.load()
+
+            backups = sorted(config_dir.glob("config.json.bak.*"))
+            assert loaded.default_provider == "apple"
+            assert config_file.exists() is False
+            assert existing_backup.read_text(encoding="utf-8") == "existing-backup"
+            assert len(backups) == 2
+            assert any(
+                backup.name == "config.json.bak.20260315010101.1"
+                and backup.read_text(encoding="utf-8") == '{"default_provider":'
+                for backup in backups
+            )
 
     def test_history_management(self):
         """Test transcription history functions."""
