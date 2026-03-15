@@ -11,6 +11,7 @@ Models (February 2026):
 - gemini-2.5-flash-lite: Lowest latency/cost, supports audio input
 """
 
+from types import SimpleNamespace
 from typing import Callable
 from .base import TranscriptionProvider, TranscriptionResult
 from ..keychain import get_api_key
@@ -93,14 +94,16 @@ Output ONLY the transcription text, nothing else.
 Do not add any commentary, labels, or formatting.
 Preserve natural punctuation."""
 
-        # Generate transcription
-        response = client.models.generate_content(
-            model=self.model,
-            contents=[
-                prompt,
-                types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
-            ],
-        )
+        try:
+            response = client.models.generate_content(
+                model=self.model,
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
+                ],
+            )
+        except Exception as e:
+            raise RuntimeError(self._build_transcribe_error_message(e)) from e
 
         # Get the model config for cost calculation
         model_config = next(
@@ -114,8 +117,15 @@ Preserve natural punctuation."""
         # Calculate cost
         cost = (duration_seconds / 60) * model_config["cost_per_minute"]
 
+        text = self._extract_transcription_text(response)
+        if text is None:
+            raise RuntimeError(
+                "Gemini transcription returned an unexpected response format. "
+                "No transcription text was found."
+            )
+
         return TranscriptionResult(
-            text=response.text.strip() if response.text else "",
+            text=text,
             duration_seconds=duration_seconds,
             cost_estimate=cost,
             provider=self.name,
@@ -144,6 +154,68 @@ Preserve natural punctuation."""
     def supports_streaming(self) -> bool:
         """Gemini supports streaming transcription."""
         return True
+
+    @staticmethod
+    def _build_transcribe_error_message(error: Exception) -> str:
+        """Map Gemini request failures to user-readable RuntimeError messages."""
+        details = str(error).strip() or error.__class__.__name__
+        error_type = error.__class__.__name__.lower()
+        status_code = getattr(error, "status_code", None)
+        if status_code is None:
+            status_code = getattr(error, "code", None)
+        if status_code is None:
+            response = getattr(error, "response", None)
+            status_code = getattr(response, "status_code", None)
+
+        if GeminiProvider._is_network_error(error_type, details):
+            return f"Gemini transcription failed due to a network error: {details}"
+        if GeminiProvider._is_api_error(error_type, status_code):
+            return f"Gemini transcription failed due to an API error: {details}"
+        return f"Gemini transcription failed: {details}"
+
+    @staticmethod
+    def _is_network_error(error_type: str, details: str) -> bool:
+        """Best-effort classification for transport-layer failures."""
+        network_markers = (
+            "connection",
+            "connect",
+            "timeout",
+            "timed out",
+            "network",
+            "dns",
+            "socket",
+            "ssl",
+            "transport",
+            "unreachable",
+            "temporarily unavailable",
+        )
+        lowered_details = details.lower()
+        return "api" not in error_type and (
+            any(marker in error_type for marker in network_markers)
+            or any(marker in lowered_details for marker in network_markers)
+        )
+
+    @staticmethod
+    def _is_api_error(error_type: str, status_code) -> bool:
+        """Detect provider/API failures from SDK metadata when available."""
+        if status_code is not None:
+            try:
+                return int(status_code) >= 400
+            except (TypeError, ValueError):
+                return True
+        return "api" in error_type or "http" in error_type or "status" in error_type
+
+    @staticmethod
+    def _extract_transcription_text(response) -> str | None:
+        """Return stripped response text when Gemini returns a valid payload."""
+        text = getattr(response, "text", None)
+        if text is None and isinstance(response, dict):
+            text = response.get("text")
+        if text is None and isinstance(response, SimpleNamespace):
+            text = response.__dict__.get("text")
+        if text is None:
+            return None
+        return text.strip()
 
     def transcribe_streaming(
         self,
