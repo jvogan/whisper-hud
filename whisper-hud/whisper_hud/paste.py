@@ -64,6 +64,7 @@ def insert_text(
 
     original_clipboard: Optional[str] = None
     original_app: Optional[str] = None
+    clipboard_contains_text = False
 
     try:
         # Save original clipboard if requested
@@ -79,6 +80,7 @@ def insert_text(
 
         # Copy to clipboard
         pyperclip.copy(text)
+        clipboard_contains_text = True
 
         # Small delay to ensure clipboard is ready
         time.sleep(0.05)
@@ -124,19 +126,6 @@ def insert_text(
                 timeout=5
             )
 
-        # Small delay before restoring clipboard
-        if restore_clipboard and original_clipboard is not None:
-            time.sleep(0.1)
-            try:
-                # Only restore if clipboard still contains our text
-                # This prevents overwriting user's content if they copied
-                # something during the paste delay
-                current_clipboard = pyperclip.paste()
-                if current_clipboard == text:
-                    pyperclip.copy(original_clipboard)
-            except Exception:
-                pass  # If restore fails, that's okay
-
         return True
 
     except subprocess.TimeoutExpired:
@@ -145,6 +134,18 @@ def insert_text(
     except Exception as e:
         logger.error(f"Paste error: {e}")
         return False
+    finally:
+        if restore_clipboard and original_clipboard is not None and clipboard_contains_text:
+            time.sleep(0.1)
+            try:
+                # Only restore if clipboard still contains our text.
+                # This prevents overwriting user's content if they copied
+                # something during the paste delay.
+                current_clipboard = pyperclip.paste()
+                if current_clipboard == text:
+                    pyperclip.copy(original_clipboard)
+            except Exception:
+                pass
 
 
 def insert_text_direct(text: str) -> bool:
