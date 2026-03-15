@@ -566,13 +566,12 @@ def _validate_openai_key(api_key: str) -> tuple[bool, str]:
             return True, ""
         else:
             return False, f"API error: {response.status_code}"
+    except ImportError:
+        return False, "requests package is required for API key validation"
     except requests.exceptions.Timeout:
         return False, "Connection timed out"
     except requests.exceptions.ConnectionError:
         return False, "Could not connect to OpenAI"
-    except ImportError:
-        # requests not installed, skip validation
-        return True, ""
     except Exception as e:
         return False, f"Validation error: {str(e)[:50]}"
 
@@ -601,13 +600,12 @@ def _validate_gemini_key(api_key: str) -> tuple[bool, str]:
             return True, ""
         else:
             return False, f"API error: {response.status_code}"
+    except ImportError:
+        return False, "requests package is required for API key validation"
     except requests.exceptions.Timeout:
         return False, "Connection timed out"
     except requests.exceptions.ConnectionError:
         return False, "Could not connect to Google AI"
-    except ImportError:
-        # requests not installed, skip validation
-        return True, ""
     except Exception as e:
         return False, f"Validation error: {str(e)[:50]}"
 
@@ -635,12 +633,11 @@ def _validate_anthropic_key(api_key: str) -> tuple[bool, str]:
             return True, ""
         else:
             return False, f"API error: {response.status_code}"
+    except ImportError:
+        return False, "requests package is required for API key validation"
     except requests.exceptions.Timeout:
         return False, "Connection timed out"
     except requests.exceptions.ConnectionError:
         return False, "Could not connect to Anthropic"
-    except ImportError:
-        # requests not installed, skip validation
-        return True, ""
     except Exception as e:
         return False, f"Validation error: {str(e)[:50]}"

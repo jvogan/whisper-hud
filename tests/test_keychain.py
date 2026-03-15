@@ -1,6 +1,7 @@
 """Tests for credential storage and API key management."""
 
-from unittest.mock import patch
+import builtins
+from unittest.mock import Mock, patch
 
 
 class TestKeychainMode:
@@ -162,3 +163,83 @@ class TestUtilityFunctions:
         assert mask_api_key("short") == "****"
         assert mask_api_key("") == "****"
         assert mask_api_key(None) == "****"
+
+
+class TestValidateApiKey:
+    """Tests for API key validation."""
+
+    def test_validate_api_key_returns_true_for_valid_openai_key(self):
+        """A 200 response should mark the key as valid."""
+        from whisper_hud.keychain import validate_api_key
+
+        response = Mock(status_code=200)
+
+        with patch("requests.get", return_value=response) as mock_get:
+            is_valid, error = validate_api_key("openai", "sk-valid-key")
+
+        assert is_valid is True
+        assert error == ""
+        mock_get.assert_called_once_with(
+            "https://api.openai.com/v1/models",
+            headers={"Authorization": "Bearer sk-valid-key"},
+            timeout=10,
+        )
+
+    def test_validate_api_key_returns_false_for_invalid_openai_key(self):
+        """A 401 response should mark the key as invalid."""
+        from whisper_hud.keychain import validate_api_key
+
+        response = Mock(status_code=401)
+
+        with patch("requests.get", return_value=response) as mock_get:
+            is_valid, error = validate_api_key("openai", "sk-invalid-key")
+
+        assert is_valid is False
+        assert error == "Invalid API key"
+        mock_get.assert_called_once()
+
+    def test_validate_api_key_returns_false_for_timeout(self):
+        """Timeouts should not be treated as valid keys."""
+        from whisper_hud.keychain import validate_api_key
+        from requests.exceptions import Timeout
+
+        with patch("requests.get", side_effect=Timeout) as mock_get:
+            is_valid, error = validate_api_key("openai", "sk-timeout-key")
+
+        assert is_valid is False
+        assert error == "Connection timed out"
+        mock_get.assert_called_once()
+
+    def test_validate_api_key_returns_false_when_requests_missing(self):
+        """Missing requests should not bypass validation."""
+        from whisper_hud.keychain import validate_api_key
+
+        original_import = builtins.__import__
+
+        def import_without_requests(name, *args, **kwargs):
+            if name == "requests":
+                raise ImportError("No module named 'requests'")
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=import_without_requests):
+            is_valid, error = validate_api_key("openai", "sk-no-requests")
+
+        assert is_valid is False
+        assert error == "requests package is required for API key validation"
+
+    def test_validate_api_key_returns_false_for_empty_key(self):
+        """An empty key should not validate successfully."""
+        from whisper_hud.keychain import validate_api_key
+
+        response = Mock(status_code=401)
+
+        with patch("requests.get", return_value=response) as mock_get:
+            is_valid, error = validate_api_key("openai", "")
+
+        assert is_valid is False
+        assert error == "Invalid API key"
+        mock_get.assert_called_once_with(
+            "https://api.openai.com/v1/models",
+            headers={"Authorization": "Bearer "},
+            timeout=10,
+        )
