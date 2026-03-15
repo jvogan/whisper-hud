@@ -31,9 +31,18 @@ def mock_config(temp_config_dir):
             yield Config()
 
 
+@pytest.fixture(autouse=True)
+def _block_real_keychain():
+    """Auto-mock keyring globally to prevent macOS Keychain access popups."""
+    with patch('keyring.get_password', return_value=None):
+        with patch('keyring.set_password', return_value=None):
+            with patch('keyring.delete_password', return_value=None):
+                yield
+
+
 @pytest.fixture
 def mock_keychain():
-    """Mock keychain operations to avoid system keychain access."""
+    """Mock keychain operations with accessible mock objects for assertions."""
     with patch('keyring.get_password') as mock_get:
         with patch('keyring.set_password') as mock_set:
             with patch('keyring.delete_password') as mock_delete:
