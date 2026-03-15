@@ -27,7 +27,7 @@ from .translate import TranslationManager
 from .providers.base import LiveTranscriptionSession, TranscriptionResult
 from .hotkey import HotkeyListener, HotkeyCapture, format_hotkey_display, string_to_key
 from .hud import create_hud
-from .paste import insert_text, check_accessibility_permission, get_accessibility_error_message, open_accessibility_settings, _escape_applescript_string
+from .paste import insert_text, check_accessibility_permission, get_accessibility_error_message, open_accessibility_settings, escape_applescript_string
 from .paste_targets import PasteTargetManager, PasteTarget, TargetType
 from .config import Config
 from .keychain import (
@@ -3053,9 +3053,9 @@ class WhisperHUDApp(rumps.App):
         import subprocess
 
         # Escape quotes for AppleScript
-        message_escaped = _escape_applescript_string(message).replace('\n', '\\n')
-        default_escaped = _escape_applescript_string(default)
-        title_escaped = _escape_applescript_string(title)
+        message_escaped = escape_applescript_string(message).replace('\n', '\\n')
+        default_escaped = escape_applescript_string(default)
+        title_escaped = escape_applescript_string(title)
         hidden_clause = " with hidden answer" if hidden else ""
 
         script = f'''

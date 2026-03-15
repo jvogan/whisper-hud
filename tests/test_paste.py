@@ -6,6 +6,14 @@ from unittest.mock import patch, MagicMock
 class TestPaste:
     """Tests for paste module functions."""
 
+    def test_escape_applescript_string_escapes_required_characters(self):
+        """AppleScript escaping should cover quotes, slashes, and control characters."""
+        from whisper_hud.paste import escape_applescript_string
+
+        value = 'backslash \\\\ quote " newline \n carriage \r tab \t'
+
+        assert escape_applescript_string(value) == 'backslash \\\\\\\\ quote \\" newline \\n carriage \\r tab \\t'
+
     def test_get_accessibility_error_message(self):
         """Test that accessibility error message is informative."""
         from whisper_hud.paste import get_accessibility_error_message

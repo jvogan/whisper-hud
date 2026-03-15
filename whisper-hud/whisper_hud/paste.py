@@ -18,15 +18,26 @@ from .logging_config import get_logger
 logger = get_logger("paste")
 
 
-def _escape_applescript_string(value: str) -> str:
+def escape_applescript_string(value: str) -> str:
     """Escape a string for safe use inside AppleScript quotes."""
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+
+
+def _escape_as_line(value: str) -> str:
+    """Escape a single line (no newlines) for use inside AppleScript quotes."""
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _as_applescript_string_expression(value: str) -> str:
     """Build an AppleScript expression that preserves embedded newlines."""
     parts = value.split("\n")
-    quoted_parts = [f'"{_escape_applescript_string(part)}"' for part in parts]
+    quoted_parts = [f'"{_escape_as_line(part)}"' for part in parts]
     return ' & (ASCII character 10) & '.join(quoted_parts)
 
 
@@ -74,7 +85,7 @@ def insert_text(
 
         # If targeting a specific app, activate it first
         if target_app:
-            safe_app = _escape_applescript_string(target_app)
+            safe_app = escape_applescript_string(target_app)
             activate_result = subprocess.run(
                 ['osascript', '-e', f'tell application "{safe_app}" to activate'],
                 capture_output=True,
@@ -106,7 +117,7 @@ def insert_text(
         # Return focus to original app if needed
         if target_app and return_focus and original_app and original_app != target_app:
             time.sleep(0.1)
-            safe_app = _escape_applescript_string(original_app)
+            safe_app = escape_applescript_string(original_app)
             subprocess.run(
                 ['osascript', '-e', f'tell application "{safe_app}" to activate'],
                 capture_output=True,

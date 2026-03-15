@@ -6,6 +6,30 @@ from unittest.mock import MagicMock, call, patch
 class TestPasteTargets:
     """Tests for targeted paste behavior."""
 
+    @patch("subprocess.run")
+    def test_activate_app_uses_shared_applescript_escaping(self, mock_run):
+        """App activation should escape AppleScript-sensitive characters consistently."""
+        from whisper_hud.paste_targets import PasteTargetManager
+
+        manager = PasteTargetManager()
+        mock_run.return_value = MagicMock(returncode=0)
+
+        assert manager.activate_app('Notes "Dev"\\Tab') is True
+        script = mock_run.call_args.args[0][2]
+        assert 'tell application "Notes \\"Dev\\"\\\\Tab"' in script
+
+    @patch("subprocess.run")
+    def test_paste_to_iterm2_uses_shared_applescript_escaping(self, mock_run):
+        """iTerm2 writes should preserve escaped control characters."""
+        from whisper_hud.paste_targets import PasteTargetManager
+
+        manager = PasteTargetManager()
+        mock_run.return_value = MagicMock(returncode=0, stderr=b"")
+
+        assert manager.paste_to_iterm2('line 1\nline 2\t"quoted"\\path') is True
+        script = mock_run.call_args.args[0][2]
+        assert 'write text "line 1\\nline 2\\t\\"quoted\\"\\\\path" without newline' in script
+
     @patch("time.sleep", return_value=None)
     @patch("subprocess.run")
     @patch("pyperclip.copy")
