@@ -1,5 +1,6 @@
 """Streaming panel behavior tests."""
 
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -219,3 +220,116 @@ def test_restore_copy_button_resets_button_title(monkeypatch):
     panel._restore_copy_button()
 
     button.setTitle_.assert_called_once_with("Copy")
+
+
+class _FakeControl:
+    def __init__(self):
+        self.accessibility_label = None
+        self.accessibility_role = None
+        self.string_value = ""
+        self.string_text = ""
+        self.selected_range = SimpleNamespace(length=0)
+        self.target = None
+        self.action = None
+
+    def setAccessibilityLabel_(self, value):
+        self.accessibility_label = value
+
+    def setAccessibilityRole_(self, value):
+        self.accessibility_role = value
+
+    def setStringValue_(self, value):
+        self.string_value = value
+
+    def stringValue(self):
+        return self.string_value
+
+    def setString_(self, value):
+        self.string_text = value
+
+    def string(self):
+        return self.string_text
+
+    def scrollRangeToVisible_(self, _range):
+        return None
+
+    def selectedRange(self):
+        return self.selected_range
+
+    def setTarget_(self, target):
+        self.target = target
+
+    def setAction_(self, action):
+        self.action = action
+
+
+def test_text_accessibility_uses_static_text_role():
+    panel = StreamingPanel()
+    text_view = _FakeControl()
+
+    panel._set_text_accessibility(text_view, "Live transcript")
+
+    assert text_view.accessibility_role == "AXStaticText"
+    assert text_view.accessibility_label == "Live transcript"
+
+
+def test_text_accessibility_falls_back_when_empty():
+    panel = StreamingPanel()
+    text_view = _FakeControl()
+
+    panel._set_text_accessibility(text_view, "")
+
+    assert text_view.accessibility_label == "No transcription text yet"
+
+
+def test_update_transcription_refreshes_accessibility_label(monkeypatch):
+    monkeypatch.setattr(streaming_panel_module, "HAS_APPKIT", True)
+    monkeypatch.setattr(
+        streaming_panel_module,
+        "AppHelper",
+        SimpleNamespace(callAfter=lambda fn: fn()),
+        raising=False,
+    )
+
+    panel = StreamingPanel()
+    panel._enabled = True
+    panel._transcription_text = _FakeControl()
+
+    panel.update_transcription("Updated transcript")
+
+    assert panel._transcription_text.accessibility_label == "Updated transcript"
+    assert panel._transcription_text.accessibility_role == "AXStaticText"
+
+
+def test_copy_action_uses_latest_transcription(monkeypatch):
+    copied = {}
+    monkeypatch.setattr(streaming_panel_module, "pyperclip", SimpleNamespace(copy=lambda text: copied.setdefault("text", text)))
+
+    panel = StreamingPanel()
+    panel._latest_transcription = "Copied text"
+
+    panel.copyTranscription_(None)
+
+    assert copied["text"] == "Copied text"
+
+
+def test_accessibility_labels_are_applied_to_window_buttons_and_text():
+    panel = StreamingPanel()
+    panel._window = _FakeControl()
+    panel._close_button = _FakeControl()
+    panel._copy_button = _FakeControl()
+    panel._transcription_text = _FakeControl()
+
+    panel._set_accessibility_attr(panel._window, "setAccessibilityLabel_", "Transcription result")
+    panel._set_accessibility_attr(panel._close_button, "setAccessibilityRole_", panel.AX_BUTTON_ROLE)
+    panel._set_accessibility_attr(panel._close_button, "setAccessibilityLabel_", "Dismiss transcription panel")
+    panel._set_accessibility_attr(panel._copy_button, "setAccessibilityRole_", panel.AX_BUTTON_ROLE)
+    panel._set_accessibility_attr(panel._copy_button, "setAccessibilityLabel_", "Copy transcription to clipboard")
+    panel._set_text_accessibility(panel._transcription_text, "Panel text")
+
+    assert panel._window.accessibility_label == "Transcription result"
+    assert panel._close_button.accessibility_role == "AXButton"
+    assert panel._close_button.accessibility_label == "Dismiss transcription panel"
+    assert panel._copy_button.accessibility_role == "AXButton"
+    assert panel._copy_button.accessibility_label == "Copy transcription to clipboard"
+    assert panel._transcription_text.accessibility_label == "Panel text"

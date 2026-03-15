@@ -29,7 +29,7 @@ try:
         NSMakeRect,
         NSWindowCollectionBehaviorCanJoinAllSpaces,
         NSWindowCollectionBehaviorStationary,
-        NSScrollView, NSTextView
+        NSScrollView, NSTextView, NSAccessibilityStaticTextRole
     )
     from Quartz import (
         CGWindowListCopyWindowInfo,
@@ -111,6 +111,8 @@ class StreamingPanel:
     TEXT_INSET = 10
     MAX_SCREEN_HEIGHT_RATIO = 0.6
     COPY_FEEDBACK_DURATION = 1.0
+    AX_STATIC_TEXT_ROLE = NSAccessibilityStaticTextRole if HAS_APPKIT else "AXStaticText"
+    AX_BUTTON_ROLE = "AXButton"
 
     def __init__(self):
         self._window: Optional[NSWindow] = None
@@ -188,6 +190,7 @@ class StreamingPanel:
             NSColor.colorWithCalibratedWhite_alpha_(0.08, 0.95).CGColor()
         )
         layer.setCornerRadius_(self.CORNER_RADIUS)
+        self._set_accessibility_attr(self._window, "setAccessibilityLabel_", "Transcription result")
         self._create_close_button(content)
 
         # Create transcription section
@@ -472,6 +475,11 @@ class StreamingPanel:
         self._close_button.setContentTintColor_(NSColor.colorWithCalibratedWhite_alpha_(0.85, 1.0))
         self._close_button.setTarget_(self)
         self._close_button.setAction_("closePanel:")
+        self._set_accessibility_attr(
+            self._close_button,
+            "setAccessibilityLabel_",
+            "Dismiss transcription panel",
+        )
         content.addSubview_(self._close_button)
 
         self._copy_button = NSButton.alloc().initWithFrame_(
@@ -481,6 +489,11 @@ class StreamingPanel:
         self._copy_button.setBezelStyle_(1)
         self._copy_button.setTarget_(self)
         self._copy_button.setAction_("copyTranscription:")
+        self._set_accessibility_attr(
+            self._copy_button,
+            "setAccessibilityLabel_",
+            "Copy transcription to clipboard",
+        )
         content.addSubview_(self._copy_button)
 
     def _create_transcription_section(self, content):
@@ -523,6 +536,7 @@ class StreamingPanel:
         self._transcription_text.setFont_(NSFont.systemFontOfSize_(15))
         self._transcription_text.setEditable_(False)
         self._transcription_text.setSelectable_(True)  # Allow text selection
+        self._set_text_accessibility(self._transcription_text, "")
 
         scroll_view.setDocumentView_(self._transcription_text)
         content.addSubview_(scroll_view)
@@ -570,9 +584,24 @@ class StreamingPanel:
         self._translation_text.setFont_(NSFont.systemFontOfSize_(15))
         self._translation_text.setEditable_(False)
         self._translation_text.setSelectable_(True)  # Allow text selection
+        self._set_text_accessibility(self._translation_text, "")
 
         scroll_view.setDocumentView_(self._translation_text)
         content.addSubview_(scroll_view)
+
+    def _set_accessibility_attr(self, target, setter_name: str, value) -> None:
+        """Set accessibility metadata when the AppKit object supports it."""
+        if not target:
+            return
+        setter = getattr(target, setter_name, None)
+        if setter:
+            setter(value)
+
+    def _set_text_accessibility(self, text_view, text: str) -> None:
+        """Keep text views discoverable to VoiceOver as static text."""
+        label = text or "No transcription text yet"
+        self._set_accessibility_attr(text_view, "setAccessibilityRole_", self.AX_STATIC_TEXT_ROLE)
+        self._set_accessibility_attr(text_view, "setAccessibilityLabel_", label)
 
     def show_transcribing(self, show_translation: bool = False):
         """Show panel in transcribing state."""
@@ -610,6 +639,7 @@ class StreamingPanel:
         def _update():
             if self._transcription_text:
                 self._transcription_text.setString_(text)
+                self._set_text_accessibility(self._transcription_text, text)
                 self._resize_panel_to_fit_content()
                 # Only auto-scroll if user doesn't have text selected
                 if not self._has_text_selection(self._transcription_text):
@@ -656,6 +686,7 @@ class StreamingPanel:
         def _update():
             if self._translation_text:
                 self._translation_text.setString_(text)
+                self._set_text_accessibility(self._translation_text, text)
                 self._resize_panel_to_fit_content()
                 # Only auto-scroll if user doesn't have text selected
                 if not self._has_text_selection(self._translation_text):
@@ -681,9 +712,11 @@ class StreamingPanel:
         def _update():
             if pending_trans and self._transcription_text:
                 self._transcription_text.setString_(pending_trans)
+                self._set_text_accessibility(self._transcription_text, pending_trans)
                 self._transcription_text.scrollRangeToVisible_((len(pending_trans), 0))
             if pending_transl and self._translation_text:
                 self._translation_text.setString_(pending_transl)
+                self._set_text_accessibility(self._translation_text, pending_transl)
                 self._translation_text.scrollRangeToVisible_((len(pending_transl), 0))
             if pending_trans or pending_transl:
                 self._resize_panel_to_fit_content()
@@ -766,8 +799,10 @@ class StreamingPanel:
             # Reset text
             if self._transcription_text:
                 self._transcription_text.setString_("")
+                self._set_text_accessibility(self._transcription_text, "")
             if self._translation_text:
                 self._translation_text.setString_("")
+                self._set_text_accessibility(self._translation_text, "")
             self._reset_copy_button_title()
 
             # Reset label colors
