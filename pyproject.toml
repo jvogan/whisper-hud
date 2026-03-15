@@ -125,6 +125,9 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
+markers = [
+    "integration: end-to-end coverage for recorder, transcription, and paste flows",
+]
 
 [tool.mypy]
 python_version = "3.11"
