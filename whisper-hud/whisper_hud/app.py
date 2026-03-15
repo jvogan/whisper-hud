@@ -651,23 +651,20 @@ class WhisperHUDApp(rumps.App):
 
         self.menu.add(rumps.MenuItem(status, callback=None))
 
-        # Show paste target status if locked to a specific target
-        target_enabled = self.config.paste_target_enabled and self.config.paste_target_type != "focused"
-        if target_enabled:
-            target_name = self._get_paste_target_display_name()
-            self.menu.add(rumps.MenuItem(f"📍 Output → {target_name}", callback=None))
-
         self.menu.add(rumps.separator)
 
-        # === Combined Provider/Model Selection ===
-        provider_menu = rumps.MenuItem("Provider")
+        # === Providers & Keys ===
+        providers_menu = rumps.MenuItem("Providers & Keys")
+        providers_menu.add(rumps.MenuItem(f"Current: {provider_name}", callback=None))
+        providers_menu.add(rumps.separator)
+        providers_menu.add(rumps.MenuItem("── Providers ──", callback=None))
         providers = self.transcriber.get_available_providers(configured_providers=configured)
         current_provider_id = self.config.default_provider
         current_provider_obj = self.transcriber.get_provider(current_provider_id)
         current_model_id = current_provider_obj.get_current_model() if current_provider_obj else ""
 
         # Cloud providers with model submenus
-        provider_menu.add(rumps.MenuItem("── Cloud ──", callback=None))
+        providers_menu.add(rumps.MenuItem("── Cloud ──", callback=None))
         for p in providers:
             if p["category"] != "cloud":
                 continue
@@ -693,25 +690,25 @@ class WhisperHUDApp(rumps.App):
                         f"{model_prefix}{model['name']}{suffix}",
                         callback=lambda sender, pid=p["id"], mid=model["id"]: self._select_provider_and_model(pid, mid)
                     ))
-                provider_menu.add(provider_submenu)
+                providers_menu.add(provider_submenu)
             elif len(provider_models) == 1:
                 # Single model - just select provider directly
                 model = provider_models[0]
-                provider_menu.add(rumps.MenuItem(
+                providers_menu.add(rumps.MenuItem(
                     f"{prefix}{p['name']} {status_icon}",
                     callback=lambda sender, pid=p["id"], mid=model["id"]: self._select_provider_and_model(pid, mid)
                 ))
             else:
                 # No models defined
-                provider_menu.add(rumps.MenuItem(
+                providers_menu.add(rumps.MenuItem(
                     f"{prefix}{p['name']} {status_icon}",
                     callback=lambda sender, pid=p["id"]: self._select_provider(pid)
                 ))
 
-        provider_menu.add(rumps.separator)
+        providers_menu.add(rumps.separator)
 
         # Local providers with model submenus
-        provider_menu.add(rumps.MenuItem("── Local ──", callback=None))
+        providers_menu.add(rumps.MenuItem("── Local ──", callback=None))
         for p in providers:
             if p["category"] != "local":
                 continue
@@ -780,20 +777,17 @@ class WhisperHUDApp(rumps.App):
                             callback=lambda sender, pid=p["id"], mid=model["id"], dl=downloaded, prov=p: self._select_provider_model_or_download(pid, mid, dl, prov)
                         ))
 
-                provider_menu.add(provider_submenu)
+                providers_menu.add(provider_submenu)
             else:
                 # Single or no models - select provider directly
-                provider_menu.add(rumps.MenuItem(
+                providers_menu.add(rumps.MenuItem(
                     f"{prefix}{name} {status_icon}",
                     callback=lambda sender, pid=p["id"], prov=p: self._select_or_download_provider(pid, prov)
                 ))
 
-        self.menu.add(provider_menu)
-
-        self.menu.add(rumps.separator)
-
-        # === API Keys ===
-        keys_menu = rumps.MenuItem("API Keys")
+        providers_menu.add(rumps.separator)
+        providers_menu.add(rumps.MenuItem("── API Keys ──", callback=None))
+        keys_menu = providers_menu
         credential_mode = self._credential_mode()
         keys_menu.add(rumps.MenuItem(f"Storage: {get_storage_mode_label(credential_mode)}", callback=None))
         if credential_mode == "passphrase":
@@ -850,14 +844,38 @@ class WhisperHUDApp(rumps.App):
             keys_menu.add(rumps.separator)
             keys_menu.add(rumps.MenuItem("Session-only mode: keys are not saved to disk", callback=None))
 
-        self.menu.add(keys_menu)
+        delete_keys_menu = rumps.MenuItem("Delete Saved Keys")
+        configured_providers = configured
+        if configured_providers:
+            for provider in configured_providers:
+                delete_keys_menu.add(rumps.MenuItem(
+                    f"Delete {self._get_provider_display_name(provider)} Key",
+                    callback=lambda s, p=provider: self._delete_api_key(p)
+                ))
+        else:
+            for provider in ["openai", "gemini", "anthropic"]:
+                delete_keys_menu.add(rumps.MenuItem(
+                    f"Delete {self._get_provider_display_name(provider)} Key",
+                    callback=lambda s, p=provider: self._delete_api_key(p)
+                ))
+        delete_keys_menu.add(rumps.separator)
+        delete_keys_menu.add(rumps.MenuItem(
+            "Delete All API Keys",
+            callback=self._delete_all_api_keys
+        ))
+        providers_menu.add(rumps.separator)
+        providers_menu.add(delete_keys_menu)
+
+        self.menu.add(providers_menu)
 
         self.menu.add(rumps.separator)
 
         # === Settings ===
         settings_menu = rumps.MenuItem("Settings")
 
-        settings_menu.add(rumps.MenuItem(
+        recording_menu = rumps.MenuItem("Recording & Display")
+
+        recording_menu.add(rumps.MenuItem(
             f"{'✓ ' if self.config.show_widget else '   '}Show floating button",
             callback=self._toggle_widget
         ))
@@ -871,15 +889,15 @@ class WhisperHUDApp(rumps.App):
                 f"{prefix}{size_name}",
                 callback=lambda sender, s=size_id: self._set_widget_size(s)
             ))
-        settings_menu.add(size_menu)
+        recording_menu.add(size_menu)
 
-        settings_menu.add(rumps.separator)
+        recording_menu.add(rumps.separator)
 
-        settings_menu.add(rumps.MenuItem(
+        recording_menu.add(rumps.MenuItem(
             f"{'✓ ' if self.config.show_hud else '   '}Show HUD overlay",
             callback=self._toggle_hud
         ))
-        settings_menu.add(rumps.MenuItem(
+        recording_menu.add(rumps.MenuItem(
             f"{'✓ ' if self.config.auto_stop else '   '}Auto-stop on silence",
             callback=self._toggle_auto_stop
         ))
@@ -901,33 +919,33 @@ class WhisperHUDApp(rumps.App):
                 f"{prefix}{label}",
                 callback=lambda s, sec=seconds: self._set_max_duration(sec)
             ))
-        settings_menu.add(max_dur_menu)
+        recording_menu.add(max_dur_menu)
 
-        settings_menu.add(rumps.MenuItem(
+        recording_menu.add(rumps.MenuItem(
             f"{'✓ ' if self.config.auto_paste else '   '}Auto-paste text",
             callback=self._toggle_auto_paste
         ))
-        settings_menu.add(rumps.MenuItem(
+        recording_menu.add(rumps.MenuItem(
             f"{'✓ ' if self.config.restore_clipboard else '   '}Restore clipboard",
             callback=self._toggle_restore_clipboard
         ))
         # History toggle (disabled in private mode)
         if self.config.private_mode:
-            settings_menu.add(rumps.MenuItem(
+            recording_menu.add(rumps.MenuItem(
                 "   Save transcription history (disabled in private mode)",
                 callback=None
             ))
         else:
-            settings_menu.add(rumps.MenuItem(
+            recording_menu.add(rumps.MenuItem(
                 f"{'✓ ' if self.config.history_enabled else '   '}Save transcription history",
                 callback=self._toggle_history
             ))
-        settings_menu.add(rumps.MenuItem(
+        recording_menu.add(rumps.MenuItem(
             f"{'✓ ' if self.config.play_sound else '   '}Play sound on completion",
             callback=self._toggle_play_sound
         ))
 
-        settings_menu.add(rumps.separator)
+        recording_menu.add(rumps.separator)
 
         # === Privacy Settings ===
         privacy_menu = rumps.MenuItem("Privacy & Security")
@@ -1020,19 +1038,19 @@ class WhisperHUDApp(rumps.App):
                 ))
 
         settings_menu.add(privacy_menu)
-        settings_menu.add(rumps.MenuItem(
+        recording_menu.add(rumps.MenuItem(
             f"{'✓ ' if self.config.show_notifications else '   '}Show notifications",
             callback=self._toggle_notifications
         ))
 
-        settings_menu.add(rumps.separator)
+        recording_menu.add(rumps.separator)
 
-        settings_menu.add(rumps.MenuItem(
+        recording_menu.add(rumps.MenuItem(
             f"{'✓ ' if self.config.streaming_enabled else '   '}Live streaming display",
             callback=self._toggle_streaming
         ))
 
-        settings_menu.add(rumps.separator)
+        recording_menu.add(rumps.separator)
 
         # === Audio Input Device ===
         from .recorder import get_input_devices
@@ -1059,18 +1077,19 @@ class WhisperHUDApp(rumps.App):
                 callback=lambda s, d=device['id']: self._set_audio_device(d)
             ))
 
-        settings_menu.add(device_menu)
+        recording_menu.add(device_menu)
 
-        settings_menu.add(rumps.separator)
+        recording_menu.add(rumps.separator)
 
         # === Launch at Login ===
         from .launch_agent import is_launch_at_login_enabled
         launch_enabled = is_launch_at_login_enabled()
-        settings_menu.add(rumps.MenuItem(
+        recording_menu.add(rumps.MenuItem(
             f"{'✓ ' if launch_enabled else '   '}Launch at login",
             callback=self._toggle_launch_at_login
         ))
 
+        settings_menu.add(recording_menu)
         settings_menu.add(rumps.separator)
 
         # === Appearance Submenu ===
@@ -1139,10 +1158,6 @@ class WhisperHUDApp(rumps.App):
         ))
 
         settings_menu.add(appearance_menu)
-
-        self.menu.add(settings_menu)
-
-        self.menu.add(rumps.separator)
 
         # === Paste Target ===
         # Show current target in menu title for quick visibility
@@ -1585,24 +1600,24 @@ class WhisperHUDApp(rumps.App):
 
         self.menu.add(translation_menu)
 
-        self.menu.add(rumps.separator)
-
-        # === Stats ===
         stats = self.transcriber.get_stats()
-        stats_text = f"Transcriptions: {stats['total_transcriptions']} • ${stats['total_cost']:.4f}"
-        self.menu.add(rumps.MenuItem(stats_text, callback=None))
+        history_menu = rumps.MenuItem("History & Stats")
+        history_menu.add(rumps.MenuItem(
+            f"Transcriptions: {stats['total_transcriptions']} • ${stats['total_cost']:.4f}",
+            callback=None
+        ))
+        history_menu.add(rumps.MenuItem(
+            f"Reset Statistics ({stats['total_transcriptions']} transcriptions)",
+            callback=self._reset_statistics
+        ))
+        history_menu.add(rumps.separator)
 
-        self.menu.add(rumps.separator)
-
-        # === History ===
         history_items = self.config.get_history(limit=10) if self.config.history_enabled else []
         if self.config.private_mode:
-            self.menu.add(rumps.MenuItem("History 🔒 Private Mode", callback=None))
+            history_menu.add(rumps.MenuItem("History 🔒 Private Mode", callback=None))
         elif not self.config.history_enabled:
-            self.menu.add(rumps.MenuItem("History (saving disabled)", callback=None))
+            history_menu.add(rumps.MenuItem("History (saving disabled)", callback=None))
         elif history_items:
-            history_menu = rumps.MenuItem(f"History ({len(history_items)})")
-
             for i, item in enumerate(history_items[:10]):
                 # Format: truncated text + timestamp
                 text = item.get("text", "")
@@ -1625,16 +1640,30 @@ class WhisperHUDApp(rumps.App):
                 ))
 
             history_menu.add(rumps.separator)
-            history_menu.add(rumps.MenuItem(
-                "Clear History",
-                callback=self._clear_history
-            ))
-
-            self.menu.add(history_menu)
         else:
-            self.menu.add(rumps.MenuItem("History (empty)", callback=None))
+            history_menu.add(rumps.MenuItem("History (empty)", callback=None))
 
-        self.menu.add(rumps.separator)
+        history_menu.add(rumps.separator)
+        if self.config.private_mode:
+            history_menu.add(rumps.MenuItem(
+                "Clear History (Private Mode—nothing saved)",
+                callback=None
+            ))
+        else:
+            history_count = len(self.config.history) if self.config.history_enabled else 0
+            if history_count > 0:
+                encryption_note = " 🔐" if self.config.history_encrypted else ""
+                history_menu.add(rumps.MenuItem(
+                    f"Clear History ({history_count} items{encryption_note})",
+                    callback=self._clear_history
+                ))
+            else:
+                history_menu.add(rumps.MenuItem(
+                    "Clear History (empty)",
+                    callback=None
+                ))
+        settings_menu.add(history_menu)
+        settings_menu.add(rumps.separator)
 
         # === Hotkey Settings ===
         hotkey_menu = rumps.MenuItem("Hotkey")
@@ -1673,87 +1702,24 @@ class WhisperHUDApp(rumps.App):
             f"{'● ' if not is_push_to_talk else '   '}Press to toggle recording",
             callback=lambda _: self._set_hotkey_mode("toggle")
         ))
-
-        self.menu.add(hotkey_menu)
-
-        self.menu.add(rumps.separator)
-
-        # === Hotkey hint ===
         hotkey_hint = format_hotkey_display(self.config.hotkey)
         hint_action = "Hold" if self.config.hotkey_mode == "push_to_talk" else "Press"
-        self.menu.add(rumps.MenuItem(
+        hotkey_menu.add(rumps.separator)
+        hotkey_menu.add(rumps.MenuItem(
             f"{hint_action} {hotkey_hint} to record",
             callback=None
         ))
-
-        self.menu.add(rumps.separator)
+        settings_menu.add(hotkey_menu)
+        settings_menu.add(rumps.separator)
 
         # === Data & Privacy ===
         data_menu = rumps.MenuItem("Data & Privacy")
-
-        # Clear history - show appropriate state
-        if self.config.private_mode:
-            data_menu.add(rumps.MenuItem(
-                "Clear History (Private Mode—nothing saved)",
-                callback=None
-            ))
-        else:
-            history_count = len(self.config.history) if self.config.history_enabled else 0
-            if history_count > 0:
-                encryption_note = " 🔐" if self.config.history_encrypted else ""
-                data_menu.add(rumps.MenuItem(
-                    f"Clear History ({history_count} items{encryption_note})",
-                    callback=self._clear_history
-                ))
-            else:
-                data_menu.add(rumps.MenuItem(
-                    "Clear History (empty)",
-                    callback=None
-                ))
-
-        # Reset statistics
-        stats = self.transcriber.get_stats()
-        data_menu.add(rumps.MenuItem(
-            f"Reset Statistics ({stats['total_transcriptions']} transcriptions)",
-            callback=self._reset_statistics
-        ))
 
         # Clear image cache
         data_menu.add(rumps.MenuItem(
             "Clear Image Cache",
             callback=self._clear_image_cache
         ))
-
-        data_menu.add(rumps.separator)
-
-        # Delete API keys submenu
-        api_keys_menu = rumps.MenuItem("Delete API Keys")
-        configured_providers = configured
-        if configured_providers:
-            for provider in configured_providers:
-                provider_name = self._get_provider_display_name(provider)
-                api_keys_menu.add(rumps.MenuItem(
-                    f"Delete {provider_name} Key",
-                    callback=lambda s, p=provider: self._delete_api_key(p)
-                ))
-            api_keys_menu.add(rumps.separator)
-            api_keys_menu.add(rumps.MenuItem(
-                "Delete All API Keys",
-                callback=self._delete_all_api_keys
-            ))
-        else:
-            for provider in ["openai", "gemini", "anthropic"]:
-                provider_name = self._get_provider_display_name(provider)
-                api_keys_menu.add(rumps.MenuItem(
-                    f"Delete {provider_name} Key",
-                    callback=lambda s, p=provider: self._delete_api_key(p)
-                ))
-            api_keys_menu.add(rumps.separator)
-            api_keys_menu.add(rumps.MenuItem(
-                "Delete All API Keys",
-                callback=self._delete_all_api_keys
-            ))
-        data_menu.add(api_keys_menu)
 
         data_menu.add(rumps.separator)
 
@@ -1775,18 +1741,16 @@ class WhisperHUDApp(rumps.App):
             callback=self._reset_all_settings
         ))
 
-        self.menu.add(data_menu)
+        settings_menu.add(data_menu)
+        settings_menu.add(rumps.separator)
 
-        self.menu.add(rumps.separator)
+        # === Advanced & Support ===
+        advanced_menu = rumps.MenuItem("Advanced & Support")
+        advanced_menu.add(rumps.MenuItem("Run Setup Wizard...", callback=self._run_setup_wizard))
+        advanced_menu.add(rumps.separator)
 
-        # === Setup Wizard ===
-        self.menu.add(rumps.MenuItem("Run Setup Wizard...", callback=self._run_setup_wizard))
-
-        self.menu.add(rumps.separator)
-
-        # === About ===
         from . import __version__
-        about_menu = rumps.MenuItem(f"WhisperHUD v{__version__}")
+        about_menu = rumps.MenuItem(f"About WhisperHUD v{__version__}")
 
         about_menu.add(rumps.MenuItem("About WhisperHUD", callback=self._show_about))
         about_menu.add(rumps.MenuItem("Check for Updates...", callback=self._check_for_updates))
@@ -1794,7 +1758,10 @@ class WhisperHUDApp(rumps.App):
         about_menu.add(rumps.MenuItem("View on GitHub", callback=self._open_github))
         about_menu.add(rumps.MenuItem("System Info", callback=self._show_system_info))
 
-        self.menu.add(about_menu)
+        advanced_menu.add(about_menu)
+        settings_menu.add(advanced_menu)
+
+        self.menu.add(settings_menu)
 
         self.menu.add(rumps.separator)
 

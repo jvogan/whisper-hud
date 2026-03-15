@@ -30,6 +30,13 @@ try:
         NSLeftTextAlignment, NSAppearance, NSAppearanceNameAqua,
         NSAppearanceNameDarkAqua
     )
+    from Foundation import (
+        NSAttributedString,
+        NSMutableParagraphStyle,
+        NSFontAttributeName,
+        NSForegroundColorAttributeName,
+        NSParagraphStyleAttributeName,
+    )
     from PyObjCTools import AppHelper
     HAS_APPKIT = True
 except ImportError:
@@ -99,6 +106,11 @@ class SetupWizard:
         self._provider_buttons = {}
         self._mode_buttons = {}
         self._api_key_field = None
+        self._api_key_status_icon = None
+        self._api_key_status_label = None
+        self._api_key_spinner = None
+        self._skip_validation_button = None
+        self._next_button = None
         self._progress_indicator = None
         self._status_label = None
         self._translation_provider_popup = None
@@ -110,7 +122,14 @@ class SetupWizard:
         self._translation_model_choices = []
         self._translation_target_choices = []
         self._translation_source_choices = []
-        self._is_dark_mode = False
+        self._api_key_validation_status = "idle"
+        self._api_key_validation_message = "Enter an API key to continue"
+        self._api_key_validation_acknowledged = False
+        self._api_key_validation_key = ""
+        self._api_key_validation_provider = ""
+        self._api_key_validation_timer = None
+        self._api_key_validation_request_id = 0
+        self._api_key_validation_lock = threading.Lock()
 
         # Prefill from current config when rerunning setup.
         try:
@@ -179,6 +198,18 @@ class SetupWizard:
 
     def _clear_content(self):
         """Clear all subviews from content view."""
+        self._cancel_api_key_validation_timer()
+        if self._api_key_field:
+            try:
+                self._api_key_field.setDelegate_(None)
+            except Exception:
+                pass
+        self._api_key_field = None
+        self._api_key_status_icon = None
+        self._api_key_status_label = None
+        self._api_key_spinner = None
+        self._skip_validation_button = None
+        self._next_button = None
         if self._content_view:
             for subview in list(self._content_view.subviews()):
                 subview.removeFromSuperview()
@@ -379,10 +410,43 @@ class SetupWizard:
         self._api_key_field.setPlaceholderString_("Paste your API key here...")
         self._api_key_field.setFont_(NSFont.systemFontOfSize_(14))
         self._api_key_field.setStringValue_(self._api_key)
+        self._api_key_field.setDelegate_(self)
         self._content_view.addSubview_(self._api_key_field)
 
+        y -= 34
+        self._api_key_spinner = NSProgressIndicator.alloc().initWithFrame_(
+            NSMakeRect(self.PADDING, y, 16, 16)
+        )
+        self._api_key_spinner.setStyle_(NSProgressIndicatorSpinningStyle)
+        self._api_key_spinner.setIndeterminate_(True)
+        self._api_key_spinner.setDisplayedWhenStopped_(False)
+        self._api_key_spinner.setHidden_(True)
+        self._content_view.addSubview_(self._api_key_spinner)
+
+        self._api_key_status_icon = self._create_label(
+            "",
+            NSMakeRect(self.PADDING + 20, y - 2, 18, 20),
+            font_size=14,
+            bold=True
+        )
+        self._content_view.addSubview_(self._api_key_status_icon)
+
+        self._api_key_status_label = self._create_label(
+            self._api_key_validation_message,
+            NSMakeRect(self.PADDING + 44, y - 2, self.WIDTH - 2 * self.PADDING - 140, 20),
+            font_size=12
+        )
+        self._content_view.addSubview_(self._api_key_status_label)
+
+        self._skip_validation_button = self._create_button(
+            "Skip Validation",
+            NSMakeRect(self.WIDTH - self.PADDING - 116, y - 6, 116, 24),
+            action=self._skip_api_key_validation
+        )
+        self._content_view.addSubview_(self._skip_validation_button)
+
         # Help text with links
-        y -= 56
+        y -= 62
         help_text = self._create_label(
             "Get your API key:\n"
             "  Gemini: aistudio.google.com/apikey (free tier!)\n"
@@ -416,8 +480,10 @@ class SetupWizard:
             back_title="Back",
             back_action=lambda: self._show_step(WizardStep.TRANSCRIPTION_MODE),
             next_title="Next",
-            next_action=self._validate_and_continue_cloud
+            next_action=self._validate_and_continue_cloud,
+            next_enabled=False
         )
+        self._handle_api_key_input_changed()
 
     def _show_local_setup(self):
         """Show local transcription setup step."""
@@ -1012,6 +1078,79 @@ class SetupWizard:
 
         return button
 
+    def _estimate_wrapped_line_count(self, text: str, width: float, font_size: float) -> int:
+        """Estimate the number of rendered lines for a wrapped button title."""
+        usable_width = max(width - 28, font_size)
+        approx_char_width = max(font_size * 0.56, 1)
+        chars_per_line = max(int(usable_width / approx_char_width), 1)
+
+        line_count = 0
+        for raw_line in text.splitlines() or [""]:
+            line = raw_line.strip()
+            if not line:
+                line_count += 1
+                continue
+            line_count += max((len(line) + chars_per_line - 1) // chars_per_line, 1)
+        return max(line_count, 1)
+
+    def _wrapped_button_height(self, text: str, width: float, font_size: float, minimum_height: float) -> float:
+        """Return a button height that fits a wrapped title without clipping."""
+        line_count = self._estimate_wrapped_line_count(text, width, font_size)
+        line_height = max(font_size + 4, 16)
+        content_height = 14 + (line_count * line_height)
+        return max(minimum_height, content_height)
+
+    def _apply_wrapped_button_title(
+        self,
+        button: NSButton,
+        text: str,
+        frame,
+        font_size: float,
+        align: int = NSLeftTextAlignment,
+        minimum_height: float | None = None,
+    ) -> NSButton:
+        """Configure a button title for multiline wrapping and resize its frame if needed."""
+        button.setTitle_(text)
+
+        paragraph_style = None
+        if HAS_APPKIT:
+            try:
+                paragraph_style = NSMutableParagraphStyle.alloc().init()
+                paragraph_style.setAlignment_(align)
+                if hasattr(paragraph_style, "setLineBreakMode_"):
+                    paragraph_style.setLineBreakMode_(0)
+
+                attributes = {
+                    NSFontAttributeName: NSFont.systemFontOfSize_(font_size),
+                    NSForegroundColorAttributeName: self._primary_text_color(),
+                    NSParagraphStyleAttributeName: paragraph_style,
+                }
+                attributed_title = NSAttributedString.alloc().initWithString_attributes_(text, attributes)
+                if hasattr(button, "setAttributedTitle_"):
+                    button.setAttributedTitle_(attributed_title)
+            except Exception:
+                paragraph_style = None
+
+        if hasattr(button, "cell"):
+            try:
+                cell = button.cell()
+                if hasattr(cell, "setWraps_"):
+                    cell.setWraps_(True)
+                if hasattr(cell, "setUsesSingleLineMode_"):
+                    cell.setUsesSingleLineMode_(False)
+                if hasattr(cell, "setScrollable_"):
+                    cell.setScrollable_(False)
+                if hasattr(cell, "setLineBreakMode_"):
+                    cell.setLineBreakMode_(0)
+            except Exception:
+                pass
+
+        if minimum_height is not None:
+            frame.size.height = self._wrapped_button_height(text, frame.size.width, font_size, minimum_height)
+            button.setFrame_(frame)
+
+        return button
+
     def _create_provider_button(
         self,
         title: str,
@@ -1022,8 +1161,14 @@ class SetupWizard:
     ) -> NSButton:
         """Create a provider selection button."""
         button = NSButton.alloc().initWithFrame_(frame)
-        button.setTitle_(f"{title}\n{subtitle}")
         button.setBezelStyle_(1)
+        self._apply_wrapped_button_title(
+            button,
+            f"{title}\n{subtitle}",
+            frame,
+            font_size=13,
+            minimum_height=frame.size.height,
+        )
 
         if selected:
             button.setState_(1)
@@ -1045,8 +1190,14 @@ class SetupWizard:
     ) -> NSButton:
         """Create a mode selection card button."""
         button = NSButton.alloc().initWithFrame_(frame)
-        button.setTitle_(f"{title}\n{subtitle}\n\n{description}")
         button.setBezelStyle_(1)
+        self._apply_wrapped_button_title(
+            button,
+            f"{title}\n{subtitle}\n\n{description}",
+            frame,
+            font_size=13,
+            minimum_height=frame.size.height,
+        )
 
         if selected:
             button.setState_(1)
@@ -1089,7 +1240,8 @@ class SetupWizard:
         extra_title: Optional[str] = None,
         extra_action: Optional[Callable] = None,
         next_title: str = "Next",
-        next_action: Optional[Callable] = None
+        next_action: Optional[Callable] = None,
+        next_enabled: bool = True
     ):
         """Add navigation buttons at bottom."""
         y = self.PADDING
@@ -1121,12 +1273,238 @@ class SetupWizard:
 
         # Next button
         if next_action:
-            next_btn = self._create_button(
+            self._next_button = self._create_button(
                 next_title,
                 NSMakeRect(self.WIDTH - self.PADDING - 90, y, 90, 32),
                 action=next_action
             )
-            self._content_view.addSubview_(next_btn)
+            self._next_button.setEnabled_(next_enabled)
+            self._content_view.addSubview_(self._next_button)
+
+    def controlTextDidChange_(self, notification):
+        """Handle AppKit text change notifications."""
+        if self._current_step == WizardStep.CLOUD_SETUP:
+            self._handle_api_key_input_changed()
+
+    def _dispatch_to_main_thread(self, callback: Callable[[], None]):
+        """Dispatch a callback onto the AppKit main thread when available."""
+        if HAS_APPKIT:
+            AppHelper.callAfter(callback)
+            return
+        callback()
+
+    def _cancel_api_key_validation_timer(self):
+        """Cancel any pending debounced validation timer."""
+        if self._api_key_validation_timer:
+            self._api_key_validation_timer.cancel()
+            self._api_key_validation_timer = None
+
+    def _next_api_key_validation_request_id(self) -> int:
+        """Return a new request id and invalidate older validation work."""
+        with self._api_key_validation_lock:
+            self._api_key_validation_request_id += 1
+            return self._api_key_validation_request_id
+
+    def _current_api_key_validation_request_id(self) -> int:
+        """Return the latest validation request id."""
+        with self._api_key_validation_lock:
+            return self._api_key_validation_request_id
+
+    def _normalized_validation_provider(self, provider: str) -> str:
+        """Map UI provider ids to validate_api_key provider ids."""
+        if provider == "openai_realtime":
+            return "openai"
+        return provider
+
+    def _set_api_key_validation_state(
+        self,
+        status: str,
+        message: str,
+        *,
+        validated_key: str = "",
+        validated_provider: str = "",
+        acknowledged: Optional[bool] = None
+    ):
+        """Update inline validation state and refresh the cloud UI."""
+        self._api_key_validation_status = status
+        self._api_key_validation_message = message
+        self._api_key_validation_key = validated_key
+        self._api_key_validation_provider = validated_provider
+        if acknowledged is not None:
+            self._api_key_validation_acknowledged = acknowledged
+        self._refresh_api_key_validation_ui()
+
+    def _handle_api_key_input_changed(self):
+        """Debounce inline API key validation after user input changes."""
+        if self._current_step != WizardStep.CLOUD_SETUP:
+            return
+
+        current_key = ""
+        if self._api_key_field:
+            current_key = self._api_key_field.stringValue().strip()
+
+        provider = self._normalized_validation_provider(self._selected_provider)
+        changed = current_key != self._api_key_validation_key or provider != self._api_key_validation_provider
+
+        self._api_key = current_key
+        if changed:
+            self._api_key_validation_acknowledged = False
+
+        self._cancel_api_key_validation_timer()
+        self._next_api_key_validation_request_id()
+
+        if not current_key:
+            self._set_api_key_validation_state(
+                "idle",
+                "Enter an API key to continue",
+                validated_key="",
+                validated_provider="",
+                acknowledged=False,
+            )
+            return
+
+        self._set_api_key_validation_state(
+            "pending",
+            "Waiting to validate API key...",
+            validated_key="",
+            validated_provider="",
+            acknowledged=False,
+        )
+
+        request_id = self._current_api_key_validation_request_id()
+        self._api_key_validation_timer = threading.Timer(
+            0.5,
+            lambda: self._begin_api_key_validation(request_id, provider, current_key),
+        )
+        self._api_key_validation_timer.daemon = True
+        self._api_key_validation_timer.start()
+
+    def _begin_api_key_validation(self, request_id: int, provider: str, api_key: str):
+        """Start API key validation on a background thread."""
+        def mark_validating():
+            if not self._should_apply_api_key_validation_result(request_id, provider, api_key):
+                return
+            self._set_api_key_validation_state(
+                "validating",
+                "Validating API key...",
+                validated_key="",
+                validated_provider="",
+            )
+
+        self._dispatch_to_main_thread(mark_validating)
+
+        def do_validate():
+            from .keychain import validate_api_key
+
+            is_valid, error = validate_api_key(provider, api_key)
+
+            def apply_result():
+                if not self._should_apply_api_key_validation_result(request_id, provider, api_key):
+                    return
+                if is_valid:
+                    self._set_api_key_validation_state(
+                        "valid",
+                        "API key validated",
+                        validated_key=api_key,
+                        validated_provider=provider,
+                        acknowledged=False,
+                    )
+                else:
+                    self._set_api_key_validation_state(
+                        "invalid",
+                        error or "API key validation failed",
+                        validated_key=api_key,
+                        validated_provider=provider,
+                        acknowledged=False,
+                    )
+
+            self._dispatch_to_main_thread(apply_result)
+
+        threading.Thread(target=do_validate, daemon=True).start()
+
+    def _should_apply_api_key_validation_result(self, request_id: int, provider: str, api_key: str) -> bool:
+        """Return whether a validation result still matches the current UI state."""
+        if request_id != self._current_api_key_validation_request_id():
+            return False
+        if self._current_step != WizardStep.CLOUD_SETUP:
+            return False
+        if self._normalized_validation_provider(self._selected_provider) != provider:
+            return False
+        return self._api_key.strip() == api_key
+
+    def _refresh_api_key_validation_ui(self):
+        """Update the inline cloud validation widgets."""
+        spinner = self._api_key_spinner
+        if spinner:
+            if self._api_key_validation_status == "validating":
+                spinner.setHidden_(False)
+                spinner.startAnimation_(None)
+            else:
+                spinner.stopAnimation_(None)
+                spinner.setHidden_(True)
+
+        icon = self._api_key_status_icon
+        label = self._api_key_status_label
+        status = self._api_key_validation_status
+
+        icon_text = ""
+        color = NSColor.colorWithCalibratedWhite_alpha_(0.7, 1.0) if HAS_APPKIT else None
+
+        if status == "valid":
+            icon_text = "✓"
+        elif status == "invalid":
+            icon_text = "✗"
+        elif status == "skipped":
+            icon_text = "!"
+
+        if HAS_APPKIT:
+            if status == "valid":
+                color = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.35, 0.85, 0.45, 1.0)
+            elif status == "invalid":
+                color = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.95, 0.35, 0.35, 1.0)
+            elif status == "skipped":
+                color = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.95, 0.75, 0.3, 1.0)
+            elif status in {"pending", "validating"}:
+                color = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.6, 0.8, 1.0, 1.0)
+
+        if icon:
+            icon.setStringValue_(icon_text)
+            if color is not None:
+                icon.setTextColor_(color)
+
+        if label:
+            label.setStringValue_(self._api_key_validation_message)
+            if color is not None:
+                label.setTextColor_(color)
+
+        if self._skip_validation_button:
+            can_skip = bool(self._api_key) and status != "validating"
+            self._skip_validation_button.setEnabled_(can_skip)
+
+        if self._next_button:
+            next_enabled = self._can_continue_cloud_setup() and status != "validating"
+            self._next_button.setEnabled_(next_enabled)
+
+    def _can_continue_cloud_setup(self) -> bool:
+        """Return whether the cloud step can advance."""
+        if not self._api_key:
+            return False
+        return self._api_key_validation_status == "valid" or self._api_key_validation_acknowledged
+
+    def _skip_api_key_validation(self):
+        """Allow the user to continue after explicitly acknowledging validation was skipped."""
+        if not self._api_key:
+            return
+
+        self._cancel_api_key_validation_timer()
+        self._next_api_key_validation_request_id()
+        self._set_api_key_validation_state(
+            "skipped",
+            "Validation skipped. The key may still fail when used.",
+            validated_key=self._api_key,
+            validated_provider=self._normalized_validation_provider(self._selected_provider),
+            acknowledged=True,
+        )
 
     def _prompt_secure_input(self, title: str, message: str) -> Optional[str]:
         """Prompt for hidden input using AppleScript."""
@@ -1323,7 +1701,16 @@ class SetupWizard:
 
     def _select_provider(self, provider: str):
         """Handle provider selection."""
+        provider_changed = self._selected_provider != provider
         self._selected_provider = provider
+        if provider_changed:
+            self._cancel_api_key_validation_timer()
+            self._next_api_key_validation_request_id()
+            self._api_key_validation_acknowledged = False
+            self._api_key_validation_status = "idle"
+            self._api_key_validation_message = "Enter an API key to continue"
+            self._api_key_validation_key = ""
+            self._api_key_validation_provider = ""
 
         # Refresh current step
         if self._current_step == WizardStep.CLOUD_SETUP:
@@ -1355,9 +1742,11 @@ class SetupWizard:
             self._show_error("Please enter an API key")
             return
 
-        # Basic validation
-        if self._selected_provider in {"openai", "openai_realtime"} and not self._api_key.startswith("sk-"):
-            self._show_error("OpenAI keys should start with 'sk-'")
+        if not self._can_continue_cloud_setup():
+            if self._api_key_validation_status == "validating":
+                self._show_error("Wait for API key validation to finish")
+            else:
+                self._show_error("Validate the API key or choose Skip Validation")
             return
 
         if get_storage_mode() == "passphrase" and not is_passphrase_unlocked():

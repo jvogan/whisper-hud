@@ -236,18 +236,34 @@ def _menu_titles(menu):
 
 
 def test_build_menu_reflects_provider_availability(monkeypatch):
-    """The menu should expose provider readiness in the status and provider submenu."""
+    """The menu should expose provider readiness within the merged providers submenu."""
     app = _build_menu_app(monkeypatch)
 
     app._build_menu()
 
     top_level_titles = _menu_titles(app.menu)
     assert top_level_titles[0] == "✓ Ready • OpenAI"
+    assert top_level_titles[1:] == [
+        "Providers & Keys",
+        "Paste Target",
+        "Translation",
+        "Settings",
+        "Quit WhisperHUD",
+    ]
+    assert len(top_level_titles) <= 6
 
-    provider_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Provider")
+    provider_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Providers & Keys")
     provider_titles = _menu_titles(provider_menu)
+    assert "Current: OpenAI" in provider_titles
     assert "● OpenAI ✓" in provider_titles
     assert "   Whisper Local [download] ⬇️" in provider_titles
+    assert "OpenAI: Not set" in provider_titles
+
+    settings_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Settings")
+    settings_titles = _menu_titles(settings_menu)
+    assert "Appearance" in settings_titles
+    assert "Hotkey" in settings_titles
+    assert "Advanced & Support" in settings_titles
 
 
 def test_hotkey_press_starts_recording():
