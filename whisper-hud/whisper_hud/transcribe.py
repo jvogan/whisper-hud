@@ -5,6 +5,7 @@ Manages providers and handles transcription requests.
 Supports both cloud (OpenAI, Gemini) and local (Apple Speech, Whisper, Parakeet) providers.
 """
 
+from copy import deepcopy
 from typing import Optional, Dict, Type, Callable
 from .providers.base import TranscriptionProvider, TranscriptionResult, LiveTranscriptionSession
 from .providers.openai_whisper import OpenAITranscribeProvider
@@ -40,6 +41,7 @@ class TranscriptionManager:
         self.config = config or Config.load()
         self._shared_config = config is not None
         self._providers: Dict[str, TranscriptionProvider] = {}
+        self._available_providers_cache: Optional[list[dict]] = None
 
     def get_available_providers(self, configured_providers: Optional[list[str]] = None) -> list[dict]:
         """
@@ -49,39 +51,59 @@ class TranscriptionManager:
             List of dicts with provider info, status, and category
         """
         configured = configured_providers if configured_providers is not None else get_configured_providers()
+        providers = deepcopy(self._get_cached_available_providers())
 
+        for provider in providers:
+            if provider["id"] == "openai_realtime":
+                provider["configured"] = "openai" in configured
+            elif provider["category"] == "cloud":
+                provider["configured"] = provider["id"] in configured
+
+        return providers
+
+    def _get_cached_available_providers(self) -> list[dict]:
+        """Compute provider metadata once and reuse it until config changes."""
+        if self._available_providers_cache is None:
+            self._available_providers_cache = self._build_available_providers_cache()
+        return self._available_providers_cache
+
+    def _build_available_providers_cache(self) -> list[dict]:
+        """Build provider metadata that is expensive to recompute on every menu open."""
         providers = []
 
-        # Cloud providers
+        openai_provider = OpenAITranscribeProvider()
         providers.append({
             "id": "openai",
             "name": "OpenAI",
             "display_name": "OpenAI",
-            "configured": "openai" in configured,
+            "configured": False,
             "category": "cloud",
             "requires_download": False,
-            "models": OpenAITranscribeProvider().get_models()
+            "models": openai_provider.get_models(),
         })
+
+        openai_realtime_provider = OpenAIRealtimeProvider()
         providers.append({
             "id": "openai_realtime",
             "name": "OpenAI Realtime",
             "display_name": "OpenAI Realtime",
-            "configured": "openai" in configured,
+            "configured": False,
             "category": "cloud",
             "requires_download": False,
-            "models": OpenAIRealtimeProvider().get_models()
+            "models": openai_realtime_provider.get_models(),
         })
+
+        gemini_provider = GeminiProvider()
         providers.append({
             "id": "gemini",
             "name": "Google Gemini",
             "display_name": "Google Gemini",
-            "configured": "gemini" in configured,
+            "configured": False,
             "category": "cloud",
             "requires_download": False,
-            "models": GeminiProvider().get_models()
+            "models": gemini_provider.get_models(),
         })
 
-        # Local providers
         apple_provider = AppleSpeechProvider()
         providers.append({
             "id": "apple",
@@ -126,6 +148,10 @@ class TranscriptionManager:
 
         return providers
 
+    def _invalidate_available_providers_cache(self) -> None:
+        """Clear cached provider metadata after config changes."""
+        self._available_providers_cache = None
+
     def get_provider(self, provider_id: str) -> Optional[TranscriptionProvider]:
         """Get or create a provider instance."""
         if provider_id not in self._providers:
@@ -146,6 +172,7 @@ class TranscriptionManager:
         if provider:
             provider.set_model(model_id)
             self.config.set_provider_model(provider_id, model_id)
+            self._invalidate_available_providers_cache()
 
     def transcribe(
         self,
@@ -305,7 +332,10 @@ class TranscriptionManager:
             return False
 
         if hasattr(provider, 'download_model'):
-            return provider.download_model(progress_callback)
+            success = provider.download_model(progress_callback)
+            if success:
+                self._invalidate_available_providers_cache()
+            return success
 
         if progress_callback:
             progress_callback("This provider doesn't require download", 100.0)
@@ -365,6 +395,7 @@ class TranscriptionManager:
             self.config.update_from(new_config)
         else:
             self.config = new_config
+        self._invalidate_available_providers_cache()
         # Update provider models
         for provider_id, provider in self._providers.items():
             model = self.config.get_provider_model(provider_id)
