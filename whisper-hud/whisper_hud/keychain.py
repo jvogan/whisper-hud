@@ -18,6 +18,7 @@ from typing import Optional, TYPE_CHECKING, TypedDict
 
 import keyring
 
+from .encryption import SCRYPT_PARAMS
 from .logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -134,13 +135,7 @@ def _ensure_credentials_file_permissions(path: Path) -> None:
 def _derive_fernet_key(passphrase: str, salt: bytes) -> bytes:
     from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
-    kdf = Scrypt(
-        salt=salt,
-        length=32,
-        n=2**14,
-        r=8,
-        p=1,
-    )
+    kdf = Scrypt(salt=salt, **SCRYPT_PARAMS)
     return base64.urlsafe_b64encode(kdf.derive(passphrase.encode("utf-8")))
 
 
@@ -600,6 +595,8 @@ def validate_api_key(provider: str, api_key: str) -> tuple[bool, str]:
 
 def _validate_openai_key(api_key: str) -> tuple[bool, str]:
     """Validate OpenAI API key by listing models."""
+    if not api_key or not api_key.startswith("sk-") or len(api_key) < 20:
+        return False, "Invalid API key format"
     try:
         import requests
 
@@ -630,6 +627,8 @@ def _validate_openai_key(api_key: str) -> tuple[bool, str]:
 
 def _validate_gemini_key(api_key: str) -> tuple[bool, str]:
     """Validate Gemini API key by listing models."""
+    if not api_key or len(api_key) < 20:
+        return False, "Invalid API key format"
     try:
         import requests
 
@@ -639,11 +638,7 @@ def _validate_gemini_key(api_key: str) -> tuple[bool, str]:
         if response.status_code == 200:
             return True, ""
         elif response.status_code == 400:
-            data = response.json()
-            error_msg = data.get("error", {}).get("message", "Invalid request")
-            if "api key" in error_msg.lower():
-                return False, "Invalid API key"
-            return False, error_msg[:50]
+            return False, "Invalid request or API key"
         elif response.status_code == 403:
             return False, "API key not authorized"
         elif response.status_code == 429:
@@ -664,6 +659,8 @@ def _validate_gemini_key(api_key: str) -> tuple[bool, str]:
 
 def _validate_anthropic_key(api_key: str) -> tuple[bool, str]:
     """Validate Anthropic API key by making a test request."""
+    if not api_key or not api_key.startswith("sk-ant-") or len(api_key) < 20:
+        return False, "Invalid API key format"
     try:
         import requests
 

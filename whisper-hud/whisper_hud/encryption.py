@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -21,6 +22,7 @@ from .logging_config import get_logger
 logger = get_logger("encryption")
 
 HISTORY_KEY_FILE = "history_encryption.key"
+SCRYPT_PARAMS = {"n": 2**14, "r": 8, "p": 1, "length": 32}
 _session_history_key: Optional[bytes] = None
 
 
@@ -61,26 +63,44 @@ def _read_history_key_payload() -> Optional[dict]:
 def _write_history_key_payload(payload: dict) -> bool:
     path = _history_key_file()
     _ensure_history_key_permissions(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Optional[Path] = None
     try:
-        with path.open("w", encoding="utf-8") as f:
-            json.dump(payload, f)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(path.parent),
+            prefix=".history_key.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            json.dump(payload, temp_file)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+
+        try:
+            os.chmod(temp_path, 0o600)
+        except Exception:
+            pass
+
+        os.replace(temp_path, path)
         _ensure_history_key_permissions(path)
         return True
     except Exception as e:
         logger.error(f"Failed to write history encryption key payload: {e}")
+        if temp_path and temp_path.exists():
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
         return False
 
 
 def _derive_wrap_key(passphrase: str, salt: bytes) -> bytes:
     from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
-    kdf = Scrypt(
-        salt=salt,
-        length=32,
-        n=2**14,
-        r=8,
-        p=1,
-    )
+    kdf = Scrypt(salt=salt, **SCRYPT_PARAMS)
     return base64.urlsafe_b64encode(kdf.derive(passphrase.encode("utf-8")))
 
 
@@ -377,7 +397,6 @@ def cleanup_orphaned_temp_files(prefix: str = "whisper_hud", temp_dir: Optional[
     Returns:
         Number of files cleaned up
     """
-    import tempfile
     import glob
 
     if temp_dir is None:

@@ -258,15 +258,16 @@ class TestValidateApiKey:
         from whisper_hud.keychain import validate_api_key
 
         response = Mock(status_code=200)
+        valid_key = "sk-valid-key-padded-to-pass-format-check-1234"
 
         with patch("requests.get", return_value=response) as mock_get:
-            is_valid, error = validate_api_key("openai", "sk-valid-key")
+            is_valid, error = validate_api_key("openai", valid_key)
 
         assert is_valid is True
         assert error == ""
         mock_get.assert_called_once_with(
             "https://api.openai.com/v1/models",
-            headers={"Authorization": "Bearer sk-valid-key"},
+            headers={"Authorization": f"Bearer {valid_key}"},
             timeout=10,
         )
 
@@ -275,9 +276,10 @@ class TestValidateApiKey:
         from whisper_hud.keychain import validate_api_key
 
         response = Mock(status_code=401)
+        invalid_key = "sk-invalid-key-padded-to-pass-format-1234567"
 
         with patch("requests.get", return_value=response) as mock_get:
-            is_valid, error = validate_api_key("openai", "sk-invalid-key")
+            is_valid, error = validate_api_key("openai", invalid_key)
 
         assert is_valid is False
         assert error == "Invalid API key"
@@ -288,8 +290,10 @@ class TestValidateApiKey:
         from whisper_hud.keychain import validate_api_key
         from requests.exceptions import Timeout
 
+        timeout_key = "sk-timeout-key-padded-to-pass-format-123456789"
+
         with patch("requests.get", side_effect=Timeout) as mock_get:
-            is_valid, error = validate_api_key("openai", "sk-timeout-key")
+            is_valid, error = validate_api_key("openai", timeout_key)
 
         assert is_valid is False
         assert error == "Connection timed out"
@@ -306,27 +310,23 @@ class TestValidateApiKey:
                 raise ImportError("No module named 'requests'")
             return original_import(name, *args, **kwargs)
 
+        no_requests_key = "sk-no-requests-padded-to-pass-format-12345678"
+
         with caplog.at_level(logging.WARNING, logger="whisper_hud.keychain"):
             with patch("builtins.__import__", side_effect=import_without_requests):
-                is_valid, error = validate_api_key("openai", "sk-no-requests")
+                is_valid, error = validate_api_key("openai", no_requests_key)
 
         assert is_valid is False
         assert error == REQUESTS_MISSING_WARNING
         assert REQUESTS_MISSING_WARNING in caplog.text
 
     def test_validate_api_key_returns_false_for_empty_key(self):
-        """An empty key should not validate successfully."""
+        """An empty key should fail format check before any network call."""
         from whisper_hud.keychain import validate_api_key
 
-        response = Mock(status_code=401)
-
-        with patch("requests.get", return_value=response) as mock_get:
+        with patch("requests.get") as mock_get:
             is_valid, error = validate_api_key("openai", "")
 
         assert is_valid is False
-        assert error == "Invalid API key"
-        mock_get.assert_called_once_with(
-            "https://api.openai.com/v1/models",
-            headers={"Authorization": "Bearer "},
-            timeout=10,
-        )
+        assert error == "Invalid API key format"
+        mock_get.assert_not_called()

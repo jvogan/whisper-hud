@@ -297,6 +297,11 @@ class PasteTargetManager:
         Returns:
             True if successful, False otherwise
         """
+        valid_sessions = self.get_tmux_sessions()
+        if session not in valid_sessions:
+            logger.warning(f"tmux session not found in running sessions")
+            return False
+
         try:
             # Use send-keys with -l flag for literal text
             # This prevents interpretation of special characters

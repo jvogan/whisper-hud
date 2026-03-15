@@ -1,6 +1,12 @@
 title = "WhisperHUD gitleaks config"
 
 [allowlist]
-paths = [
-  "tests/test_keychain.py",
+# Allow obviously fake/test key literals used in unit tests.
+# These match only short, clearly synthetic patterns like sk-test, sk-valid-key,
+# sk-invalid-key, sk-timeout-key, sk-no-requests, sk-short-key, and
+# repeated-character padding strings (sk-aaa...aaa / sk-bbb...bbb).
+regexes = [
+  '''sk-(test|valid-key|invalid-key|timeout-key|no-requests|short-key)''',
+  '''sk-[a-z]{1}\1{30,}''',
+  '''"sk-" \+ \("[a-z]" \* \d+\)''',
 ]
