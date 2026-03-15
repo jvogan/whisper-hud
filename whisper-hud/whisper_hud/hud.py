@@ -108,6 +108,7 @@ class HUD:
     DEFAULT_HEIGHT = 44
     TOP_MARGIN = 80
     ERROR_MAX_CHARS = 120
+    SUCCESS_MAX_CHARS = 40
 
     def __init__(self):
         self._window: Optional[NSWindow] = None
@@ -176,6 +177,13 @@ class HUD:
     @staticmethod
     def _truncate_error_message(message: str, max_chars: int = ERROR_MAX_CHARS) -> str:
         """Truncate error text to fit the HUD without overflowing."""
+        if len(message) <= max_chars:
+            return message
+        return message[: max_chars - 1] + "\u2026"
+
+    @staticmethod
+    def _truncate_success_message(message: str, max_chars: int = SUCCESS_MAX_CHARS) -> str:
+        """Truncate success text to fit the HUD width without overflow."""
         if len(message) <= max_chars:
             return message
         return message[: max_chars - 1] + "\u2026"
@@ -433,7 +441,8 @@ class HUD:
         """Show success and auto-dismiss."""
         if not self._enabled:
             return
-        self._show(text, HUDState.SUCCESS)
+        display_text = self._truncate_success_message(text)
+        self._show(display_text, HUDState.SUCCESS)
         if auto_dismiss > 0:
             self._schedule_dismiss(auto_dismiss)
 

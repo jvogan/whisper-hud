@@ -172,3 +172,19 @@ def test_show_error_truncates_to_120_characters(monkeypatch):
     assert len(shown["text"]) == 120
     assert shown["text"].endswith("\u2026")
     assert scheduled["delay"] == 6.5
+
+
+def test_show_success_truncates_long_message(monkeypatch):
+    hud = HUD()
+    shown = {}
+    scheduled = {}
+
+    monkeypatch.setattr(hud, "_show", lambda text, state: shown.update({"text": text, "state": state}))
+    monkeypatch.setattr(hud, "_schedule_dismiss", lambda delay: scheduled.update({"delay": delay}))
+
+    hud.show_success("Done! (" + ("word " * 20).strip() + ")")
+
+    assert len(shown["text"]) == 40
+    assert shown["text"].endswith("\u2026")
+    assert shown["state"] == HUDState.SUCCESS
+    assert scheduled["delay"] == 1.2

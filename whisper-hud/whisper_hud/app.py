@@ -324,6 +324,16 @@ class WhisperHUDApp(rumps.App):
             return True
         return self._ensure_passphrase_unlocked(allow_create=False)
 
+    @staticmethod
+    def _hud_success_message(text: str, suffix: str = "") -> str:
+        """Format the HUD success label from the final result text."""
+        word_count = len(text.split())
+        if word_count == 0:
+            return "Nothing detected"
+
+        noun = "word" if word_count == 1 else "words"
+        return f"Done! ({word_count} {noun}){suffix}"
+
     def _ensure_history_encryption_session(
         self,
         create_if_missing: bool = False,
@@ -2468,23 +2478,24 @@ class WhisperHUDApp(rumps.App):
                                 self.config.target_language,
                                 self.config.target_language
                             )
-                            word_count = len(final_text.split())
                             self._set_title(self.ICON_SUCCESS)
                             if self.config.show_hud:
-                                self.hud.show_success(f"✓ {word_count} words → {lang_name}")
+                                self.hud.show_success(
+                                    self._hud_success_message(final_text, f" -> {lang_name}")
+                                )
 
                         except Exception as e:
                             logger.warning(f"Translation failed: {e}")
                             final_text = result.text
-                            word_count = len(final_text.split())
                             self._set_title(self.ICON_SUCCESS)
                             if self.config.show_hud:
-                                self.hud.show_success(f"✓ {word_count} words (translation failed)")
+                                self.hud.show_success(
+                                    self._hud_success_message(final_text, " (translation failed)")
+                                )
                     else:
-                        word_count = len(final_text.split())
                         self._set_title(self.ICON_SUCCESS)
                         if self.config.show_hud:
-                            self.hud.show_success(f"✓ {word_count} words")
+                            self.hud.show_success(self._hud_success_message(final_text))
 
                     self._play_completion_sound()
 

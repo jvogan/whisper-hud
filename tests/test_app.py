@@ -317,7 +317,7 @@ def test_transcription_result_is_dispatched_to_paste_pipeline(monkeypatch):
     app._process_turn_result(3, result, use_streaming=False, stats_already_recorded=True)
 
     app._paste_to_target.assert_called_once_with("hello world")
-    app.hud.show_success.assert_called_once_with("✓ 2 words")
+    app.hud.show_success.assert_called_once_with("Done! (2 words)")
     app._finish_turn_cleanup.assert_called_once_with(3)
 
 
@@ -341,6 +341,16 @@ def test_empty_transcription_suppresses_success_hud(monkeypatch):
     app.hud.show_error.assert_called_once_with("No speech detected")
     app._play_completion_sound.assert_not_called()
     app._finish_turn_cleanup.assert_called_once_with(5)
+
+
+def test_hud_success_message_formats_word_count():
+    assert WhisperHUDApp._hud_success_message("hello") == "Done! (1 word)"
+    assert WhisperHUDApp._hud_success_message("hello world") == "Done! (2 words)"
+    assert WhisperHUDApp._hud_success_message("   ") == "Nothing detected"
+
+
+def test_hud_success_message_preserves_suffix():
+    assert WhisperHUDApp._hud_success_message("hello", " -> French") == "Done! (1 word) -> French"
 
 
 def test_transcription_failure_shows_hud_error():
