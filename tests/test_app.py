@@ -305,6 +305,28 @@ def test_transcription_result_is_dispatched_to_paste_pipeline(monkeypatch):
     app._finish_turn_cleanup.assert_called_once_with(3)
 
 
+def test_empty_transcription_suppresses_success_hud(monkeypatch):
+    """Whitespace-only transcriptions should not surface a success banner."""
+    app = _build_recording_app()
+    app._active_turn = ActiveTranscriptionTurn(turn_id=5, provider_id="openai")
+    monkeypatch.setattr("whisper_hud.app.threading.Thread", ImmediateThread)
+
+    result = TranscriptionResult(
+        text="   ",
+        duration_seconds=1.0,
+        cost_estimate=0.01,
+        provider="openai",
+        model="gpt-4o",
+    )
+
+    app._process_turn_result(5, result, use_streaming=False, stats_already_recorded=True)
+
+    app.hud.show_success.assert_not_called()
+    app.hud.show_error.assert_called_once_with("No speech detected")
+    app._play_completion_sound.assert_not_called()
+    app._finish_turn_cleanup.assert_called_once_with(5)
+
+
 def test_transcription_failure_shows_hud_error():
     """Transcription errors should surface a terminal HUD error state."""
     app = _build_recording_app()

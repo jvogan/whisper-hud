@@ -2442,7 +2442,9 @@ class WhisperHUDApp(rumps.App):
                 if use_streaming and result.text:
                     self.streaming_panel.update_transcription(result.text)
 
-                if result.text:
+                has_transcription = bool(result.text and result.text.strip())
+
+                if has_transcription:
                     final_text = result.text
                     did_translate = False
 

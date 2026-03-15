@@ -29,6 +29,7 @@ try:
         NSWindowCollectionBehaviorStationary
     )
     from PyObjCTools import AppHelper
+    from objc import super as objc_super
     HAS_APPKIT = True
 except ImportError:
     HAS_APPKIT = False
@@ -42,6 +43,22 @@ class HUDState(Enum):
     PROCESSING = "processing"
     SUCCESS = "success"
     ERROR = "error"
+
+
+if HAS_APPKIT:
+    class HUDContentView(NSView):
+        """Content view that lets the full HUD surface dismiss error state on click."""
+
+        def initWithFrame_onClick_(self, frame, on_click):
+            self = objc_super(HUDContentView, self).initWithFrame_(frame)
+            if self is None:
+                return None
+            self._on_click = on_click
+            return self
+
+        def mouseDown_(self, event):
+            if self._on_click:
+                self._on_click()
 
 
 def _hex_to_cgcolor(hex_color: str):
@@ -183,7 +200,11 @@ class HUD:
         )
 
         # Create rounded background view
-        content = self._window.contentView()
+        content = HUDContentView.alloc().initWithFrame_onClick_(
+            NSMakeRect(0, 0, width, height),
+            self._handle_click,
+        )
+        self._window.setContentView_(content)
         content.setWantsLayer_(True)
         layer = content.layer()
         layer.setBackgroundColor_(NSColor.colorWithCalibratedWhite_alpha_(0.1, 0.92).CGColor())
@@ -308,6 +329,11 @@ class HUD:
         dismiss_time = 3.0 + (len(message) / 40)
         self._schedule_dismiss(min(dismiss_time, 8.0))
 
+    def _handle_click(self):
+        """Dismiss the HUD immediately when the error banner is clicked."""
+        if self._state == HUDState.ERROR:
+            self.hide()
+
     def _schedule_dismiss(self, delay: float):
         """Schedule HUD dismissal."""
         with self._lock:
@@ -336,6 +362,7 @@ class HUD:
                 return
 
             self._label.setStringValue_(text)
+            self._window.setIgnoresMouseEvents_(state != HUDState.ERROR)
 
             # Set indicator color based on state (using appearance config)
             indicator_layer = self._indicator_view.layer()
@@ -372,6 +399,7 @@ class HUD:
 
         def _hide():
             if self._window:
+                self._window.setIgnoresMouseEvents_(True)
                 self._window.orderOut_(None)
 
         try:
