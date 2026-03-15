@@ -6,10 +6,12 @@ A multi-step wizard using PyObjC/AppKit that guides users through:
 2. Transcription Mode - Choose between Cloud or Local transcription
 3. Cloud Setup (if cloud selected) - Choose provider, enter API key
 4. Local Setup (if local selected) - Download model
-5. Translation Setup (Optional) - Configure translation provider
-6. Complete - Summary and usage tips
+5. Permissions - Check microphone and accessibility access
+6. Translation Setup (Optional) - Configure translation provider
+7. Complete - Summary and usage tips
 """
 
+import subprocess
 import threading
 import platform
 from typing import Callable, Optional
@@ -27,12 +29,35 @@ try:
         NSMakeRect, NSButton, NSApplication,
         NSSecureTextField, NSProgressIndicator,
         NSProgressIndicatorSpinningStyle, NSPopUpButton,
-        NSLeftTextAlignment
+        NSLeftTextAlignment, NSAppearance, NSAppearanceNameAqua,
+        NSAppearanceNameDarkAqua
+    )
+    from Foundation import (
+        NSAttributedString,
+        NSMutableParagraphStyle,
+        NSFontAttributeName,
+        NSForegroundColorAttributeName,
+        NSParagraphStyleAttributeName,
     )
     from PyObjCTools import AppHelper
     HAS_APPKIT = True
 except ImportError:
     HAS_APPKIT = False
+
+try:
+    from AVFoundation import AVCaptureDevice, AVMediaTypeAudio
+    HAS_AVFOUNDATION = True
+except ImportError:
+    AVCaptureDevice = None
+    AVMediaTypeAudio = "soun"
+    HAS_AVFOUNDATION = False
+
+try:
+    from Quartz import AXIsProcessTrusted
+    HAS_ACCESSIBILITY_API = True
+except ImportError:
+    AXIsProcessTrusted = None
+    HAS_ACCESSIBILITY_API = False
 
 
 class WizardStep(Enum):
@@ -40,8 +65,9 @@ class WizardStep(Enum):
     TRANSCRIPTION_MODE = 1
     CLOUD_SETUP = 2
     LOCAL_SETUP = 3
-    TRANSLATION = 4
-    COMPLETE = 5
+    PERMISSIONS = 4
+    TRANSLATION = 5
+    COMPLETE = 6
 
 
 class SetupWizard:
@@ -55,6 +81,11 @@ class SetupWizard:
     WIDTH = 560
     HEIGHT = 480
     PADDING = 24
+    PERMISSION_STATUS_GRANTED = "granted"
+    PERMISSION_STATUS_DENIED = "denied"
+    PERMISSION_STATUS_NOT_DETERMINED = "not-determined"
+    MICROPHONE_SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+    ACCESSIBILITY_SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 
     def __init__(
         self,
@@ -98,6 +129,11 @@ class SetupWizard:
         self._provider_buttons = {}
         self._mode_buttons = {}
         self._api_key_field = None
+        self._api_key_status_icon = None
+        self._api_key_status_label = None
+        self._api_key_spinner = None
+        self._skip_validation_button = None
+        self._next_button = None
         self._progress_indicator = None
         self._status_label = None
         self._translation_provider_popup = None
@@ -109,6 +145,22 @@ class SetupWizard:
         self._translation_model_choices = []
         self._translation_target_choices = []
         self._translation_source_choices = []
+        self._api_key_validation_status = "idle"
+        self._api_key_validation_message = "Enter an API key to continue"
+        self._api_key_validation_acknowledged = False
+        self._api_key_validation_key = ""
+        self._api_key_validation_provider = ""
+        self._api_key_validation_timer = None
+        self._api_key_validation_request_id = 0
+        self._api_key_validation_lock = threading.Lock()
+        self._permission_status_labels = {}
+        self._permission_detail_labels = {}
+        self._permission_open_buttons = {}
+        self._permission_settings_opened = set()
+        self._permission_statuses = {
+            "microphone": self._default_permission_state("microphone"),
+            "accessibility": self._default_permission_state("accessibility"),
+        }
 
         # Prefill from current config when rerunning setup.
         try:
@@ -172,14 +224,25 @@ class SetupWizard:
         )
 
         self._window.setTitle_("WhisperHUD Setup")
-        self._window.setBackgroundColor_(
-            NSColor.colorWithCalibratedWhite_alpha_(0.12, 1.0)
-        )
-
+        if hasattr(self._window, "setDelegate_"):
+            self._window.setDelegate_(self)
         self._content_view = self._window.contentView()
+        self._refresh_appearance()
 
     def _clear_content(self):
         """Clear all subviews from content view."""
+        self._cancel_api_key_validation_timer()
+        if self._api_key_field:
+            try:
+                self._api_key_field.setDelegate_(None)
+            except Exception:
+                pass
+        self._api_key_field = None
+        self._api_key_status_icon = None
+        self._api_key_status_label = None
+        self._api_key_spinner = None
+        self._skip_validation_button = None
+        self._next_button = None
         if self._content_view:
             for subview in list(self._content_view.subviews()):
                 subview.removeFromSuperview()
@@ -188,6 +251,8 @@ class SetupWizard:
         """Show a specific wizard step."""
         self._current_step = step
         self._clear_content()
+        self._refresh_appearance()
+        self._add_step_progress(step)
 
         if step == WizardStep.WELCOME:
             self._show_welcome()
@@ -197,6 +262,8 @@ class SetupWizard:
             self._show_cloud_setup()
         elif step == WizardStep.LOCAL_SETUP:
             self._show_local_setup()
+        elif step == WizardStep.PERMISSIONS:
+            self._show_permissions()
         elif step == WizardStep.TRANSLATION:
             self._show_translation()
         elif step == WizardStep.COMPLETE:
@@ -238,7 +305,7 @@ class SetupWizard:
             "Local: Private, works offline. Apple mode needs no download.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 60),
             font_size=12,
-            color=NSColor.colorWithCalibratedRed_green_blue_alpha_(0.6, 0.8, 1.0, 1.0)
+            color=self._accent_text_color()
         )
         self._content_view.addSubview_(info)
 
@@ -307,7 +374,7 @@ class SetupWizard:
             "You can change this later in the app settings.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 24),
             font_size=12,
-            color=NSColor.colorWithCalibratedWhite_alpha_(0.6, 1.0)
+            color=self._secondary_text_color()
         )
         self._content_view.addSubview_(info)
 
@@ -378,17 +445,50 @@ class SetupWizard:
         self._api_key_field.setPlaceholderString_("Paste your API key here...")
         self._api_key_field.setFont_(NSFont.systemFontOfSize_(14))
         self._api_key_field.setStringValue_(self._api_key)
+        self._api_key_field.setDelegate_(self)
         self._content_view.addSubview_(self._api_key_field)
 
+        y -= 34
+        self._api_key_spinner = NSProgressIndicator.alloc().initWithFrame_(
+            NSMakeRect(self.PADDING, y, 16, 16)
+        )
+        self._api_key_spinner.setStyle_(NSProgressIndicatorSpinningStyle)
+        self._api_key_spinner.setIndeterminate_(True)
+        self._api_key_spinner.setDisplayedWhenStopped_(False)
+        self._api_key_spinner.setHidden_(True)
+        self._content_view.addSubview_(self._api_key_spinner)
+
+        self._api_key_status_icon = self._create_label(
+            "",
+            NSMakeRect(self.PADDING + 20, y - 2, 18, 20),
+            font_size=14,
+            bold=True
+        )
+        self._content_view.addSubview_(self._api_key_status_icon)
+
+        self._api_key_status_label = self._create_label(
+            self._api_key_validation_message,
+            NSMakeRect(self.PADDING + 44, y - 2, self.WIDTH - 2 * self.PADDING - 140, 20),
+            font_size=12
+        )
+        self._content_view.addSubview_(self._api_key_status_label)
+
+        self._skip_validation_button = self._create_button(
+            "Skip Validation",
+            NSMakeRect(self.WIDTH - self.PADDING - 116, y - 6, 116, 24),
+            action=self._skip_api_key_validation
+        )
+        self._content_view.addSubview_(self._skip_validation_button)
+
         # Help text with links
-        y -= 56
+        y -= 62
         help_text = self._create_label(
             "Get your API key:\n"
             "  Gemini: aistudio.google.com/apikey (free tier!)\n"
             "  OpenAI + OpenAI Realtime: platform.openai.com/api-keys",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 50),
             font_size=12,
-            color=NSColor.colorWithCalibratedRed_green_blue_alpha_(0.6, 0.8, 1.0, 1.0)
+            color=self._accent_text_color()
         )
         self._content_view.addSubview_(help_text)
 
@@ -406,7 +506,7 @@ class SetupWizard:
             security_text,
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 24),
             font_size=11,
-            color=NSColor.colorWithCalibratedWhite_alpha_(0.5, 1.0)
+            color=self._muted_text_color()
         )
         self._content_view.addSubview_(security)
 
@@ -415,8 +515,10 @@ class SetupWizard:
             back_title="Back",
             back_action=lambda: self._show_step(WizardStep.TRANSCRIPTION_MODE),
             next_title="Next",
-            next_action=self._validate_and_continue_cloud
+            next_action=self._validate_and_continue_cloud,
+            next_enabled=False
         )
+        self._handle_api_key_input_changed()
 
     def _show_local_setup(self):
         """Show local transcription setup step."""
@@ -498,7 +600,7 @@ class SetupWizard:
             "download their models when you first use them.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 40),
             font_size=11,
-            color=NSColor.colorWithCalibratedWhite_alpha_(0.5, 1.0)
+            color=self._muted_text_color()
         )
         self._content_view.addSubview_(note)
 
@@ -509,6 +611,103 @@ class SetupWizard:
             next_title="Next",
             next_action=lambda: self._continue_from_local_setup()
         )
+
+    def _show_permissions(self):
+        """Show permission guidance and current status."""
+        self._refresh_permission_statuses()
+
+        y = self.HEIGHT - self.PADDING
+
+        y -= 36
+        title = self._create_label(
+            "Permissions",
+            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 32),
+            font_size=22,
+            bold=True
+        )
+        self._content_view.addSubview_(title)
+
+        y -= 44
+        desc = self._create_label(
+            "WhisperHUD needs Microphone access to record audio. Accessibility is optional but recommended for global hotkeys and paste automation.",
+            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 36),
+            font_size=13,
+            align=NSLeftTextAlignment
+        )
+        self._content_view.addSubview_(desc)
+
+        y -= 82
+        self._add_permission_row("microphone", "Microphone", y)
+        y -= 96
+        self._add_permission_row("accessibility", "Accessibility", y)
+
+        y -= 26
+        warning_lines = []
+        if self._permission_statuses["microphone"]["status"] == self.PERMISSION_STATUS_DENIED:
+            warning_lines.append("Microphone access is denied. Grant it before you can finish setup.")
+        if self._permission_statuses["accessibility"]["status"] == self.PERMISSION_STATUS_DENIED:
+            warning_lines.append("Accessibility is denied. You can finish setup, but hotkeys and auto-paste will not work yet.")
+        if not warning_lines:
+            warning_lines.append("After changing permissions in System Settings, switch back to WhisperHUD and this page will refresh automatically.")
+
+        warning = self._create_label(
+            "\n".join(warning_lines),
+            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 54),
+            font_size=12,
+            color=self._accent_text_color(),
+            align=NSLeftTextAlignment
+        )
+        self._content_view.addSubview_(warning)
+
+        self._add_navigation_buttons(
+            back_title="Back",
+            back_action=self._go_back_from_permissions,
+            extra_title="Refresh",
+            extra_action=self._refresh_permissions_step,
+            next_title="Next",
+            next_action=lambda: self._show_step(WizardStep.TRANSLATION),
+            next_enabled=self._can_continue_permissions_step()
+        )
+
+    def _add_permission_row(self, permission_name: str, title_text: str, y: float):
+        """Render a single permission row."""
+        status_info = self._permission_statuses[permission_name]
+        row_title = self._create_label(
+            title_text,
+            NSMakeRect(self.PADDING, y, 180, 22),
+            font_size=15,
+            bold=True
+        )
+        self._content_view.addSubview_(row_title)
+
+        status_label = self._create_label(
+            "",
+            NSMakeRect(self.PADDING, y - 26, 180, 22),
+            font_size=13,
+            bold=True
+        )
+        self._content_view.addSubview_(status_label)
+        self._permission_status_labels[permission_name] = status_label
+
+        detail_label = self._create_label(
+            status_info["message"],
+            NSMakeRect(self.PADDING + 190, y - 4, 220, 52),
+            font_size=12,
+            color=self._secondary_text_color(),
+            align=NSLeftTextAlignment
+        )
+        self._content_view.addSubview_(detail_label)
+        self._permission_detail_labels[permission_name] = detail_label
+
+        button = self._create_button(
+            "Open System Settings",
+            NSMakeRect(self.WIDTH - self.PADDING - 150, y - 2, 150, 32),
+            action=lambda perm=permission_name: self._open_permission_settings(perm)
+        )
+        self._content_view.addSubview_(button)
+        self._permission_open_buttons[permission_name] = button
+
+        self._update_permission_row(permission_name)
 
     def _show_translation(self):
         """Show translation setup step with full first-run configuration."""
@@ -722,7 +921,7 @@ class SetupWizard:
             "\n".join(summary_lines),
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 48),
             font_size=11,
-            color=NSColor.colorWithCalibratedWhite_alpha_(0.75, 1.0),
+            color=self._secondary_text_color(),
             align=NSLeftTextAlignment,
         )
         self._content_view.addSubview_(summary_label)
@@ -756,6 +955,8 @@ class SetupWizard:
         self._add_navigation_buttons(
             back_title="Back",
             back_action=self._go_back_from_translation,
+            extra_title="Skip Translation",
+            extra_action=self._skip_translation_setup,
             next_title="Next",
             next_action=lambda: self._show_step(WizardStep.COMPLETE)
         )
@@ -845,7 +1046,7 @@ class SetupWizard:
             "You can re-run this wizard from the menu anytime.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 112),
             font_size=13,
-            color=NSColor.colorWithCalibratedWhite_alpha_(0.8, 1.0),
+            color=self._secondary_text_color(),
             align=NSLeftTextAlignment
         )
         self._content_view.addSubview_(tips)
@@ -859,6 +1060,260 @@ class SetupWizard:
         )
 
     # === UI Helper Methods ===
+
+    def _refresh_appearance(self):
+        """Apply colors from the current macOS appearance."""
+        self._is_dark_mode = self._detect_dark_mode()
+
+        if self._window:
+            try:
+                appearance_name = NSAppearanceNameDarkAqua if self._is_dark_mode else NSAppearanceNameAqua
+                self._window.setAppearance_(NSAppearance.appearanceNamed_(appearance_name))
+            except Exception:
+                pass
+            self._window.setBackgroundColor_(self._background_color())
+
+    def _detect_dark_mode(self) -> bool:
+        """Return whether the effective system appearance is dark."""
+        appearance = None
+
+        if self._window and hasattr(self._window, "effectiveAppearance"):
+            try:
+                appearance = self._window.effectiveAppearance()
+            except Exception:
+                appearance = None
+
+        if appearance is None:
+            try:
+                appearance = NSApplication.sharedApplication().effectiveAppearance()
+            except Exception:
+                appearance = None
+
+        if appearance is None:
+            return False
+
+        try:
+            match = appearance.bestMatchFromAppearancesWithNames_([
+                NSAppearanceNameAqua,
+                NSAppearanceNameDarkAqua,
+            ])
+            return match == NSAppearanceNameDarkAqua
+        except Exception:
+            return "dark" in str(appearance).lower()
+
+    def _background_color(self):
+        """Return the wizard background color for the current appearance."""
+        if self._is_dark_mode:
+            return NSColor.colorWithCalibratedWhite_alpha_(0.12, 1.0)
+        return NSColor.colorWithCalibratedWhite_alpha_(0.97, 1.0)
+
+    def _primary_text_color(self):
+        """Return the primary text color for the current appearance."""
+        if self._is_dark_mode:
+            return NSColor.whiteColor()
+        return NSColor.colorWithCalibratedWhite_alpha_(0.1, 1.0)
+
+    def _secondary_text_color(self):
+        """Return the secondary text color for the current appearance."""
+        if self._is_dark_mode:
+            return NSColor.colorWithCalibratedWhite_alpha_(0.75, 1.0)
+        return NSColor.colorWithCalibratedWhite_alpha_(0.35, 1.0)
+
+    def _muted_text_color(self):
+        """Return a muted text color for the current appearance."""
+        if self._is_dark_mode:
+            return NSColor.colorWithCalibratedWhite_alpha_(0.5, 1.0)
+        return NSColor.colorWithCalibratedWhite_alpha_(0.45, 1.0)
+
+    def _accent_text_color(self):
+        """Return the accent/info text color for the current appearance."""
+        if self._is_dark_mode:
+            return NSColor.colorWithCalibratedRed_green_blue_alpha_(0.6, 0.8, 1.0, 1.0)
+        return NSColor.colorWithCalibratedRed_green_blue_alpha_(0.16, 0.39, 0.78, 1.0)
+
+    def _get_step_sequence(self) -> list[WizardStep]:
+        """Return the visible step order for the current transcription mode."""
+        setup_step = WizardStep.CLOUD_SETUP if self._transcription_mode == "cloud" else WizardStep.LOCAL_SETUP
+        return [
+            WizardStep.WELCOME,
+            WizardStep.TRANSCRIPTION_MODE,
+            setup_step,
+            WizardStep.PERMISSIONS,
+            WizardStep.TRANSLATION,
+            WizardStep.COMPLETE,
+        ]
+
+    def _default_permission_state(self, permission_name: str) -> dict[str, str]:
+        """Return a placeholder permission state."""
+        labels = {
+            "microphone": "Check microphone permission before recording your first transcript.",
+            "accessibility": "Accessibility enables global hotkeys and paste automation.",
+        }
+        return {
+            "status": self.PERMISSION_STATUS_NOT_DETERMINED,
+            "message": labels.get(permission_name, ""),
+        }
+
+    def _permission_status_title(self, status: str) -> str:
+        """Return display text for a permission status."""
+        return {
+            self.PERMISSION_STATUS_GRANTED: "Granted",
+            self.PERMISSION_STATUS_DENIED: "Denied",
+            self.PERMISSION_STATUS_NOT_DETERMINED: "Not Determined",
+        }.get(status, "Unknown")
+
+    def _permission_status_color(self, status: str):
+        """Return a color for a permission status label."""
+        if not HAS_APPKIT:
+            return None
+        if status == self.PERMISSION_STATUS_GRANTED:
+            return NSColor.colorWithCalibratedRed_green_blue_alpha_(0.35, 0.85, 0.45, 1.0)
+        if status == self.PERMISSION_STATUS_DENIED:
+            return NSColor.colorWithCalibratedRed_green_blue_alpha_(0.95, 0.35, 0.35, 1.0)
+        return NSColor.colorWithCalibratedRed_green_blue_alpha_(0.95, 0.75, 0.3, 1.0)
+
+    def _update_permission_row(self, permission_name: str):
+        """Refresh the rendered status for a permission row."""
+        status_info = self._permission_statuses.get(permission_name, self._default_permission_state(permission_name))
+        status_label = self._permission_status_labels.get(permission_name)
+        detail_label = self._permission_detail_labels.get(permission_name)
+        color = self._permission_status_color(status_info["status"])
+
+        if status_label:
+            status_label.setStringValue_(self._permission_status_title(status_info["status"]))
+            if color is not None:
+                status_label.setTextColor_(color)
+
+        if detail_label:
+            detail_label.setStringValue_(status_info["message"])
+            if color is not None and status_info["status"] == self.PERMISSION_STATUS_DENIED:
+                detail_label.setTextColor_(color)
+
+    def _refresh_permission_statuses(self):
+        """Re-check current macOS permission states."""
+        self._permission_statuses = {
+            "microphone": self._get_microphone_permission_state(),
+            "accessibility": self._get_accessibility_permission_state(),
+        }
+
+    def _refresh_permissions_step(self):
+        """Refresh cached permission state and the current UI."""
+        self._refresh_permission_statuses()
+        if self._current_step == WizardStep.PERMISSIONS:
+            self._show_step(WizardStep.PERMISSIONS)
+
+    def _get_microphone_permission_state(self) -> dict[str, str]:
+        """Return the microphone permission state."""
+        if not HAS_AVFOUNDATION or AVCaptureDevice is None:
+            return {
+                "status": self.PERMISSION_STATUS_NOT_DETERMINED,
+                "message": "Microphone status is unavailable in this environment. macOS will prompt when recording starts.",
+            }
+
+        try:
+            status = AVCaptureDevice.authorizationStatusForMediaType_(AVMediaTypeAudio)
+        except Exception:
+            status = None
+
+        if status == 3:
+            return {
+                "status": self.PERMISSION_STATUS_GRANTED,
+                "message": "Ready to record audio.",
+            }
+        if status in {1, 2}:
+            return {
+                "status": self.PERMISSION_STATUS_DENIED,
+                "message": "Recording is blocked until you allow WhisperHUD in Privacy & Security > Microphone.",
+            }
+        return {
+            "status": self.PERMISSION_STATUS_NOT_DETERMINED,
+            "message": "macOS will ask for microphone access the first time WhisperHUD records.",
+        }
+
+    def _get_accessibility_permission_state(self) -> dict[str, str]:
+        """Return the accessibility permission state."""
+        trusted = False
+        if HAS_ACCESSIBILITY_API and AXIsProcessTrusted is not None:
+            try:
+                trusted = bool(AXIsProcessTrusted())
+            except Exception:
+                trusted = False
+
+        if trusted:
+            return {
+                "status": self.PERMISSION_STATUS_GRANTED,
+                "message": "Global hotkeys and paste automation are ready.",
+            }
+
+        status = self.PERMISSION_STATUS_DENIED if "accessibility" in self._permission_settings_opened else self.PERMISSION_STATUS_NOT_DETERMINED
+        message = (
+            "Hotkeys and auto-paste stay disabled until Accessibility access is granted."
+            if status == self.PERMISSION_STATUS_DENIED
+            else "Recommended for global hotkeys and paste automation. You can grant it later."
+        )
+        return {
+            "status": status,
+            "message": message,
+        }
+
+    def _open_permission_settings(self, permission_name: str) -> bool:
+        """Open the relevant macOS System Settings pane for a permission."""
+        settings_url = {
+            "microphone": self.MICROPHONE_SETTINGS_URL,
+            "accessibility": self.ACCESSIBILITY_SETTINGS_URL,
+        }.get(permission_name)
+        if not settings_url:
+            return False
+
+        self._permission_settings_opened.add(permission_name)
+        try:
+            result = subprocess.run(
+                ["open", settings_url],
+                capture_output=True,
+                timeout=5
+            )
+            return result.returncode == 0
+        except Exception as exc:
+            logger.error(f"Failed to open {permission_name} settings: {exc}")
+            return False
+
+    def _can_continue_permissions_step(self) -> bool:
+        """Return whether the permissions step can continue."""
+        microphone_status = self._permission_statuses.get("microphone", {}).get("status")
+        return microphone_status != self.PERMISSION_STATUS_DENIED
+
+    def windowDidBecomeKey_(self, _notification):
+        """Refresh permissions when the user returns from System Settings."""
+        self._refresh_permission_statuses()
+        if self._current_step == WizardStep.PERMISSIONS:
+            self._show_step(WizardStep.PERMISSIONS)
+
+    def _get_step_progress(self, step: WizardStep) -> tuple[int, int]:
+        """Return the 1-based step position and total visible steps."""
+        steps = self._get_step_sequence()
+        if step not in steps:
+            step = steps[0]
+        return steps.index(step) + 1, len(steps)
+
+    def _add_step_progress(self, step: WizardStep):
+        """Show the wizard progress header on every page."""
+        current, total = self._get_step_progress(step)
+        progress_label = self._create_label(
+            f"Step {current} of {total}",
+            NSMakeRect(self.PADDING, self.HEIGHT - 26, 140, 18),
+            font_size=11,
+            color=self._secondary_text_color(),
+        )
+        self._content_view.addSubview_(progress_label)
+
+        dot_text = " ".join("●" if index < current else "○" for index in range(total))
+        dot_label = self._create_label(
+            dot_text,
+            NSMakeRect(self.WIDTH - self.PADDING - 120, self.HEIGHT - 28, 120, 18),
+            font_size=11,
+            color=self._accent_text_color(),
+        )
+        self._content_view.addSubview_(dot_label)
 
     def _create_label(
         self,
@@ -882,7 +1337,7 @@ class SetupWizard:
         else:
             label.setFont_(NSFont.systemFontOfSize_(font_size))
 
-        label.setTextColor_(color or NSColor.whiteColor())
+        label.setTextColor_(color or self._primary_text_color())
 
         if align is not None:
             label.setAlignment_(align)
@@ -901,6 +1356,79 @@ class SetupWizard:
 
         return button
 
+    def _estimate_wrapped_line_count(self, text: str, width: float, font_size: float) -> int:
+        """Estimate the number of rendered lines for a wrapped button title."""
+        usable_width = max(width - 28, font_size)
+        approx_char_width = max(font_size * 0.56, 1)
+        chars_per_line = max(int(usable_width / approx_char_width), 1)
+
+        line_count = 0
+        for raw_line in text.splitlines() or [""]:
+            line = raw_line.strip()
+            if not line:
+                line_count += 1
+                continue
+            line_count += max((len(line) + chars_per_line - 1) // chars_per_line, 1)
+        return max(line_count, 1)
+
+    def _wrapped_button_height(self, text: str, width: float, font_size: float, minimum_height: float) -> float:
+        """Return a button height that fits a wrapped title without clipping."""
+        line_count = self._estimate_wrapped_line_count(text, width, font_size)
+        line_height = max(font_size + 4, 16)
+        content_height = 14 + (line_count * line_height)
+        return max(minimum_height, content_height)
+
+    def _apply_wrapped_button_title(
+        self,
+        button: NSButton,
+        text: str,
+        frame,
+        font_size: float,
+        align: int = NSLeftTextAlignment,
+        minimum_height: float | None = None,
+    ) -> NSButton:
+        """Configure a button title for multiline wrapping and resize its frame if needed."""
+        button.setTitle_(text)
+
+        paragraph_style = None
+        if HAS_APPKIT:
+            try:
+                paragraph_style = NSMutableParagraphStyle.alloc().init()
+                paragraph_style.setAlignment_(align)
+                if hasattr(paragraph_style, "setLineBreakMode_"):
+                    paragraph_style.setLineBreakMode_(0)
+
+                attributes = {
+                    NSFontAttributeName: NSFont.systemFontOfSize_(font_size),
+                    NSForegroundColorAttributeName: self._primary_text_color(),
+                    NSParagraphStyleAttributeName: paragraph_style,
+                }
+                attributed_title = NSAttributedString.alloc().initWithString_attributes_(text, attributes)
+                if hasattr(button, "setAttributedTitle_"):
+                    button.setAttributedTitle_(attributed_title)
+            except Exception:
+                paragraph_style = None
+
+        if hasattr(button, "cell"):
+            try:
+                cell = button.cell()
+                if hasattr(cell, "setWraps_"):
+                    cell.setWraps_(True)
+                if hasattr(cell, "setUsesSingleLineMode_"):
+                    cell.setUsesSingleLineMode_(False)
+                if hasattr(cell, "setScrollable_"):
+                    cell.setScrollable_(False)
+                if hasattr(cell, "setLineBreakMode_"):
+                    cell.setLineBreakMode_(0)
+            except Exception:
+                pass
+
+        if minimum_height is not None:
+            frame.size.height = self._wrapped_button_height(text, frame.size.width, font_size, minimum_height)
+            button.setFrame_(frame)
+
+        return button
+
     def _create_provider_button(
         self,
         title: str,
@@ -911,8 +1439,14 @@ class SetupWizard:
     ) -> NSButton:
         """Create a provider selection button."""
         button = NSButton.alloc().initWithFrame_(frame)
-        button.setTitle_(f"{title}\n{subtitle}")
         button.setBezelStyle_(1)
+        self._apply_wrapped_button_title(
+            button,
+            f"{title}\n{subtitle}",
+            frame,
+            font_size=13,
+            minimum_height=frame.size.height,
+        )
 
         if selected:
             button.setState_(1)
@@ -934,8 +1468,14 @@ class SetupWizard:
     ) -> NSButton:
         """Create a mode selection card button."""
         button = NSButton.alloc().initWithFrame_(frame)
-        button.setTitle_(f"{title}\n{subtitle}\n\n{description}")
         button.setBezelStyle_(1)
+        self._apply_wrapped_button_title(
+            button,
+            f"{title}\n{subtitle}\n\n{description}",
+            frame,
+            font_size=13,
+            minimum_height=frame.size.height,
+        )
 
         if selected:
             button.setState_(1)
@@ -975,8 +1515,11 @@ class SetupWizard:
         self,
         back_title: Optional[str] = None,
         back_action: Optional[Callable] = None,
+        extra_title: Optional[str] = None,
+        extra_action: Optional[Callable] = None,
         next_title: str = "Next",
-        next_action: Optional[Callable] = None
+        next_action: Optional[Callable] = None,
+        next_enabled: bool = True
     ):
         """Add navigation buttons at bottom."""
         y = self.PADDING
@@ -998,14 +1541,248 @@ class SetupWizard:
             )
             self._content_view.addSubview_(back_btn)
 
+        if extra_title and extra_action:
+            extra_btn = self._create_button(
+                extra_title,
+                NSMakeRect(self.WIDTH - 2 * self.PADDING - 310, y, 120, 32),
+                action=extra_action,
+            )
+            self._content_view.addSubview_(extra_btn)
+
         # Next button
         if next_action:
-            next_btn = self._create_button(
+            self._next_button = self._create_button(
                 next_title,
                 NSMakeRect(self.WIDTH - self.PADDING - 90, y, 90, 32),
                 action=next_action
             )
-            self._content_view.addSubview_(next_btn)
+            self._next_button.setEnabled_(next_enabled)
+            self._content_view.addSubview_(self._next_button)
+
+    def controlTextDidChange_(self, notification):
+        """Handle AppKit text change notifications."""
+        if self._current_step == WizardStep.CLOUD_SETUP:
+            self._handle_api_key_input_changed()
+
+    def _dispatch_to_main_thread(self, callback: Callable[[], None]):
+        """Dispatch a callback onto the AppKit main thread when available."""
+        if HAS_APPKIT:
+            AppHelper.callAfter(callback)
+            return
+        callback()
+
+    def _cancel_api_key_validation_timer(self):
+        """Cancel any pending debounced validation timer."""
+        if self._api_key_validation_timer:
+            self._api_key_validation_timer.cancel()
+            self._api_key_validation_timer = None
+
+    def _next_api_key_validation_request_id(self) -> int:
+        """Return a new request id and invalidate older validation work."""
+        with self._api_key_validation_lock:
+            self._api_key_validation_request_id += 1
+            return self._api_key_validation_request_id
+
+    def _current_api_key_validation_request_id(self) -> int:
+        """Return the latest validation request id."""
+        with self._api_key_validation_lock:
+            return self._api_key_validation_request_id
+
+    def _normalized_validation_provider(self, provider: str) -> str:
+        """Map UI provider ids to validate_api_key provider ids."""
+        if provider == "openai_realtime":
+            return "openai"
+        return provider
+
+    def _set_api_key_validation_state(
+        self,
+        status: str,
+        message: str,
+        *,
+        validated_key: str = "",
+        validated_provider: str = "",
+        acknowledged: Optional[bool] = None
+    ):
+        """Update inline validation state and refresh the cloud UI."""
+        self._api_key_validation_status = status
+        self._api_key_validation_message = message
+        self._api_key_validation_key = validated_key
+        self._api_key_validation_provider = validated_provider
+        if acknowledged is not None:
+            self._api_key_validation_acknowledged = acknowledged
+        self._refresh_api_key_validation_ui()
+
+    def _handle_api_key_input_changed(self):
+        """Debounce inline API key validation after user input changes."""
+        if self._current_step != WizardStep.CLOUD_SETUP:
+            return
+
+        current_key = ""
+        if self._api_key_field:
+            current_key = self._api_key_field.stringValue().strip()
+
+        provider = self._normalized_validation_provider(self._selected_provider)
+        changed = current_key != self._api_key_validation_key or provider != self._api_key_validation_provider
+
+        self._api_key = current_key
+        if changed:
+            self._api_key_validation_acknowledged = False
+
+        self._cancel_api_key_validation_timer()
+        self._next_api_key_validation_request_id()
+
+        if not current_key:
+            self._set_api_key_validation_state(
+                "idle",
+                "Enter an API key to continue",
+                validated_key="",
+                validated_provider="",
+                acknowledged=False,
+            )
+            return
+
+        self._set_api_key_validation_state(
+            "pending",
+            "Waiting to validate API key...",
+            validated_key="",
+            validated_provider="",
+            acknowledged=False,
+        )
+
+        request_id = self._current_api_key_validation_request_id()
+        self._api_key_validation_timer = threading.Timer(
+            0.5,
+            lambda: self._begin_api_key_validation(request_id, provider, current_key),
+        )
+        self._api_key_validation_timer.daemon = True
+        self._api_key_validation_timer.start()
+
+    def _begin_api_key_validation(self, request_id: int, provider: str, api_key: str):
+        """Start API key validation on a background thread."""
+        def mark_validating():
+            if not self._should_apply_api_key_validation_result(request_id, provider, api_key):
+                return
+            self._set_api_key_validation_state(
+                "validating",
+                "Validating API key...",
+                validated_key="",
+                validated_provider="",
+            )
+
+        self._dispatch_to_main_thread(mark_validating)
+
+        def do_validate():
+            from .keychain import validate_api_key
+
+            is_valid, error = validate_api_key(provider, api_key)
+
+            def apply_result():
+                if not self._should_apply_api_key_validation_result(request_id, provider, api_key):
+                    return
+                if is_valid:
+                    self._set_api_key_validation_state(
+                        "valid",
+                        "API key validated",
+                        validated_key=api_key,
+                        validated_provider=provider,
+                        acknowledged=False,
+                    )
+                else:
+                    self._set_api_key_validation_state(
+                        "invalid",
+                        error or "API key validation failed",
+                        validated_key=api_key,
+                        validated_provider=provider,
+                        acknowledged=False,
+                    )
+
+            self._dispatch_to_main_thread(apply_result)
+
+        threading.Thread(target=do_validate, daemon=True).start()
+
+    def _should_apply_api_key_validation_result(self, request_id: int, provider: str, api_key: str) -> bool:
+        """Return whether a validation result still matches the current UI state."""
+        if request_id != self._current_api_key_validation_request_id():
+            return False
+        if self._current_step != WizardStep.CLOUD_SETUP:
+            return False
+        if self._normalized_validation_provider(self._selected_provider) != provider:
+            return False
+        return self._api_key.strip() == api_key
+
+    def _refresh_api_key_validation_ui(self):
+        """Update the inline cloud validation widgets."""
+        spinner = self._api_key_spinner
+        if spinner:
+            if self._api_key_validation_status == "validating":
+                spinner.setHidden_(False)
+                spinner.startAnimation_(None)
+            else:
+                spinner.stopAnimation_(None)
+                spinner.setHidden_(True)
+
+        icon = self._api_key_status_icon
+        label = self._api_key_status_label
+        status = self._api_key_validation_status
+
+        icon_text = ""
+        color = NSColor.colorWithCalibratedWhite_alpha_(0.7, 1.0) if HAS_APPKIT else None
+
+        if status == "valid":
+            icon_text = "✓"
+        elif status == "invalid":
+            icon_text = "✗"
+        elif status == "skipped":
+            icon_text = "!"
+
+        if HAS_APPKIT:
+            if status == "valid":
+                color = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.35, 0.85, 0.45, 1.0)
+            elif status == "invalid":
+                color = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.95, 0.35, 0.35, 1.0)
+            elif status == "skipped":
+                color = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.95, 0.75, 0.3, 1.0)
+            elif status in {"pending", "validating"}:
+                color = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.6, 0.8, 1.0, 1.0)
+
+        if icon:
+            icon.setStringValue_(icon_text)
+            if color is not None:
+                icon.setTextColor_(color)
+
+        if label:
+            label.setStringValue_(self._api_key_validation_message)
+            if color is not None:
+                label.setTextColor_(color)
+
+        if self._skip_validation_button:
+            can_skip = bool(self._api_key) and status != "validating"
+            self._skip_validation_button.setEnabled_(can_skip)
+
+        if self._next_button:
+            next_enabled = self._can_continue_cloud_setup() and status != "validating"
+            self._next_button.setEnabled_(next_enabled)
+
+    def _can_continue_cloud_setup(self) -> bool:
+        """Return whether the cloud step can advance."""
+        if not self._api_key:
+            return False
+        return self._api_key_validation_status == "valid" or self._api_key_validation_acknowledged
+
+    def _skip_api_key_validation(self):
+        """Allow the user to continue after explicitly acknowledging validation was skipped."""
+        if not self._api_key:
+            return
+
+        self._cancel_api_key_validation_timer()
+        self._next_api_key_validation_request_id()
+        self._set_api_key_validation_state(
+            "skipped",
+            "Validation skipped. The key may still fail when used.",
+            validated_key=self._api_key,
+            validated_provider=self._normalized_validation_provider(self._selected_provider),
+            acknowledged=True,
+        )
 
     def _prompt_secure_input(self, title: str, message: str) -> Optional[str]:
         """Prompt for hidden input using AppleScript."""
@@ -1202,7 +1979,16 @@ class SetupWizard:
 
     def _select_provider(self, provider: str):
         """Handle provider selection."""
+        provider_changed = self._selected_provider != provider
         self._selected_provider = provider
+        if provider_changed:
+            self._cancel_api_key_validation_timer()
+            self._next_api_key_validation_request_id()
+            self._api_key_validation_acknowledged = False
+            self._api_key_validation_status = "idle"
+            self._api_key_validation_message = "Enter an API key to continue"
+            self._api_key_validation_key = ""
+            self._api_key_validation_provider = ""
 
         # Refresh current step
         if self._current_step == WizardStep.CLOUD_SETUP:
@@ -1234,9 +2020,11 @@ class SetupWizard:
             self._show_error("Please enter an API key")
             return
 
-        # Basic validation
-        if self._selected_provider in {"openai", "openai_realtime"} and not self._api_key.startswith("sk-"):
-            self._show_error("OpenAI keys should start with 'sk-'")
+        if not self._can_continue_cloud_setup():
+            if self._api_key_validation_status == "validating":
+                self._show_error("Wait for API key validation to finish")
+            else:
+                self._show_error("Validate the API key or choose Skip Validation")
             return
 
         if get_storage_mode() == "passphrase" and not is_passphrase_unlocked():
@@ -1283,16 +2071,25 @@ class SetupWizard:
             except Exception:
                 pass
 
-        # Continue to translation step
-        self._show_step(WizardStep.TRANSLATION)
+        # Continue to the permissions step.
+        self._show_step(WizardStep.PERMISSIONS)
 
     def _continue_from_local_setup(self):
-        """Continue from local setup to translation."""
-        # Just continue - model download will happen when user first uses it
-        self._show_step(WizardStep.TRANSLATION)
+        """Continue from local setup to permissions."""
+        # Just continue - model download will happen when user first uses it.
+        self._show_step(WizardStep.PERMISSIONS)
+
+    def _skip_translation_setup(self):
+        """Skip translation setup and continue to completion."""
+        self._translation_enabled = False
+        self._show_step(WizardStep.COMPLETE)
 
     def _go_back_from_translation(self):
-        """Go back from translation to appropriate setup step."""
+        """Go back from translation to the permissions step."""
+        self._show_step(WizardStep.PERMISSIONS)
+
+    def _go_back_from_permissions(self):
+        """Go back from the permissions step to the selected setup step."""
         if self._transcription_mode == "cloud":
             self._show_step(WizardStep.CLOUD_SETUP)
         else:
@@ -1381,6 +2178,11 @@ class SetupWizard:
     def _finish_wizard(self):
         """Finish wizard and save settings."""
         from .config import Config
+
+        self._refresh_permission_statuses()
+        if not self._can_continue_permissions_step():
+            self._show_error("Microphone permission is required before finishing setup")
+            return
 
         config = Config.load()
         config.default_provider = self._selected_provider

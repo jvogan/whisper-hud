@@ -6,7 +6,9 @@ Supports both cloud (OpenAI, Gemini) and local (Apple Speech, Whisper, Parakeet)
 """
 
 from copy import deepcopy
-from typing import Optional, Dict, Type, Callable
+import platform
+from typing import Callable, NotRequired, Optional, TypedDict, cast
+
 from .providers.base import TranscriptionProvider, TranscriptionResult, LiveTranscriptionSession
 from .providers.openai_whisper import OpenAITranscribeProvider
 from .providers.openai_realtime import OpenAIRealtimeProvider
@@ -18,11 +20,33 @@ from .config import Config
 from .keychain import get_configured_providers
 
 
+class ProviderInfo(TypedDict):
+    id: str
+    name: str
+    display_name: str
+    configured: bool
+    category: str
+    requires_download: bool
+    models: list[dict]
+    availability_message: NotRequired[str]
+    is_installed: NotRequired[bool]
+
+
+class DownloadInfo(TypedDict, total=False):
+    error: str
+    provider_id: str
+    requires_download: bool
+    downloaded: bool
+    size_mb: float | int
+    has_disk_space: bool
+    available_mb: float | int
+
+
 class TranscriptionManager:
     """Manages transcription providers and requests."""
 
     # Registry of available providers
-    PROVIDER_CLASSES: Dict[str, Type[TranscriptionProvider]] = {
+    PROVIDER_CLASSES: dict[str, type[TranscriptionProvider]] = {
         "openai": OpenAITranscribeProvider,
         "openai_realtime": OpenAIRealtimeProvider,
         "gemini": GeminiProvider,
@@ -37,13 +61,13 @@ class TranscriptionManager:
         "local": ["apple", "whisper_local", "parakeet"],
     }
 
-    def __init__(self, config: Optional[Config] = None):
+    def __init__(self, config: Optional[Config] = None) -> None:
         self.config = config or Config.load()
         self._shared_config = config is not None
-        self._providers: Dict[str, TranscriptionProvider] = {}
-        self._available_providers_cache: Optional[list[dict]] = None
+        self._providers: dict[str, TranscriptionProvider] = {}
+        self._available_providers_cache: Optional[list[ProviderInfo]] = None
 
-    def get_available_providers(self, configured_providers: Optional[list[str]] = None) -> list[dict]:
+    def get_available_providers(self, configured_providers: Optional[list[str]] = None) -> list[ProviderInfo]:
         """
         Get list of available providers with their configured status.
 
@@ -61,15 +85,15 @@ class TranscriptionManager:
 
         return providers
 
-    def _get_cached_available_providers(self) -> list[dict]:
+    def _get_cached_available_providers(self) -> list[ProviderInfo]:
         """Compute provider metadata once and reuse it until config changes."""
         if self._available_providers_cache is None:
             self._available_providers_cache = self._build_available_providers_cache()
         return self._available_providers_cache
 
-    def _build_available_providers_cache(self) -> list[dict]:
+    def _build_available_providers_cache(self) -> list[ProviderInfo]:
         """Build provider metadata that is expensive to recompute on every menu open."""
-        providers = []
+        providers: list[ProviderInfo] = []
 
         openai_provider = OpenAITranscribeProvider()
         providers.append({
@@ -129,8 +153,6 @@ class TranscriptionManager:
             "availability_message": WhisperLocalProvider.get_availability_message()
         })
 
-        # Show Parakeet on all macOS systems (with availability info)
-        import platform
         if platform.system() == "Darwin":
             parakeet_provider = ParakeetProvider()
             is_apple_silicon = ParakeetProvider.is_apple_silicon()
@@ -158,7 +180,8 @@ class TranscriptionManager:
             provider_class = self.PROVIDER_CLASSES.get(provider_id)
             if provider_class:
                 model = self.config.get_provider_model(provider_id)
-                self._providers[provider_id] = provider_class(model=model)
+                provider_factory = cast(Callable[..., TranscriptionProvider], provider_class)
+                self._providers[provider_id] = provider_factory(model=model)
 
         return self._providers.get(provider_id)
 
@@ -341,7 +364,7 @@ class TranscriptionManager:
             progress_callback("This provider doesn't require download", 100.0)
         return True
 
-    def get_download_info(self, provider_id: str) -> dict:
+    def get_download_info(self, provider_id: str) -> DownloadInfo:
         """
         Get download information for a provider.
 
@@ -355,7 +378,7 @@ class TranscriptionManager:
         if not provider:
             return {"error": f"Unknown provider: {provider_id}"}
 
-        info = {
+        info: DownloadInfo = {
             "provider_id": provider_id,
             "requires_download": provider_id in ["whisper_local", "parakeet"],
         }
@@ -377,11 +400,11 @@ class TranscriptionManager:
             info["available_mb"] = available
         else:
             info["has_disk_space"] = True
-            info["available_mb"] = float('inf')
+            info["available_mb"] = float("inf")
 
         return info
 
-    def get_stats(self) -> dict:
+    def get_stats(self) -> dict[str, int | float]:
         """Get transcription statistics."""
         return {
             "total_transcriptions": self.config.total_transcriptions,

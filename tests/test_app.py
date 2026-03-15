@@ -57,6 +57,20 @@ class ImmediateThread:
         self._target()
 
 
+class FakeCapturePanel:
+    """Minimal hotkey capture panel test double."""
+
+    instances = []
+
+    def __init__(self, current_hotkey, on_confirm, on_cancel=None):
+        self.current_hotkey = current_hotkey
+        self.on_confirm = on_confirm
+        self.on_cancel = on_cancel
+        self.show = MagicMock(return_value=True)
+        self.close = MagicMock()
+        FakeCapturePanel.instances.append(self)
+
+
 def _build_recording_app():
     """Construct a partial app instance for recording-flow tests."""
     app = WhisperHUDApp.__new__(WhisperHUDApp)
@@ -65,6 +79,8 @@ def _build_recording_app():
     app._is_recording = False
     app._turn_counter = 0
     app._active_turn = None
+    app._is_capturing_hotkey = False
+    app._hotkey_capture_panel = None
     app.ICON_RECORDING = "recording"
     app.ICON_ERROR = "error"
     app.ICON_SUCCESS = "success"
@@ -236,18 +252,115 @@ def _menu_titles(menu):
 
 
 def test_build_menu_reflects_provider_availability(monkeypatch):
-    """The menu should expose provider readiness in the status and provider submenu."""
+    """The menu should expose provider readiness within the merged providers submenu."""
     app = _build_menu_app(monkeypatch)
 
     app._build_menu()
 
     top_level_titles = _menu_titles(app.menu)
     assert top_level_titles[0] == "✓ Ready • OpenAI"
+    assert top_level_titles[1:] == [
+        "Providers & Keys",
+        "Paste Target",
+        "Translation",
+        "Settings",
+        "Quit WhisperHUD",
+    ]
+    assert len(top_level_titles) <= 6
 
-    provider_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Provider")
+    provider_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Providers & Keys")
     provider_titles = _menu_titles(provider_menu)
+    assert "Current: OpenAI" in provider_titles
     assert "● OpenAI ✓" in provider_titles
     assert "   Whisper Local [download] ⬇️" in provider_titles
+    assert "OpenAI: Not set" in provider_titles
+
+    settings_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Settings")
+    settings_titles = _menu_titles(settings_menu)
+    assert "Appearance" in settings_titles
+    assert "Hotkey" in settings_titles
+    assert "Advanced & Support" in settings_titles
+
+    recording_menu = next(item for item in settings_menu.items if getattr(item, "title", None) == "Recording & Display")
+    recording_titles = _menu_titles(recording_menu)
+    assert "Reset Position" in recording_titles
+
+
+def test_needs_setup_cloud_provider_click_opens_provider_setup(monkeypatch):
+    """Clicking an unconfigured cloud provider should open its key setup dialog."""
+    app = _build_menu_app(monkeypatch)
+    app.transcriber.get_available_providers.return_value = [
+        {"id": "openai", "name": "OpenAI", "category": "cloud", "configured": True},
+        {"id": "gemini", "name": "Gemini", "category": "cloud", "configured": False},
+        {
+            "id": "whisper_local",
+            "name": "Whisper Local",
+            "category": "local",
+            "configured": False,
+            "requires_download": True,
+        },
+    ]
+    gemini_provider = MagicMock(
+        get_models=MagicMock(return_value=[{"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash"}]),
+        get_current_model=MagicMock(return_value="gemini-2.5-flash"),
+        is_configured=MagicMock(return_value=False),
+    )
+    openai_provider = MagicMock(
+        get_models=MagicMock(return_value=[{"id": "gpt-4o", "name": "GPT-4o", "recommended": True}]),
+        get_current_model=MagicMock(return_value="gpt-4o"),
+        is_configured=MagicMock(return_value=True),
+    )
+    whisper_local_provider = MagicMock(
+        get_models=MagicMock(return_value=[{"id": "tiny", "name": "Tiny", "downloaded": False}]),
+        get_current_model=MagicMock(return_value="tiny"),
+        is_configured=MagicMock(return_value=False),
+    )
+    app.transcriber.get_provider.side_effect = lambda provider_id: {
+        "openai": openai_provider,
+        "gemini": gemini_provider,
+        "whisper_local": whisper_local_provider,
+    }.get(provider_id)
+    app._open_provider_setup = MagicMock()
+
+    app._build_menu()
+
+    provider_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Providers & Keys")
+    gemini_item = next(item for item in provider_menu.items if getattr(item, "title", None) == "   Gemini ⚠️")
+
+    gemini_item.callback(None)
+
+    app._open_provider_setup.assert_called_once_with("gemini")
+
+
+def test_set_openai_key_prefills_existing_key(monkeypatch):
+    """The provider setup dialog should be prefilled with any stored key."""
+    app = _build_recording_app()
+    app._is_passphrase_mode = MagicMock(return_value=False)
+    app._applescript_input_dialog = MagicMock(return_value="")
+    monkeypatch.setattr("whisper_hud.app.get_api_key", MagicMock(return_value="sk-existing"))
+
+    app._set_openai_key(None)
+
+    app._applescript_input_dialog.assert_called_once_with(
+        "Enter OpenAI API Key",
+        "Enter your OpenAI API key.\n\nGet your key at: platform.openai.com/api-keys\n\nA key is already saved. Enter a new key to replace it.",
+        default="sk-existing",
+    )
+
+
+def test_open_provider_setup_uses_backing_credential_dialog():
+    """Cloud provider setup should route through the backing credential provider."""
+    app = _build_recording_app()
+    app._set_openai_key = MagicMock()
+    app._set_gemini_key = MagicMock()
+    app._set_anthropic_key = MagicMock()
+
+    app._open_provider_setup("openai_realtime")
+    app._open_provider_setup("gemini")
+
+    app._set_openai_key.assert_called_once_with(None)
+    app._set_gemini_key.assert_called_once_with(None)
+    app._set_anthropic_key.assert_not_called()
 
 
 def test_hotkey_press_starts_recording():
@@ -301,7 +414,7 @@ def test_transcription_result_is_dispatched_to_paste_pipeline(monkeypatch):
     app._process_turn_result(3, result, use_streaming=False, stats_already_recorded=True)
 
     app._paste_to_target.assert_called_once_with("hello world")
-    app.hud.show_success.assert_called_once_with("✓ 2 words")
+    app.hud.show_success.assert_called_once_with("Done! (2 words)")
     app._finish_turn_cleanup.assert_called_once_with(3)
 
 
@@ -327,6 +440,16 @@ def test_empty_transcription_suppresses_success_hud(monkeypatch):
     app._finish_turn_cleanup.assert_called_once_with(5)
 
 
+def test_hud_success_message_formats_word_count():
+    assert WhisperHUDApp._hud_success_message("hello") == "Done! (1 word)"
+    assert WhisperHUDApp._hud_success_message("hello world") == "Done! (2 words)"
+    assert WhisperHUDApp._hud_success_message("   ") == "Nothing detected"
+
+
+def test_hud_success_message_preserves_suffix():
+    assert WhisperHUDApp._hud_success_message("hello", " -> French") == "Done! (1 word) -> French"
+
+
 def test_transcription_failure_shows_hud_error():
     """Transcription errors should surface a terminal HUD error state."""
     app = _build_recording_app()
@@ -350,4 +473,64 @@ def test_select_provider_updates_config_and_rebuilds_menu():
 
     assert app.config.default_provider == "gemini"
     app.config.save.assert_called_once_with()
+    app._schedule_menu_rebuild.assert_called_once_with()
+
+
+def test_hotkey_config_opens_capture_panel_with_existing_hotkey(monkeypatch):
+    app = _build_recording_app()
+    app.hotkey_listener = MagicMock()
+    monkeypatch.setattr("whisper_hud.app.HotkeyCapturePanel", FakeCapturePanel)
+    FakeCapturePanel.instances.clear()
+
+    app._change_hotkey(None)
+
+    assert app._is_capturing_hotkey is True
+    app.hotkey_listener.stop.assert_called_once_with()
+    assert len(FakeCapturePanel.instances) == 1
+    assert FakeCapturePanel.instances[0].current_hotkey == ["cmd", "shift", "space"]
+    FakeCapturePanel.instances[0].show.assert_called_once_with()
+
+
+def test_hotkey_config_cancel_restores_listener():
+    app = _build_recording_app()
+    app._is_capturing_hotkey = True
+    app._restart_hotkey_listener = MagicMock()
+    panel = FakeCapturePanel(["cmd", "shift", "space"], MagicMock(), MagicMock())
+    app._hotkey_capture_panel = panel
+
+    app._cancel_hotkey_capture()
+
+    assert app._is_capturing_hotkey is False
+    assert app._hotkey_capture_panel is None
+    panel.close.assert_called_once_with()
+    app._restart_hotkey_listener.assert_called_once_with()
+
+
+def test_hotkey_config_capture_saves_and_restarts_listener(monkeypatch):
+    class FakeHotkeyListener:
+        def __init__(self, on_start, on_stop, hotkey, mode):
+            self.on_start = on_start
+            self.on_stop = on_stop
+            self.hotkey = hotkey
+            self.mode = mode
+            self.start = MagicMock()
+
+    app = _build_recording_app()
+    app.hotkey_listener = MagicMock()
+    app._is_capturing_hotkey = True
+    app._hotkey_capture_panel = FakeCapturePanel(["cmd", "shift", "space"], MagicMock(), MagicMock())
+    app._refresh_widget_tooltip = MagicMock()
+    app._schedule_menu_rebuild = MagicMock()
+    app._build_hotkey_set = MagicMock(return_value={"new-hotkey"})
+    monkeypatch.setattr("whisper_hud.app.HotkeyListener", FakeHotkeyListener)
+
+    app._on_hotkey_captured({"new-hotkey"}, ["cmd", "alt", "r"])
+
+    assert app.config.hotkey == ["cmd", "alt", "r"]
+    app.config.save.assert_called_once_with()
+    assert isinstance(app.hotkey_listener, FakeHotkeyListener)
+    assert app.hotkey_listener.hotkey == {"new-hotkey"}
+    app.hotkey_listener.start.assert_called_once_with()
+    app._notify.assert_called_once_with("WhisperHUD", "Hotkey Changed", "New hotkey: ⌘⌥R")
+    app._refresh_widget_tooltip.assert_called_once_with()
     app._schedule_menu_rebuild.assert_called_once_with()

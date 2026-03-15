@@ -9,8 +9,10 @@ A multi-step wizard for customizing widget colors and icons:
 Uses PyObjC for native macOS UI.
 """
 
+from copy import deepcopy
 from typing import Callable, Optional
 
+from .config import Config
 from .logging_config import get_logger
 
 logger = get_logger("appearance_editor")
@@ -44,6 +46,12 @@ STATE_LABELS = {
     "success": "Success",
     "error": "Error"
 }
+
+
+def _get_default_widget_appearance() -> dict:
+    """Return a fresh copy of the factory-default appearance config."""
+    default_factory = Config.__dataclass_fields__["widget_appearance"].default_factory
+    return deepcopy(default_factory())
 
 
 def _hex_to_nscolor(hex_color: str) -> 'NSColor':
@@ -202,6 +210,9 @@ if HAS_APPKIT:
         def save_(self, sender):
             self._editor.handleSave()
 
+        def resetToDefaults_(self, sender):
+            self._editor.handleResetToDefaults()
+
 
 class AppearanceEditorWindow:
     """
@@ -219,19 +230,8 @@ class AppearanceEditorWindow:
         self._max_steps = 2  # Simplified to 2 steps: Colors and Icon
 
         # Working copy of appearance config
-        self._working_config = dict(config.widget_appearance)
-        if "colors" not in self._working_config:
-            self._working_config["colors"] = {}
-        if "custom_icon" not in self._working_config:
-            self._working_config["custom_icon"] = {
-                "enabled": False,
-                "path": "",
-                "apply_state_tint": True,
-                "tint_opacity": 0.3,
-                "shape_mode": "auto"
-            }
-        elif "shape_mode" not in self._working_config["custom_icon"]:
-            self._working_config["custom_icon"]["shape_mode"] = "auto"
+        self._working_config = deepcopy(config.widget_appearance)
+        self._apply_missing_defaults()
 
         # UI elements
         self._color_wells = {}
@@ -245,6 +245,19 @@ class AppearanceEditorWindow:
 
         # Create delegate for handling actions
         self._delegate = None
+
+    def _apply_missing_defaults(self):
+        """Backfill any missing appearance settings from the factory defaults."""
+        def _merge_defaults(target, defaults):
+            for key, value in defaults.items():
+                if key not in target:
+                    target[key] = deepcopy(value)
+                    continue
+
+                if isinstance(value, dict) and isinstance(target[key], dict):
+                    _merge_defaults(target[key], value)
+
+        _merge_defaults(self._working_config, _get_default_widget_appearance())
 
     def show(self):
         """Show the editor window."""
@@ -558,7 +571,7 @@ class AppearanceEditorWindow:
 
         # Show previews for each state
         x_pos = 20
-        for state in ["idle", "recording", "processing"]:
+        for state in WIDGET_STATES:
             state_label = NSTextField.alloc().initWithFrame_(NSMakeRect(x_pos, height - 305, 80, 16))
             state_label.setStringValue_(STATE_LABELS.get(state, state))
             state_label.setFont_(NSFont.systemFontOfSize_(10))
@@ -589,7 +602,7 @@ class AppearanceEditorWindow:
             content.addSubview_(preview)
             self._preview_views[f"icon_{state}"] = preview
 
-            x_pos += 100
+            x_pos += 120
 
         # Navigation buttons
         self._add_navigation_buttons(content, height, show_back=True, show_next=False, show_save=True)
@@ -605,6 +618,13 @@ class AppearanceEditorWindow:
         cancel_btn.setTarget_(self._delegate)
         cancel_btn.setAction_("cancel:")
         content.addSubview_(cancel_btn)
+
+        reset_btn = NSButton.alloc().initWithFrame_(NSMakeRect(110, y, 140, 32))
+        reset_btn.setTitle_("Reset to Defaults")
+        reset_btn.setBezelStyle_(NSBezelStyleRounded)
+        reset_btn.setTarget_(self._delegate)
+        reset_btn.setAction_("resetToDefaults:")
+        content.addSubview_(reset_btn)
 
         if show_back:
             back_btn = NSButton.alloc().initWithFrame_(NSMakeRect(440, y, 80, 32))
@@ -659,6 +679,7 @@ class AppearanceEditorWindow:
                             colors.get("background", "#232329"),
                             colors.get("icon", "#66A5FF")
                         )
+                    self._update_icon_previews()
                 break
 
     def handleBrowseForIcon(self):
@@ -742,7 +763,7 @@ class AppearanceEditorWindow:
         # Determine if using custom shape (non-circle mode with enabled icon)
         use_custom_shape = path and custom_icon.get("enabled", False) and shape_mode != "circle"
 
-        for state in ["idle", "recording", "processing"]:
+        for state in WIDGET_STATES:
             key = f"icon_{state}"
             if key in self._preview_views:
                 preview = self._preview_views[key]
@@ -762,6 +783,26 @@ class AppearanceEditorWindow:
                 else:
                     preview.setCustomIcon_(None)
 
+    def _confirm_reset_to_defaults(self) -> bool:
+        """Ask the user to confirm resetting all appearance settings."""
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("Reset Appearance")
+        alert.setInformativeText_(
+            "Restore all appearance settings to their factory defaults?\n\n"
+            "This resets colors, icon settings, and any other appearance customizations."
+        )
+        alert.addButtonWithTitle_("Reset")
+        alert.addButtonWithTitle_("Cancel")
+        return alert.runModal() == 1000
+
+    def handleResetToDefaults(self):
+        """Restore the working appearance config to factory defaults."""
+        if not self._confirm_reset_to_defaults():
+            return
+
+        self._working_config = _get_default_widget_appearance()
+        self._show_step(self._current_step)
+
     def handleGoBack(self):
         """Go to previous step."""
         if self._current_step > 1:
@@ -780,10 +821,11 @@ class AppearanceEditorWindow:
 
     def handleSave(self):
         """Save changes and close the editor."""
-        # Update config with working values
-        self._config.widget_appearance["theme"] = "custom"
-        self._config.widget_appearance["colors"] = self._working_config["colors"]
-        self._config.widget_appearance["custom_icon"] = self._working_config["custom_icon"]
+        appearance = deepcopy(self._working_config)
+        if appearance != _get_default_widget_appearance():
+            appearance["theme"] = "custom"
+
+        self._config.widget_appearance = appearance
         self._config.save()
 
         self._image_processor.clear_cache()

@@ -6,13 +6,13 @@ labels: bug
 assignees: ''
 ---
 
-## Describe the Bug
+## Description
 
-A clear and concise description of what the bug is.
+Describe the problem clearly and concisely.
 
-## To Reproduce
+## Reproduction Steps
 
-Steps to reproduce the behavior:
+List the steps needed to reproduce the issue:
 
 1. Go to '...'
 2. Click on '...'
@@ -30,8 +30,8 @@ What actually happened.
 
 - **macOS version**: (e.g., 14.2 Sonoma)
 - **Python version**: (run `python3 --version`)
+- **Provider being used**: (e.g., Apple, Whisper Local, Parakeet, OpenAI, Gemini)
 - **WhisperHUD version**: (run `git log -1 --format="%h"` in the project directory)
-- **Transcription provider**: (e.g., Apple, Whisper Local, Parakeet, OpenAI, Gemini)
 
 ## Logs
 

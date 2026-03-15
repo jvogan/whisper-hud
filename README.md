@@ -24,6 +24,22 @@
 
 # WhisperHUD
 
+## Quickstart
+
+- Requires macOS 12+ (Monterey) and Python 3.11+.
+- From the repo root, run:
+
+```bash
+./install.sh
+```
+
+1. Start WhisperHUD, then open **System Settings** → **Privacy & Security**.
+2. **Accessibility**: open **Accessibility**, enable WhisperHUD or your terminal app, then reopen the app if macOS asks.
+3. **Microphone**: open **Microphone**, enable WhisperHUD or your terminal app, then retry recording.
+4. **Automation**: on the first paste, click **OK** when macOS asks to allow WhisperHUD or your terminal app to control **System Events**.
+5. If the Automation prompt was dismissed, go to **System Settings** → **Privacy & Security** → **Automation** and re-enable **System Events** for WhisperHUD or your terminal app.
+- Easiest first run: choose **Local → Apple (Built-in)** in the setup wizard to start without an API key.
+
 ## Features
 
 - **Hold-to-record**: Press `Cmd+Shift+Space` anywhere to start recording
@@ -36,16 +52,7 @@
 - **Secure**: API keys can use encrypted passphrase storage (default), macOS Keychain, or session-only mode
 - **Cost tracking**: See your usage and estimated costs in the menu
 
-## Quick Start
-
-```bash
-git clone https://github.com/jvogan/whisper-hud.git
-cd whisper-hud
-./install.sh
-./run.sh
-```
-
-### Optional extras (local engines)
+## Optional Extras
 
 If you want local transcription engines, install extras after setting up the venv:
 
@@ -55,32 +62,6 @@ source venv/bin/activate
 pip install -e ".[whisper-local]"   # Whisper Local (faster-whisper)
 pip install -e ".[parakeet]"        # Parakeet (Apple Silicon)
 ```
-
-The setup wizard will guide you through:
-1. Granting Accessibility permission (required for hotkey + paste)
-2. Choosing providers and adding your API key (optional if using local providers)
-
-First-time easiest path: choose **Local → Apple (Built-in)** to start with no API key and no model download.
-
-If you use cloud providers, WhisperHUD defaults to encrypted passphrase storage for API keys.
-
-That's it! Hold `Cmd+Shift+Space` to record.
-
-### First-Run Experience (What You’ll See)
-
-1. **Setup wizard opens automatically**
-2. Choose **Local → Apple (Built-in)** for the fastest no-key start
-3. Hold `Cmd+Shift+Space`, speak, release to transcribe
-4. Optional: enable translation, choose provider/model/source/target language
-
-By default, translation source language is **Auto detect** for multilingual first runs.
-
-## Permissions
-
-WhisperHUD needs two macOS permissions to work properly:
-
-- **Accessibility**: System Settings → Privacy & Security → Accessibility
-- **Microphone**: System Settings → Privacy & Security → Microphone
 
 ## Getting API Keys
 

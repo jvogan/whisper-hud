@@ -9,36 +9,126 @@ This works in ANY application that supports paste.
 """
 
 import subprocess
-import pyperclip
 import time
 from typing import Optional
+
+import pyperclip
 
 from .logging_config import get_logger
 
 logger = get_logger("paste")
+MAX_APPLESCRIPT_LITERAL_LENGTH = 65535
+
+
+def _strip_null_bytes(value: str) -> str:
+    """Remove null bytes, which osascript cannot handle in source literals."""
+    return value.replace("\x00", "")
+
+
+def _utf16_code_units(value: str) -> int:
+    """AppleScript string limits are based on UTF-16 code units."""
+    return len(value.encode("utf-16-be")) // 2
 
 
 def escape_applescript_string(value: str) -> str:
     """Escape a string for safe use inside AppleScript quotes."""
-    return (
-        value.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
-    )
+    escaped = []
+    for char in _strip_null_bytes(value):
+        if char == "\\":
+            escaped.append("\\\\")
+        elif char == '"':
+            escaped.append('\\"')
+        elif char == "\n":
+            escaped.append("\\n")
+        elif char == "\r":
+            escaped.append("\\r")
+        elif char == "\t":
+            escaped.append("\\t")
+        else:
+            escaped.append(char)
+    return "".join(escaped)
 
 
 def _escape_as_line(value: str) -> str:
     """Escape a single line (no newlines) for use inside AppleScript quotes."""
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = []
+    for char in _strip_null_bytes(value):
+        if char == "\\":
+            escaped.append("\\\\")
+        elif char == '"':
+            escaped.append('\\"')
+        else:
+            escaped.append(char)
+    return "".join(escaped)
+
+
+def _append_literal_chunk(chunks: list[str], buffer: list[str]) -> None:
+    """Flush the current quoted literal buffer into the expression chunks."""
+    if buffer:
+        chunks.append(f'"{_escape_as_line("".join(buffer))}"')
+        buffer.clear()
+
+
+def _unicode_character_id_segments(value: str) -> list[str]:
+    """Represent non-ASCII text without embedding raw Unicode in AppleScript source."""
+    if ord(value) <= 0xFFFF:
+        return [f"(character id {ord(value)})"]
+
+    utf16_bytes = value.encode("utf-16-be")
+    code_units = [
+        int.from_bytes(utf16_bytes[index:index + 2], byteorder="big")
+        for index in range(0, len(utf16_bytes), 2)
+    ]
+    return [f"(character id {code_unit})" for code_unit in code_units]
 
 
 def _as_applescript_string_expression(value: str) -> str:
     """Build an AppleScript expression that preserves embedded newlines."""
-    parts = value.split("\n")
-    quoted_parts = [f'"{_escape_as_line(part)}"' for part in parts]
-    return ' & (ASCII character 10) & '.join(quoted_parts)
+    value = _strip_null_bytes(value)
+    if not value:
+        return '""'
+
+    chunks: list[str] = []
+    literal_buffer: list[str] = []
+    literal_code_units = 0
+
+    for char in value:
+        if char == "\n":
+            _append_literal_chunk(chunks, literal_buffer)
+            literal_code_units = 0
+            chunks.append("(ASCII character 10)")
+            continue
+        if char == "\r":
+            _append_literal_chunk(chunks, literal_buffer)
+            literal_code_units = 0
+            chunks.append("(ASCII character 13)")
+            continue
+        if char == "\t":
+            _append_literal_chunk(chunks, literal_buffer)
+            literal_code_units = 0
+            chunks.append("(ASCII character 9)")
+            continue
+        if ord(char) < 0x20:
+            _append_literal_chunk(chunks, literal_buffer)
+            literal_code_units = 0
+            chunks.append(f"(character id {ord(char)})")
+            continue
+        if ord(char) > 0x7E:
+            _append_literal_chunk(chunks, literal_buffer)
+            literal_code_units = 0
+            chunks.extend(_unicode_character_id_segments(char))
+            continue
+
+        char_units = _utf16_code_units(char)
+        if literal_code_units + char_units > MAX_APPLESCRIPT_LITERAL_LENGTH:
+            _append_literal_chunk(chunks, literal_buffer)
+            literal_code_units = 0
+
+        literal_buffer.append(char)
+        literal_code_units += char_units
+
+    _append_literal_chunk(chunks, literal_buffer)
+    return " & ".join(chunks)
 
 
 def insert_text(

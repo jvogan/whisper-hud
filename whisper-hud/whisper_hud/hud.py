@@ -23,16 +23,22 @@ try:
     from AppKit import (
         NSWindow, NSView, NSColor, NSFont,
         NSWindowStyleMaskBorderless, NSBackingStoreBuffered,
-        NSFloatingWindowLevel, NSScreen, NSTextField,
+        NSFloatingWindowLevel, NSScreen, NSTextField, NSWorkspace,
         NSMakeRect,
         NSWindowCollectionBehaviorCanJoinAllSpaces,
         NSWindowCollectionBehaviorStationary
+    )
+    from Quartz import (
+        CGWindowListCopyWindowInfo,
+        kCGNullWindowID,
+        kCGWindowListOptionOnScreenOnly,
     )
     from PyObjCTools import AppHelper
     from objc import super as objc_super
     HAS_APPKIT = True
 except ImportError:
     HAS_APPKIT = False
+    CGWindowListCopyWindowInfo = None
     logger.warning("PyObjC not available, HUD will use menu bar only")
 
 
@@ -98,6 +104,11 @@ class HUD:
         "success": "#3FB950",    # Green
         "error": "#F85149"       # Red
     }
+    DEFAULT_WIDTH = 260
+    DEFAULT_HEIGHT = 44
+    TOP_MARGIN = 80
+    ERROR_MAX_CHARS = 120
+    SUCCESS_MAX_CHARS = 40
 
     def __init__(self):
         self._window: Optional[NSWindow] = None
@@ -163,26 +174,142 @@ class HUD:
         }
         return color_map.get(state, NSColor.redColor()).CGColor()
 
+    @staticmethod
+    def _truncate_error_message(message: str, max_chars: int = ERROR_MAX_CHARS) -> str:
+        """Truncate error text to fit the HUD without overflowing."""
+        if len(message) <= max_chars:
+            return message
+        return message[: max_chars - 1] + "\u2026"
+
+    @staticmethod
+    def _truncate_success_message(message: str, max_chars: int = SUCCESS_MAX_CHARS) -> str:
+        """Truncate success text to fit the HUD width without overflow."""
+        if len(message) <= max_chars:
+            return message
+        return message[: max_chars - 1] + "\u2026"
+
+    @staticmethod
+    def _rect_components(rect) -> tuple[float, float, float, float]:
+        """Extract x/y/width/height from an NSRect-like object or CGWindow bounds dict."""
+        if isinstance(rect, dict):
+            return (
+                float(rect.get("X", 0.0)),
+                float(rect.get("Y", 0.0)),
+                float(rect.get("Width", 0.0)),
+                float(rect.get("Height", 0.0)),
+            )
+
+        origin = getattr(rect, "origin", None)
+        size = getattr(rect, "size", None)
+        return (
+            float(getattr(origin, "x", 0.0)),
+            float(getattr(origin, "y", 0.0)),
+            float(getattr(size, "width", 0.0)),
+            float(getattr(size, "height", 0.0)),
+        )
+
+    @classmethod
+    def _intersection_area(cls, rect_a, rect_b) -> float:
+        """Return the overlap area between two rect-like objects."""
+        ax, ay, aw, ah = cls._rect_components(rect_a)
+        bx, by, bw, bh = cls._rect_components(rect_b)
+        overlap_width = min(ax + aw, bx + bw) - max(ax, bx)
+        overlap_height = min(ay + ah, by + bh) - max(ay, by)
+        if overlap_width <= 0 or overlap_height <= 0:
+            return 0.0
+        return overlap_width * overlap_height
+
+    def _screen_for_frontmost_window(self):
+        """Return the screen containing the frontmost application window."""
+        if not HAS_APPKIT:
+            return None
+
+        main_screen = NSScreen.mainScreen()
+        screens = list(NSScreen.screens() or [])
+        if len(screens) <= 1:
+            return main_screen
+
+        try:
+            workspace = NSWorkspace.sharedWorkspace()
+            app = workspace.frontmostApplication() if workspace else None
+            pid = app.processIdentifier() if app else None
+            if not pid or not CGWindowListCopyWindowInfo:
+                return main_screen
+
+            windows = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID) or []
+            best_screen = main_screen
+            best_overlap = 0.0
+            for window in windows:
+                if window.get("kCGWindowOwnerPID") != pid:
+                    continue
+                bounds = window.get("kCGWindowBounds")
+                if not bounds:
+                    continue
+
+                for screen in screens:
+                    overlap = self._intersection_area(bounds, screen.visibleFrame())
+                    if overlap > best_overlap:
+                        best_overlap = overlap
+                        best_screen = screen
+
+                if best_overlap > 0:
+                    return best_screen
+        except Exception:
+            logger.debug("Falling back to main screen for HUD placement", exc_info=True)
+
+        return main_screen
+
+    def _window_frame_for_screen(self, screen):
+        """Calculate a HUD frame that stays inside the visible screen bounds."""
+        if not screen:
+            return None
+
+        screen_rect = screen.visibleFrame()
+        screen_x, screen_y, screen_width, screen_height = self._rect_components(screen_rect)
+        width = min(self.DEFAULT_WIDTH, screen_width)
+        height = min(self.DEFAULT_HEIGHT, screen_height)
+
+        x = screen_x + (screen_width - width) / 2
+        y = screen_y + screen_height - height - self.TOP_MARGIN
+
+        min_x = screen_x
+        max_x = screen_x + screen_width - width
+        min_y = screen_y
+        max_y = screen_y + screen_height - height
+        x = min(max(x, min_x), max_x)
+        y = min(max(y, min_y), max_y)
+        return NSMakeRect(x, y, width, height)
+
+    def _update_window_frame(self):
+        """Move the HUD to the active screen and keep it inside visible bounds."""
+        if not self._window:
+            return
+
+        screen = self._screen_for_frontmost_window()
+        frame = self._window_frame_for_screen(screen)
+        if frame is None:
+            return
+        self._window.setFrame_display_(frame, False)
+
     def _ensure_window(self):
         """Create window if needed (must be called on main thread)."""
-        if not HAS_APPKIT or self._window is not None:
+        if not HAS_APPKIT:
             return
 
-        # Window dimensions (wider to accommodate level bars and longer error messages)
-        width, height = 260, 44
+        if self._window is not None:
+            self._update_window_frame()
+            return
+
         corner_radius = 12
 
-        # Position in top-center of screen
-        screen = NSScreen.mainScreen()
-        if not screen:
+        screen = self._screen_for_frontmost_window()
+        frame = self._window_frame_for_screen(screen)
+        if frame is None:
             return
-        screen_rect = screen.visibleFrame()
-        x = screen_rect.origin.x + (screen_rect.size.width - width) / 2
-        y = screen_rect.origin.y + screen_rect.size.height - height - 80
 
         # Create borderless window
         self._window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(x, y, width, height),
+            frame,
             NSWindowStyleMaskBorderless,
             NSBackingStoreBuffered,
             False
@@ -201,7 +328,7 @@ class HUD:
 
         # Create rounded background view
         content = HUDContentView.alloc().initWithFrame_onClick_(
-            NSMakeRect(0, 0, width, height),
+            NSMakeRect(0, 0, self.DEFAULT_WIDTH, self.DEFAULT_HEIGHT),
             self._handle_click,
         )
         self._window.setContentView_(content)
@@ -314,7 +441,8 @@ class HUD:
         """Show success and auto-dismiss."""
         if not self._enabled:
             return
-        self._show(text, HUDState.SUCCESS)
+        display_text = self._truncate_success_message(text)
+        self._show(display_text, HUDState.SUCCESS)
         if auto_dismiss > 0:
             self._schedule_dismiss(auto_dismiss)
 
@@ -322,8 +450,7 @@ class HUD:
         """Show error state with dynamic dismiss time."""
         if not self._enabled:
             return
-        # Truncate long messages (45 chars is readable in the HUD width)
-        display_msg = message[:45] + "..." if len(message) > 48 else message
+        display_msg = self._truncate_error_message(message)
         self._show(display_msg, HUDState.ERROR)
         # Dynamic dismiss: base 3s + 0.5s per 20 chars, capped at 8s
         dismiss_time = 3.0 + (len(message) / 40)
@@ -361,6 +488,7 @@ class HUD:
             if not self._window or not self._label or not self._indicator_view:
                 return
 
+            self._update_window_frame()
             self._label.setStringValue_(text)
             self._window.setIgnoresMouseEvents_(state != HUDState.ERROR)
 

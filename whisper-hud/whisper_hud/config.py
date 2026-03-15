@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 from dataclasses import dataclass, asdict, field
+from datetime import datetime
 from typing import List, Optional
 
 from .logging_config import get_logger
@@ -17,6 +18,26 @@ logger = get_logger("config")
 
 CONFIG_DIR = Path.home() / ".config" / "whisper-hud"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+
+
+def _backup_corrupted_config() -> Optional[Path]:
+    """Back up a corrupted config file without overwriting existing backups."""
+    if not CONFIG_FILE.exists():
+        return None
+
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    backup_file = CONFIG_DIR / f"{CONFIG_FILE.name}.bak.{timestamp}"
+    suffix = 1
+    while backup_file.exists():
+        backup_file = CONFIG_DIR / f"{CONFIG_FILE.name}.bak.{timestamp}.{suffix}"
+        suffix += 1
+
+    try:
+        CONFIG_FILE.replace(backup_file)
+        return backup_file
+    except Exception as e:
+        logger.warning(f"Failed to back up corrupted config: {e}")
+        return None
 
 
 def _ensure_config_permissions() -> None:
@@ -172,6 +193,18 @@ class Config:
 
                 # Handle missing fields gracefully
                 return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+            except json.JSONDecodeError as e:
+                backup_file = _backup_corrupted_config()
+                if backup_file is not None:
+                    logger.warning(
+                        f"Config file contained invalid JSON and was reset to defaults. "
+                        f"Backed up corrupted file to {backup_file}: {e}"
+                    )
+                else:
+                    logger.warning(
+                        f"Config file contained invalid JSON and was reset to defaults, "
+                        f"but backup failed: {e}"
+                    )
             except Exception as e:
                 logger.warning(f"Failed to load config: {e}")
         return cls()

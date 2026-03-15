@@ -52,10 +52,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "flake8>=7.0.0",
+    "ruff>=0.11.0",
     "black>=24.3.0",
     "pre-commit>=3.6.0",
     "pytest>=8.0.0",
+    "mypy>=1.18.0",
 ]
 custom-icons = [
     "Pillow>=10.0.0",
@@ -84,6 +85,9 @@ whisper-hud = "whisper_hud.main:run"
 [tool.setuptools.packages.find]
 where = ["whisper-hud"]
 
+[tool.setuptools.package-data]
+whisper_hud = ["py.typed"]
+
 [tool.black]
 line-length = 120
 target-version = ['py311']
@@ -98,11 +102,50 @@ exclude = '''
 )/
 '''
 
-[tool.flake8]
-max-line-length = 120
-exclude = ".git,__pycache__,venv,.venv,build,dist"
-extend-ignore = "E501,W503"
+[tool.ruff]
+line-length = 120
+exclude = [
+    ".git",
+    "__pycache__",
+    "venv",
+    ".venv",
+    "build",
+    "dist",
+    "assets",
+    "scripts",
+    "tests",
+    "setup_app.py",
+]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
+markers = [
+    "integration: end-to-end coverage for recorder, transcription, and paste flows",
+]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["whisper-hud/whisper_hud"]
+ignore_missing_imports = true
+warn_return_any = false
+show_error_codes = true
+pretty = true
+disable_error_code = ["import-untyped"]
+
+[[tool.mypy.overrides]]
+module = ["requests"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["whisper_hud.*"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["whisper_hud.paste", "whisper_hud.transcribe", "whisper_hud.keychain"]
+ignore_errors = false

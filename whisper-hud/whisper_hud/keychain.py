@@ -14,11 +14,14 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING, TypedDict
 
 import keyring
 
 from .logging_config import get_logger
+
+if TYPE_CHECKING:
+    from .config import Config
 
 logger = get_logger("keychain")
 
@@ -27,10 +30,23 @@ PROVIDERS = ("openai", "gemini", "anthropic")
 STORAGE_MODES = ("passphrase", "keychain", "none")
 DEFAULT_STORAGE_MODE = "passphrase"
 PASSFILE_NAME = "credentials.enc"
+REQUESTS_MISSING_WARNING = "requests package not available, skipping API key validation"
 
 _session_passphrase: Optional[str] = None
 _session_passphrase_cache: dict[str, str] = {}
 _session_none_cache: dict[str, str] = {}
+_PROVIDER_DISPLAY_NAMES = {
+    "openai": "OpenAI",
+    "gemini": "Gemini",
+    "anthropic": "Anthropic",
+}
+
+
+class PassphraseStorePayload(TypedDict):
+    version: int
+    kdf: str
+    salt: str
+    ciphertext: str
 
 
 def _normalize_mode(mode: Optional[str]) -> str:
@@ -45,6 +61,28 @@ def _account_name(provider: str) -> str:
 
 def _validate_provider(provider: str) -> bool:
     return provider in PROVIDERS
+
+
+def _normalize_and_validate_api_key(provider: str, api_key: str) -> str:
+    """Strip outer whitespace and enforce provider-specific key format rules."""
+    provider_name = _PROVIDER_DISPLAY_NAMES.get(provider, provider.capitalize())
+    normalized_key = api_key.strip()
+
+    if not normalized_key:
+        raise ValueError(f"{provider_name} API key cannot be empty")
+    if any(char.isspace() for char in normalized_key):
+        raise ValueError(f"{provider_name} API key must not contain whitespace")
+
+    if provider == "openai":
+        if not normalized_key.startswith("sk-"):
+            raise ValueError("OpenAI API keys must start with 'sk-'")
+        if len(normalized_key) < 40:
+            raise ValueError("OpenAI API keys must be at least 40 characters")
+    elif provider == "gemini":
+        if len(normalized_key) < 20:
+            raise ValueError("Gemini API keys must be at least 20 characters")
+
+    return normalized_key
 
 
 def _keychain_get_api_key(provider: str) -> Optional[str]:
@@ -128,7 +166,7 @@ def _decrypt_keys(ciphertext: str, passphrase: str, salt: bytes) -> dict[str, st
     }
 
 
-def _read_passphrase_store() -> Optional[dict]:
+def _read_passphrase_store() -> Optional[PassphraseStorePayload]:
     path = _credentials_file()
     if not path.exists():
         return None
@@ -138,7 +176,12 @@ def _read_passphrase_store() -> Optional[dict]:
             data = json.load(f)
         if not isinstance(data, dict):
             return None
-        return data
+        return {
+            "version": int(data.get("version", 1)),
+            "kdf": str(data.get("kdf", "")),
+            "salt": str(data["salt"]),
+            "ciphertext": str(data["ciphertext"]),
+        }
     except Exception:
         return None
 
@@ -322,7 +365,7 @@ def change_passphrase(current_passphrase: str, new_passphrase: str) -> tuple[boo
     return True, "Passphrase updated"
 
 
-def get_storage_mode(config=None) -> str:
+def get_storage_mode(config: Optional["Config"] = None) -> str:
     """
     Get active credential storage mode.
 
@@ -471,7 +514,8 @@ def import_api_keys(
     for provider, key in keys.items():
         if provider not in PROVIDERS or not key:
             continue
-        if not _set_api_key_for_mode(provider, key, target_mode):
+        normalized_key = _normalize_and_validate_api_key(provider, key)
+        if not _set_api_key_for_mode(provider, normalized_key, target_mode):
             return False, f"Failed to store key for {provider}"
 
     return True, ""
@@ -493,8 +537,14 @@ def set_api_key(provider: str, api_key: str) -> bool:
     """
     if not _validate_provider(provider) or not api_key:
         return False
+    normalized_key = _normalize_and_validate_api_key(provider, api_key)
     mode = get_storage_mode()
-    return _set_api_key_for_mode(provider, api_key, mode)
+    return _set_api_key_for_mode(provider, normalized_key, mode)
+
+
+def store_api_key(provider: str, api_key: str) -> bool:
+    """Backward-compatible alias for storing API keys."""
+    return set_api_key(provider, api_key)
 
 
 def delete_api_key(provider: str) -> bool:
@@ -511,7 +561,7 @@ def get_configured_providers() -> list[str]:
     """
     Return providers with keys configured in active storage mode.
     """
-    providers = []
+    providers: list[str] = []
     for provider in PROVIDERS:
         if get_api_key(provider):
             providers.append(provider)
@@ -538,12 +588,11 @@ def validate_api_key(provider: str, api_key: str) -> tuple[bool, str]:
     """
     if provider == "openai":
         return _validate_openai_key(api_key)
-    elif provider == "gemini":
+    if provider == "gemini":
         return _validate_gemini_key(api_key)
-    elif provider == "anthropic":
+    if provider == "anthropic":
         return _validate_anthropic_key(api_key)
-    else:
-        return False, f"Unknown provider: {provider}"
+    return False, f"Unknown provider: {provider}"
 
 
 def _validate_openai_key(api_key: str) -> tuple[bool, str]:
@@ -567,7 +616,8 @@ def _validate_openai_key(api_key: str) -> tuple[bool, str]:
         else:
             return False, f"API error: {response.status_code}"
     except ImportError:
-        return False, "requests package is required for API key validation"
+        logger.warning(REQUESTS_MISSING_WARNING)
+        return False, REQUESTS_MISSING_WARNING
     except requests.exceptions.Timeout:
         return False, "Connection timed out"
     except requests.exceptions.ConnectionError:
@@ -601,7 +651,8 @@ def _validate_gemini_key(api_key: str) -> tuple[bool, str]:
         else:
             return False, f"API error: {response.status_code}"
     except ImportError:
-        return False, "requests package is required for API key validation"
+        logger.warning(REQUESTS_MISSING_WARNING)
+        return False, REQUESTS_MISSING_WARNING
     except requests.exceptions.Timeout:
         return False, "Connection timed out"
     except requests.exceptions.ConnectionError:
@@ -634,7 +685,8 @@ def _validate_anthropic_key(api_key: str) -> tuple[bool, str]:
         else:
             return False, f"API error: {response.status_code}"
     except ImportError:
-        return False, "requests package is required for API key validation"
+        logger.warning(REQUESTS_MISSING_WARNING)
+        return False, REQUESTS_MISSING_WARNING
     except requests.exceptions.Timeout:
         return False, "Connection timed out"
     except requests.exceptions.ConnectionError:
