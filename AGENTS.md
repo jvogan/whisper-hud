@@ -100,6 +100,7 @@ CI runs on `macos-latest` via GitHub Actions:
 ## What NOT to Do
 
 - Do not make live API calls (OpenAI, Gemini, Anthropic) in tests
+- Do not call real `keyring.get_password()` or `keyring.set_password()` in tests — always mock `keyring` to avoid macOS Keychain access popups that block the test runner
 - Do not import real `rumps`, `AppKit`, `pynput`, or `sounddevice` in tests
 - Do not modify `keychain.py` scrypt parameters or encryption algorithms
 - Do not add `print()` statements — use `logger.debug/info/warning/error`
