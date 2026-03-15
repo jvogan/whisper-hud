@@ -8,6 +8,7 @@ Includes silence detection for auto-stop functionality.
 """
 
 import io
+import logging
 import threading
 import time
 from typing import Optional, Callable
@@ -123,7 +124,6 @@ class AudioRecorder:
             logger.info(f"Starting recording with device: {device_name} (ID: {self.device})")
 
             self.audio_data = []
-            self.recording = True
             self._speech_detected = False
             self._silence_start = None
             self._on_silence = on_silence
@@ -187,6 +187,7 @@ class AudioRecorder:
                         device=device_to_use
                     )
                     self._stream.start()
+                    self.recording = True
 
                     # Success - update device if we fell back
                     if attempt > 0:
@@ -220,6 +221,7 @@ class AudioRecorder:
         """Check audio chunk for silence and trigger callback if needed."""
         # Calculate RMS (root mean square) as volume level
         rms = np.sqrt(np.mean(audio_chunk ** 2))
+        debug_enabled = logger.isEnabledFor(logging.DEBUG)
 
         current_time = time.time()
         recording_duration = current_time - self._recording_start
@@ -231,8 +233,12 @@ class AudioRecorder:
         # Debug logging every ~0.5 seconds
         if int(recording_duration * 2) != getattr(self, '_last_debug_time', -1):
             self._last_debug_time = int(recording_duration * 2)
-            relative_thresh = self._speech_peak_rms * 0.3 if self._speech_detected else 0
-            logger.debug(f"Audio RMS: {rms:.4f}, peak: {self._speech_peak_rms:.4f}, rel_thresh: {relative_thresh:.4f}, speech_detected: {self._speech_detected}")
+            if debug_enabled:
+                relative_thresh = self._speech_peak_rms * 0.3 if self._speech_detected else 0
+                logger.debug(
+                    f"Audio RMS: {rms:.4f}, peak: {self._speech_peak_rms:.4f}, "
+                    f"rel_thresh: {relative_thresh:.4f}, speech_detected: {self._speech_detected}"
+                )
 
             # Warn if audio levels are suspiciously low after some recording time
             if recording_duration > 2.0 and not self._speech_detected:
@@ -255,7 +261,8 @@ class AudioRecorder:
                 self._speech_detected = True
                 self._speech_peak_rms = rms
                 self._silence_start = None
-                logger.debug(f"Speech detected! RMS: {rms:.4f}")
+                if debug_enabled:
+                    logger.debug(f"Speech detected! RMS: {rms:.4f}")
             return
 
         # Track peak speech level (with decay to adapt to volume changes)

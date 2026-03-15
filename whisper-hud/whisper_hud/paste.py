@@ -18,9 +18,27 @@ from .logging_config import get_logger
 logger = get_logger("paste")
 
 
-def _escape_applescript_string(value: str) -> str:
+def escape_applescript_string(value: str) -> str:
     """Escape a string for safe use inside AppleScript quotes."""
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+
+
+def _escape_as_line(value: str) -> str:
+    """Escape a single line (no newlines) for use inside AppleScript quotes."""
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _as_applescript_string_expression(value: str) -> str:
+    """Build an AppleScript expression that preserves embedded newlines."""
+    parts = value.split("\n")
+    quoted_parts = [f'"{_escape_as_line(part)}"' for part in parts]
+    return ' & (ASCII character 10) & '.join(quoted_parts)
 
 
 def insert_text(
@@ -46,6 +64,7 @@ def insert_text(
 
     original_clipboard: Optional[str] = None
     original_app: Optional[str] = None
+    clipboard_contains_text = False
 
     try:
         # Save original clipboard if requested
@@ -61,13 +80,14 @@ def insert_text(
 
         # Copy to clipboard
         pyperclip.copy(text)
+        clipboard_contains_text = True
 
         # Small delay to ensure clipboard is ready
         time.sleep(0.05)
 
         # If targeting a specific app, activate it first
         if target_app:
-            safe_app = _escape_applescript_string(target_app)
+            safe_app = escape_applescript_string(target_app)
             activate_result = subprocess.run(
                 ['osascript', '-e', f'tell application "{safe_app}" to activate'],
                 capture_output=True,
@@ -99,25 +119,12 @@ def insert_text(
         # Return focus to original app if needed
         if target_app and return_focus and original_app and original_app != target_app:
             time.sleep(0.1)
-            safe_app = _escape_applescript_string(original_app)
+            safe_app = escape_applescript_string(original_app)
             subprocess.run(
                 ['osascript', '-e', f'tell application "{safe_app}" to activate'],
                 capture_output=True,
                 timeout=5
             )
-
-        # Small delay before restoring clipboard
-        if restore_clipboard and original_clipboard is not None:
-            time.sleep(0.1)
-            try:
-                # Only restore if clipboard still contains our text
-                # This prevents overwriting user's content if they copied
-                # something during the paste delay
-                current_clipboard = pyperclip.paste()
-                if current_clipboard == text:
-                    pyperclip.copy(original_clipboard)
-            except Exception:
-                pass  # If restore fails, that's okay
 
         return True
 
@@ -127,6 +134,18 @@ def insert_text(
     except Exception as e:
         logger.error(f"Paste error: {e}")
         return False
+    finally:
+        if restore_clipboard and original_clipboard is not None and clipboard_contains_text:
+            time.sleep(0.1)
+            try:
+                # Only restore if clipboard still contains our text.
+                # This prevents overwriting user's content if they copied
+                # something during the paste delay.
+                current_clipboard = pyperclip.paste()
+                if current_clipboard == text:
+                    pyperclip.copy(original_clipboard)
+            except Exception:
+                pass
 
 
 def insert_text_direct(text: str) -> bool:
@@ -144,12 +163,11 @@ def insert_text_direct(text: str) -> bool:
         return insert_text(text, restore_clipboard=True)
 
     try:
-        # Escape special characters for AppleScript
-        escaped = text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+        applescript_text = _as_applescript_string_expression(text)
 
         applescript = f'''
         tell application "System Events"
-            keystroke "{escaped}"
+            keystroke {applescript_text}
         end tell
         '''
 

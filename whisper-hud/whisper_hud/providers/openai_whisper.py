@@ -11,9 +11,13 @@ API endpoint: POST https://api.openai.com/v1/audio/transcriptions
 """
 
 import io
-from openai import OpenAI
+from importlib import import_module
+from typing import TYPE_CHECKING
 from .base import TranscriptionProvider, TranscriptionResult
 from ..keychain import get_api_key
+
+if TYPE_CHECKING:
+    from openai import OpenAI
 
 
 class OpenAITranscribeProvider(TranscriptionProvider):
@@ -55,14 +59,33 @@ class OpenAITranscribeProvider(TranscriptionProvider):
         self._client = None
 
     @property
-    def client(self) -> OpenAI:
+    def client(self) -> "OpenAI":
         """Lazy-load the OpenAI client."""
         if self._client is None:
+            openai_cls = self._get_openai_client_class()
             api_key = get_api_key("openai")
             if not api_key:
                 raise ValueError("OpenAI API key not configured")
-            self._client = OpenAI(api_key=api_key)
+            self._client = openai_cls(api_key=api_key)
         return self._client
+
+    @staticmethod
+    def _get_openai_client_class():
+        """Import the OpenAI SDK lazily so availability checks can mock package absence."""
+        try:
+            return import_module("openai").OpenAI
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "openai package not installed. Install with: pip install openai"
+            ) from exc
+
+    def is_available(self) -> bool:
+        """Check whether the SDK is importable and an API key is configured."""
+        try:
+            self._get_openai_client_class()
+        except RuntimeError:
+            return False
+        return bool(get_api_key("openai"))
 
     def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
         """Transcribe audio using OpenAI API."""
@@ -89,37 +112,40 @@ class OpenAITranscribeProvider(TranscriptionProvider):
         # gpt-4o-transcribe models support json or text output
         # gpt-4o-transcribe-diarize supports json/text/diarized_json
         # whisper-1 also supports srt, vtt, verbose_json
-        if self.model == "whisper-1":
-            response = self.client.audio.transcriptions.create(
-                model=self.model,
-                file=audio_file,
-                response_format="verbose_json"
-            )
-            duration = response.duration
-            text = response.text.strip()
-            language = response.language
-        elif self.model == "gpt-4o-transcribe-diarize":
-            response = self.client.audio.transcriptions.create(
-                model=self.model,
-                file=audio_file,
-                response_format="diarized_json",
-                chunking_strategy="auto"
-            )
-            text = self._extract_text(response)
-            # Estimate duration from audio bytes (16kHz, 16-bit mono = 32KB/sec)
-            duration = len(audio_bytes) / 32000
-            language = None
-        else:
-            # gpt-4o-transcribe models
-            response = self.client.audio.transcriptions.create(
-                model=self.model,
-                file=audio_file,
-                response_format="json"
-            )
-            text = response.text.strip()
-            # Estimate duration from audio bytes (16kHz, 16-bit mono = 32KB/sec)
-            duration = len(audio_bytes) / 32000
-            language = None
+        try:
+            if self.model == "whisper-1":
+                response = self.client.audio.transcriptions.create(
+                    model=self.model,
+                    file=audio_file,
+                    response_format="verbose_json"
+                )
+                duration = response.duration
+                text = response.text.strip()
+                language = response.language
+            elif self.model == "gpt-4o-transcribe-diarize":
+                response = self.client.audio.transcriptions.create(
+                    model=self.model,
+                    file=audio_file,
+                    response_format="diarized_json",
+                    chunking_strategy="auto"
+                )
+                text = self._extract_text(response)
+                # Estimate duration from audio bytes (16kHz, 16-bit mono = 32KB/sec)
+                duration = len(audio_bytes) / 32000
+                language = None
+            else:
+                # gpt-4o-transcribe models
+                response = self.client.audio.transcriptions.create(
+                    model=self.model,
+                    file=audio_file,
+                    response_format="json"
+                )
+                text = response.text.strip()
+                # Estimate duration from audio bytes (16kHz, 16-bit mono = 32KB/sec)
+                duration = len(audio_bytes) / 32000
+                language = None
+        except Exception as e:
+            raise RuntimeError(f"OpenAI transcription failed: {e}") from e
 
         # Calculate cost
         duration_minutes = duration / 60

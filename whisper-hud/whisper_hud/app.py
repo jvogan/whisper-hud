@@ -27,7 +27,7 @@ from .translate import TranslationManager
 from .providers.base import LiveTranscriptionSession, TranscriptionResult
 from .hotkey import HotkeyListener, HotkeyCapture, format_hotkey_display, string_to_key
 from .hud import create_hud
-from .paste import insert_text, check_accessibility_permission, get_accessibility_error_message, open_accessibility_settings, _escape_applescript_string
+from .paste import insert_text, check_accessibility_permission, get_accessibility_error_message, open_accessibility_settings, escape_applescript_string
 from .paste_targets import PasteTargetManager, PasteTarget, TargetType
 from .config import Config
 from .keychain import (
@@ -2442,7 +2442,9 @@ class WhisperHUDApp(rumps.App):
                 if use_streaming and result.text:
                     self.streaming_panel.update_transcription(result.text)
 
-                if result.text:
+                has_transcription = bool(result.text and result.text.strip())
+
+                if has_transcription:
                     final_text = result.text
                     did_translate = False
 
@@ -2677,7 +2679,11 @@ class WhisperHUDApp(rumps.App):
                         on_ready=lambda tid=turn.turn_id: self._on_live_session_ready(tid),
                         language=self._selected_live_language(),
                     )
-                    on_audio_chunk = lambda chunk, rate, tid=turn.turn_id: self._on_live_audio_chunk(tid, chunk, rate)
+
+                    def live_audio_chunk_handler(chunk, rate, tid=turn.turn_id):
+                        self._on_live_audio_chunk(tid, chunk, rate)
+
+                    on_audio_chunk = live_audio_chunk_handler
             except Exception as e:
                 logger.error(f"Failed to prepare live transcription session: {e}")
                 with self._lock:
@@ -3049,9 +3055,9 @@ class WhisperHUDApp(rumps.App):
         import subprocess
 
         # Escape quotes for AppleScript
-        message_escaped = _escape_applescript_string(message).replace('\n', '\\n')
-        default_escaped = _escape_applescript_string(default)
-        title_escaped = _escape_applescript_string(title)
+        message_escaped = escape_applescript_string(message).replace('\n', '\\n')
+        default_escaped = escape_applescript_string(default)
+        title_escaped = escape_applescript_string(title)
         hidden_clause = " with hidden answer" if hidden else ""
 
         script = f'''

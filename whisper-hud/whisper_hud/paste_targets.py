@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .logging_config import get_logger
+from .paste import escape_applescript_string
 
 logger = get_logger("paste_targets")
 
@@ -57,11 +58,6 @@ class PasteTargetManager:
         "UserNotificationCenter",  # Notifications
     }
     # Note: Finder, System Settings, etc. are NOT excluded - they can receive paste
-
-    @staticmethod
-    def _escape_applescript_string(value: str) -> str:
-        """Escape a string for safe use inside AppleScript quotes."""
-        return value.replace("\\", "\\\\").replace('"', '\\"')
 
     def get_running_apps(self) -> List[str]:
         """Get list of running apps via AppleScript."""
@@ -220,7 +216,7 @@ class PasteTargetManager:
 
     def activate_app(self, app_name: str) -> bool:
         """Activate (bring to front) an application."""
-        safe_app = self._escape_applescript_string(app_name)
+        safe_app = escape_applescript_string(app_name)
         applescript = f'''
         tell application "{safe_app}"
             activate
@@ -377,16 +373,6 @@ class PasteTargetManager:
             logger.error(f"Error sending to tmux session '{session}': {e}")
             return False
 
-    def _escape_for_applescript(self, text: str) -> str:
-        """Escape text for use in AppleScript strings."""
-        # Order matters: escape backslashes first
-        text = text.replace('\\', '\\\\')
-        text = text.replace('"', '\\"')
-        text = text.replace('\n', '\\n')
-        text = text.replace('\r', '\\r')
-        text = text.replace('\t', '\\t')
-        return text
-
     def paste_to_iterm2(self, text: str) -> bool:
         """
         Send text directly to iTerm2 (no focus change).
@@ -400,7 +386,7 @@ class PasteTargetManager:
         Returns:
             True if successful, False otherwise
         """
-        escaped_text = self._escape_for_applescript(text)
+        escaped_text = escape_applescript_string(text)
 
         # Use 'write text' without newline to insert text at cursor
         applescript = f'''

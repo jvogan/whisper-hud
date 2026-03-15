@@ -13,6 +13,7 @@ Features:
 
 import importlib.util
 import os
+import platform
 import time
 from pathlib import Path
 from typing import Optional, Callable
@@ -210,22 +211,20 @@ class WhisperLocalProvider(TranscriptionProvider):
         except Exception:
             return False
 
+    def _get_compute_type(self) -> str:
+        """Select the faster-whisper compute backend for the current Mac architecture."""
+        if platform.machine() == "arm64":
+            return "coreml"
+        return "float16"
+
     def _load_model(self):
         """Load the whisper model."""
         if self._whisper_model is None:
             try:
                 from faster_whisper import WhisperModel
 
-                # Use CPU with int8 for broad compatibility
-                # Could detect Apple Silicon and use different settings
-                compute_type = "int8"
                 device = "cpu"
-
-                # Check for Apple Silicon
-                import platform
-                if platform.processor() == "arm":
-                    # Apple Silicon - can use float16
-                    compute_type = "float16"
+                compute_type = self._get_compute_type()
 
                 self._whisper_model = WhisperModel(
                     self.model,
