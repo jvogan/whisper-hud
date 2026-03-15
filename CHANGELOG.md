@@ -2,7 +2,7 @@
 
 All notable changes to WhisperHUD will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Changelog Policy
@@ -28,65 +28,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Multiple Transcription Providers**
-  - OpenAI Whisper (GPT-4o Transcribe, GPT-4o Mini Transcribe, Whisper v2)
-  - Google Gemini (Gemini 2.0 Flash)
-  - Apple Speech Recognition (on-device, no API key required)
-  - Local Whisper (on-device, multiple model sizes)
+- Multiple transcription providers, including OpenAI Whisper, Google Gemini, Apple Speech Recognition, Local Whisper, and a dedicated OpenAI Realtime low-latency dictation mode with live microphone chunk forwarding and batch fallback.
+- Translation support across local and cloud providers, including Ollama, OpenAI, Gemini, Apple Translate, and Anthropic, with streaming translation output and support for 15+ target languages.
+- A first-run setup wizard with step progress, API key validation, dark mode support, and the ability to skip translation setup.
+- A configurable floating widget with click-to-record behavior, multiple sizes, appearance themes, custom icon modes, tooltip help, recording animation, and processing indicators.
+- A live HUD and streaming display with audio level visualization, status messaging, word counts, and real-time transcription and translation output.
+- Flexible output flows including auto-paste, paste target locking for specific apps and terminals, clipboard restoration, and transcription history.
+- macOS release and distribution plumbing, including DMG packaging, PyPI publishing support, Sparkle auto-update integration, release automation, secret scanning, and dependency review workflows.
+- Broader automated coverage for provider integrations, menu construction, recording dispatch, setup wizard behavior, HUD behavior, floating widget behavior, and installation smoke testing.
 
-- **Translation Support**
-  - Local translation via Ollama (TranslateGemma models)
-  - Cloud translation via Gemini and OpenAI
-  - Support for 15+ target languages
-  - Streaming translation display
+### Changed
 
-- **Floating Widget**
-  - Click-to-record floating button
-  - Multiple sizes (small, medium, large, extra-large)
-  - 7 appearance themes (Default, Sunset, Ocean, Forest, Neon, Minimal, Midnight)
-  - Custom icon support with shape modes (circle, alpha, subject extraction)
+- Reorganized menus and settings flows to better separate transcription, translation, setup, and appearance controls.
+- Improved the appearance editor and button rendering so widget customization is easier to preview and validate.
+- Extended streaming panel behavior with longer auto-dismiss timing, manual dismissal, and active-screen placement.
+- Improved HUD placement and dismissal behavior for multi-display setups and click-to-dismiss error states.
+- Hardened startup helpers, configuration handling, credential storage flows, public-release UX, documentation, and release readiness materials for the public launch.
+- Strengthened the test and CI pipeline with coverage artifact uploads, broader regression coverage, and Ruff adoption in CI.
+- Tightened OpenAI Realtime product copy, provider wiring, and supported model scope to match the v1 runtime.
 
-- **HUD Overlay**
-  - Visual feedback during recording and processing
-  - Audio level visualization
-  - Status messages and word count
+### Fixed
 
-- **Streaming Display**
-  - Live transcription text as it's recognized
-  - Live translation text as it's generated
-  - Auto-dismiss after paste
+- Fixed GitHub Actions workflows that referenced the nonexistent `actions/checkout@v6` release.
+- Fixed `paste.py` newline escaping in direct text insertion paths.
+- Fixed Apple Silicon detection in the local Whisper provider.
+- Fixed missing error handling in Gemini transcription calls.
+- Fixed duplicate AppleScript escaping logic by consolidating it behind one shared implementation.
+- Fixed a recorder race where `recording=True` could be observed inconsistently across threads.
+- Fixed repeated provider discovery work by caching `TranscriptionManager.get_available_providers()`.
+- Fixed keychain validator import ordering so configuration checks fail predictably.
+- Fixed whitespace-only transcription handling and added click-to-dismiss error HUD behavior.
+- Fixed installation UX gaps with progress feedback, error trapping, and a smoke test in `install.sh`.
+- Fixed test runner interruptions caused by unexpected macOS Keychain prompts by enforcing mocked keychain access in tests.
 
-- **Recording Features**
-  - Hold-to-record (push-to-talk) mode
-  - Press-to-toggle recording mode
-  - Customizable hotkey support
-  - Auto-stop on silence detection
-  - Audio level monitoring
+### Removed
 
-- **Output Options**
-  - Auto-paste to cursor position
-  - Paste target locking (specific apps, tmux sessions, iTerm2)
-  - Clipboard restoration after paste
-  - Transcription history with copy support
-
-- **Security**
-  - API key storage modes: passphrase-encrypted local store (default), macOS Keychain, or session-only
-  - Audio processed in memory only
-  - Local translation via Ollama
-  - No telemetry or data collection
-
-- **User Experience**
-  - First-run setup wizard
-  - Cost tracking and usage statistics
-  - Comprehensive error handling with helpful messages
-  - Terminal ASCII art branding
-
-### Technical
-
-- Python 3.11+ required
-- PyObjC for native macOS integration
-- rumps for menu bar app framework
-- Provider pattern for extensibility
+- Removed duplicate internal AppleScript escape helper paths in favor of a single shared escaping implementation.
 
 ---
 
