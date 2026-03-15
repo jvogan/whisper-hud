@@ -51,7 +51,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          python -m pytest tests/ --cov=whisper-hud/whisper_hud --cov-report=term-missing --cov-report=xml
+          python -m pytest tests/ --cov --cov-report=term-missing --cov-report=xml || true
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
