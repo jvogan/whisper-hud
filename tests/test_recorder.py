@@ -1,7 +1,10 @@
 """Tests for audio recording functionality."""
 
+import logging
+import time
+
 import pytest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import numpy as np
 
 
@@ -100,8 +103,45 @@ class TestAudioRecorder:
 
             assert result == b''
 
+    def test_start_keeps_recording_false_when_stream_start_raises(self):
+        """Recorder should stay stopped if stream.start() fails."""
+        stream = Mock()
+        stream.start.side_effect = Exception("boom")
+
+        with patch('sounddevice.InputStream', return_value=stream):
+            with patch('whisper_hud.recorder.is_valid_input_device', return_value=True):
+                from whisper_hud.recorder import AudioRecorder
+
+                recorder = AudioRecorder()
+                with pytest.raises(Exception, match="boom"):
+                    recorder.start()
+
+                assert recorder.recording is False
+                assert recorder._stream is None
+                assert stream.stop.call_count == 3
+                assert stream.close.call_count == 3
+
+    def test_start_sets_recording_true_after_successful_stream_start(self):
+        """Recorder should mark recording only after stream.start() succeeds."""
+        stream = Mock()
+
+        with patch('sounddevice.InputStream', return_value=stream):
+            with patch('whisper_hud.recorder.is_valid_input_device', return_value=True):
+                from whisper_hud.recorder import AudioRecorder
+
+                recorder = AudioRecorder()
+                recorder.start()
+
+                assert recorder.recording is True
+                assert recorder._stream is stream
+                stream.start.assert_called_once()
+
+                recorder.stop()
+                stream.stop.assert_called_once()
+                stream.close.assert_called_once()
+
     def test_start_failure_rolls_back_state(self):
-        """Test that start() rolls back if InputStream fails."""
+        """Test that start() rolls back if InputStream construction fails."""
         with patch('sounddevice.InputStream', side_effect=Exception("boom")):
             from whisper_hud.recorder import AudioRecorder
 
@@ -146,6 +186,41 @@ class TestAudioRecorder:
                 assert len(chunks) == 1
                 np.testing.assert_allclose(chunks[0][0], audio_chunk)
                 assert chunks[0][1] == 16000
+
+
+    def test_check_silence_skips_debug_logs_when_debug_disabled(self):
+        """_check_silence should avoid debug logging work when DEBUG is off."""
+        with patch('sounddevice.InputStream'):
+            from whisper_hud.recorder import AudioRecorder
+
+            recorder = AudioRecorder()
+            recorder._recording_start = time.time() - 1.0
+            loud_chunk = np.ones((256, 1), dtype=np.float32) * 0.01
+
+            with patch('whisper_hud.recorder.logger.isEnabledFor', return_value=False) as mock_enabled:
+                with patch('whisper_hud.recorder.logger.debug') as mock_debug:
+                    recorder._check_silence(loud_chunk)
+
+            assert recorder._speech_detected is True
+            mock_enabled.assert_called_once_with(logging.DEBUG)
+            mock_debug.assert_not_called()
+
+    def test_check_silence_emits_debug_logs_when_debug_enabled(self):
+        """_check_silence should still log debug messages when DEBUG is on."""
+        with patch('sounddevice.InputStream'):
+            from whisper_hud.recorder import AudioRecorder
+
+            recorder = AudioRecorder()
+            recorder._recording_start = time.time() - 1.0
+            loud_chunk = np.ones((256, 1), dtype=np.float32) * 0.01
+
+            with patch('whisper_hud.recorder.logger.isEnabledFor', return_value=True) as mock_enabled:
+                with patch('whisper_hud.recorder.logger.debug') as mock_debug:
+                    recorder._check_silence(loud_chunk)
+
+            assert recorder._speech_detected is True
+            mock_enabled.assert_called_once_with(logging.DEBUG)
+            assert mock_debug.call_count == 2
 
 
 class TestInputDevices:
