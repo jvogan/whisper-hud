@@ -31,6 +31,12 @@ def _load_floating_widget_module(monkeypatch):
     appkit.NSZeroRect = SimpleNamespace()
     appkit.NSMenu = MagicMock()
     appkit.NSMenuItem = MagicMock()
+    appkit.NSAccessibilityButtonRole = "AXButton"
+    appkit.NSAccessibilityImageRole = "AXImage"
+    appkit.NSAccessibilityCreatedNotification = "AXCreated"
+    appkit.NSAccessibilityFocusedUIElementChangedNotification = "AXFocusedUIElementChanged"
+    appkit.NSAccessibilityValueChangedNotification = "AXValueChanged"
+    appkit.NSAccessibilityPostNotification = MagicMock()
 
     pyobjc_tools = ModuleType("PyObjCTools")
     pyobjc_tools.AppHelper = SimpleNamespace(callAfter=lambda fn: fn())
@@ -161,3 +167,58 @@ def test_widget_reset_position_moves_to_primary_monitor_default(monkeypatch):
     assert widget._position == expected_position
     widget._window.setFrameOrigin_.assert_called_once_with(expected_position)
     on_position_changed.assert_called_once_with(*expected_position)
+
+
+def test_widget_accessibility_label_tracks_state_changes(monkeypatch):
+    floating_widget = _load_floating_widget_module(monkeypatch)
+    widget = floating_widget.FloatingWidget(lambda: None, lambda: None)
+    widget._view = MagicMock()
+    widget._window = MagicMock()
+
+    widget.set_recording()
+    assert widget._accessibility_label == "WhisperHUD - Recording"
+    widget._view.setAccessibilityLabelText_.assert_called_with("WhisperHUD - Recording")
+
+    widget.set_processing()
+    assert widget._accessibility_label == "WhisperHUD - Processing"
+    widget._view.setAccessibilityLabelText_.assert_called_with("WhisperHUD - Processing")
+
+    widget.set_idle()
+    assert widget._accessibility_label == "WhisperHUD - Idle"
+    widget._view.setAccessibilityLabelText_.assert_called_with("WhisperHUD - Idle")
+
+
+def test_widget_posts_accessibility_notifications_on_state_change(monkeypatch):
+    floating_widget = _load_floating_widget_module(monkeypatch)
+    widget = floating_widget.FloatingWidget(lambda: None, lambda: None)
+    widget._view = MagicMock()
+    widget._window = MagicMock()
+
+    floating_widget.NSAccessibilityPostNotification.reset_mock()
+
+    widget.set_recording()
+
+    assert floating_widget.NSAccessibilityPostNotification.call_count == 2
+    floating_widget.NSAccessibilityPostNotification.assert_any_call(
+        widget._view,
+        floating_widget.NSAccessibilityValueChangedNotification,
+    )
+    floating_widget.NSAccessibilityPostNotification.assert_any_call(
+        widget._view,
+        floating_widget.NSAccessibilityFocusedUIElementChangedNotification,
+    )
+
+
+def test_widget_view_exposes_button_accessibility(monkeypatch):
+    floating_widget = _load_floating_widget_module(monkeypatch)
+    clicked = MagicMock()
+    view = object.__new__(floating_widget.WidgetView)
+    view._on_click = clicked
+    view._accessibility_role = floating_widget.NSAccessibilityButtonRole
+    view._accessibility_label = "WhisperHUD - Idle"
+
+    assert view.isAccessibilityElement() is True
+    assert view.accessibilityRole() == floating_widget.NSAccessibilityButtonRole
+    assert view.accessibilityLabel() == "WhisperHUD - Idle"
+    assert view.accessibilityPerformPress() is True
+    clicked.assert_called_once_with()

@@ -14,20 +14,43 @@ from enum import Enum
 from typing import Callable, Optional
 
 try:
-    from AppKit import (
-        NSWindow, NSView, NSColor, NSBezierPath,
-        NSWindowStyleMaskBorderless, NSBackingStoreBuffered,
-        NSFloatingWindowLevel, NSScreen,
-        NSMakeRect, NSTrackingArea,
-        NSWindowCollectionBehaviorCanJoinAllSpaces,
-        NSWindowCollectionBehaviorStationary,
-        NSTrackingMouseEnteredAndExited, NSTrackingActiveAlways,
-        NSTrackingInVisibleRect,
-        NSCursor, NSCompositingOperationSourceOver,
-        NSZeroRect, NSMenu, NSMenuItem
-    )
+    import AppKit
     from PyObjCTools import AppHelper
     from objc import super as objc_super
+    NSWindow = AppKit.NSWindow
+    NSView = AppKit.NSView
+    NSColor = AppKit.NSColor
+    NSBezierPath = AppKit.NSBezierPath
+    NSWindowStyleMaskBorderless = AppKit.NSWindowStyleMaskBorderless
+    NSBackingStoreBuffered = AppKit.NSBackingStoreBuffered
+    NSFloatingWindowLevel = AppKit.NSFloatingWindowLevel
+    NSScreen = AppKit.NSScreen
+    NSMakeRect = AppKit.NSMakeRect
+    NSTrackingArea = AppKit.NSTrackingArea
+    NSWindowCollectionBehaviorCanJoinAllSpaces = AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
+    NSWindowCollectionBehaviorStationary = AppKit.NSWindowCollectionBehaviorStationary
+    NSTrackingMouseEnteredAndExited = AppKit.NSTrackingMouseEnteredAndExited
+    NSTrackingActiveAlways = AppKit.NSTrackingActiveAlways
+    NSTrackingInVisibleRect = AppKit.NSTrackingInVisibleRect
+    NSCursor = AppKit.NSCursor
+    NSCompositingOperationSourceOver = AppKit.NSCompositingOperationSourceOver
+    NSZeroRect = AppKit.NSZeroRect
+    NSMenu = AppKit.NSMenu
+    NSMenuItem = AppKit.NSMenuItem
+    NSAccessibilityButtonRole = getattr(AppKit, "NSAccessibilityButtonRole", "AXButton")
+    NSAccessibilityImageRole = getattr(AppKit, "NSAccessibilityImageRole", "AXImage")
+    NSAccessibilityCreatedNotification = getattr(AppKit, "NSAccessibilityCreatedNotification", "AXCreated")
+    NSAccessibilityFocusedUIElementChangedNotification = getattr(
+        AppKit,
+        "NSAccessibilityFocusedUIElementChangedNotification",
+        "AXFocusedUIElementChanged",
+    )
+    NSAccessibilityValueChangedNotification = getattr(
+        AppKit,
+        "NSAccessibilityValueChangedNotification",
+        "AXValueChanged",
+    )
+    NSAccessibilityPostNotification = getattr(AppKit, "NSAccessibilityPostNotification", None)
     HAS_APPKIT = True
 except ImportError:
     HAS_APPKIT = False
@@ -78,6 +101,9 @@ if HAS_APPKIT:
         def canBecomeMainWindow(self):
             return False
 
+        def canBecomeVisibleWithoutLogin(self):
+            return True
+
     class WidgetView(NSView):
         """Custom view for the floating widget with drag support."""
 
@@ -94,6 +120,8 @@ if HAS_APPKIT:
             self._initial_location = None
             self._mouse_down_time = None
             self._did_drag = False
+            self._accessibility_role = NSAccessibilityButtonRole
+            self._accessibility_label = "WhisperHUD - Idle"
 
             # Appearance configuration
             self._appearance_config = None
@@ -169,6 +197,27 @@ if HAS_APPKIT:
                 None
             )
             self.addTrackingArea_(tracking_area)
+
+        def isAccessibilityElement(self):
+            return True
+
+        def accessibilityRole(self):
+            return self._accessibility_role or NSAccessibilityImageRole
+
+        def accessibilityLabel(self):
+            return self._accessibility_label
+
+        def accessibilityPerformPress(self):
+            if self._on_click:
+                self._on_click()
+                return True
+            return False
+
+        def setAccessibilityLabelText_(self, label):
+            self._accessibility_label = label
+            setter = getattr(self, "setAccessibilityLabel_", None)
+            if setter:
+                setter(label)
 
         def drawRect_(self, rect):
             # Get dimensions (default to medium if not set)
@@ -483,6 +532,7 @@ class FloatingWidget:
         self._tooltip_provider = "Unknown"
         self._tooltip_hotkey = ""
         self._tooltip_mode = "push_to_talk"
+        self._accessibility_label = self._build_accessibility_label(self._state)
 
     def _get_dimensions(self):
         """Get current size dimensions."""
@@ -560,6 +610,7 @@ class FloatingWidget:
 
         self._window.setContentView_(self._view)
         self._update_tooltip()
+        self._apply_accessibility_metadata()
         self._update_animation_phase()
 
     def _handle_click(self):
@@ -588,9 +639,50 @@ class FloatingWidget:
             def _update():
                 if self._view:
                     self._view.setState_(self._state)
+                    self._apply_accessibility_metadata()
                     # Update custom icon for new state
                     self._update_custom_icon()
             AppHelper.callAfter(_update)
+
+    def _build_accessibility_label(self, state: WidgetState) -> str:
+        state_labels = {
+            WidgetState.IDLE: "Idle",
+            WidgetState.RECORDING: "Recording",
+            WidgetState.PROCESSING: "Processing",
+        }
+        return f"WhisperHUD - {state_labels.get(state, 'Idle')}"
+
+    def _apply_accessibility_metadata(self):
+        if not HAS_APPKIT:
+            return
+
+        label = self._build_accessibility_label(self._state)
+        self._accessibility_label = label
+
+        if self._view:
+            self._view.setAccessibilityLabelText_(label)
+            role_setter = getattr(self._view, "setAccessibilityRole_", None)
+            if role_setter:
+                role_setter(NSAccessibilityButtonRole)
+
+        if self._window:
+            window_role_setter = getattr(self._window, "setAccessibilityRole_", None)
+            if window_role_setter:
+                window_role_setter(NSAccessibilityButtonRole)
+            window_label_setter = getattr(self._window, "setAccessibilityLabel_", None)
+            if window_label_setter:
+                window_label_setter(label)
+
+    def _post_accessibility_notification(self):
+        if not HAS_APPKIT or NSAccessibilityPostNotification is None:
+            return
+
+        element = self._view or self._window
+        if not element:
+            return
+
+        NSAccessibilityPostNotification(element, NSAccessibilityValueChangedNotification)
+        NSAccessibilityPostNotification(element, NSAccessibilityFocusedUIElementChangedNotification)
 
     def _update_animation_phase(self):
         """Push the current animation phase to the view."""
@@ -675,9 +767,13 @@ class FloatingWidget:
     def set_state(self, state: WidgetState):
         """Set widget state."""
         with self._lock:
+            if state == self._state:
+                return
             self._state = state
+            self._accessibility_label = self._build_accessibility_label(state)
             self._restart_animation_for_state_locked()
             self._update_view()
+        self._post_accessibility_notification()
 
     def set_idle(self):
         """Set to idle state."""
@@ -703,6 +799,8 @@ class FloatingWidget:
             self._ensure_window()
             if self._window:
                 self._window.orderFront_(None)
+                if NSAccessibilityPostNotification is not None:
+                    NSAccessibilityPostNotification(self._view or self._window, NSAccessibilityCreatedNotification)
 
         AppHelper.callAfter(_show)
         with self._lock:
