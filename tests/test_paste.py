@@ -68,3 +68,17 @@ class TestPaste:
 
         result = insert_text(None)
         assert result is False
+
+    @patch('subprocess.run')
+    def test_insert_text_direct_preserves_newlines(self, mock_run):
+        """Test direct insertion uses AppleScript newline expressions."""
+        from whisper_hud.paste import insert_text_direct
+
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = insert_text_direct("line 1\nline 2")
+
+        assert result is True
+        mock_run.assert_called_once()
+        script = mock_run.call_args.args[0][2]
+        assert 'keystroke "line 1" & (ASCII character 10) & "line 2"' in script

@@ -2677,7 +2677,11 @@ class WhisperHUDApp(rumps.App):
                         on_ready=lambda tid=turn.turn_id: self._on_live_session_ready(tid),
                         language=self._selected_live_language(),
                     )
-                    on_audio_chunk = lambda chunk, rate, tid=turn.turn_id: self._on_live_audio_chunk(tid, chunk, rate)
+
+                    def live_audio_chunk_handler(chunk, rate, tid=turn.turn_id):
+                        self._on_live_audio_chunk(tid, chunk, rate)
+
+                    on_audio_chunk = live_audio_chunk_handler
             except Exception as e:
                 logger.error(f"Failed to prepare live transcription session: {e}")
                 with self._lock:

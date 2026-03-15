@@ -23,6 +23,13 @@ def _escape_applescript_string(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _as_applescript_string_expression(value: str) -> str:
+    """Build an AppleScript expression that preserves embedded newlines."""
+    parts = value.split("\n")
+    quoted_parts = [f'"{_escape_applescript_string(part)}"' for part in parts]
+    return ' & (ASCII character 10) & '.join(quoted_parts)
+
+
 def insert_text(
     text: str,
     restore_clipboard: bool = True,
@@ -144,12 +151,11 @@ def insert_text_direct(text: str) -> bool:
         return insert_text(text, restore_clipboard=True)
 
     try:
-        # Escape special characters for AppleScript
-        escaped = text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+        applescript_text = _as_applescript_string_expression(text)
 
         applescript = f'''
         tell application "System Events"
-            keystroke "{escaped}"
+            keystroke {applescript_text}
         end tell
         '''
 
