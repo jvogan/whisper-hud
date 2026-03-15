@@ -27,7 +27,8 @@ try:
         NSMakeRect, NSButton, NSApplication,
         NSSecureTextField, NSProgressIndicator,
         NSProgressIndicatorSpinningStyle, NSPopUpButton,
-        NSLeftTextAlignment
+        NSLeftTextAlignment, NSAppearance, NSAppearanceNameAqua,
+        NSAppearanceNameDarkAqua
     )
     from PyObjCTools import AppHelper
     HAS_APPKIT = True
@@ -109,6 +110,7 @@ class SetupWizard:
         self._translation_model_choices = []
         self._translation_target_choices = []
         self._translation_source_choices = []
+        self._is_dark_mode = False
 
         # Prefill from current config when rerunning setup.
         try:
@@ -172,11 +174,8 @@ class SetupWizard:
         )
 
         self._window.setTitle_("WhisperHUD Setup")
-        self._window.setBackgroundColor_(
-            NSColor.colorWithCalibratedWhite_alpha_(0.12, 1.0)
-        )
-
         self._content_view = self._window.contentView()
+        self._refresh_appearance()
 
     def _clear_content(self):
         """Clear all subviews from content view."""
@@ -188,6 +187,8 @@ class SetupWizard:
         """Show a specific wizard step."""
         self._current_step = step
         self._clear_content()
+        self._refresh_appearance()
+        self._add_step_progress(step)
 
         if step == WizardStep.WELCOME:
             self._show_welcome()
@@ -238,7 +239,7 @@ class SetupWizard:
             "Local: Private, works offline. Apple mode needs no download.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 60),
             font_size=12,
-            color=NSColor.colorWithCalibratedRed_green_blue_alpha_(0.6, 0.8, 1.0, 1.0)
+            color=self._accent_text_color()
         )
         self._content_view.addSubview_(info)
 
@@ -307,7 +308,7 @@ class SetupWizard:
             "You can change this later in the app settings.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 24),
             font_size=12,
-            color=NSColor.colorWithCalibratedWhite_alpha_(0.6, 1.0)
+            color=self._secondary_text_color()
         )
         self._content_view.addSubview_(info)
 
@@ -388,7 +389,7 @@ class SetupWizard:
             "  OpenAI + OpenAI Realtime: platform.openai.com/api-keys",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 50),
             font_size=12,
-            color=NSColor.colorWithCalibratedRed_green_blue_alpha_(0.6, 0.8, 1.0, 1.0)
+            color=self._accent_text_color()
         )
         self._content_view.addSubview_(help_text)
 
@@ -406,7 +407,7 @@ class SetupWizard:
             security_text,
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 24),
             font_size=11,
-            color=NSColor.colorWithCalibratedWhite_alpha_(0.5, 1.0)
+            color=self._muted_text_color()
         )
         self._content_view.addSubview_(security)
 
@@ -498,7 +499,7 @@ class SetupWizard:
             "download their models when you first use them.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 40),
             font_size=11,
-            color=NSColor.colorWithCalibratedWhite_alpha_(0.5, 1.0)
+            color=self._muted_text_color()
         )
         self._content_view.addSubview_(note)
 
@@ -722,7 +723,7 @@ class SetupWizard:
             "\n".join(summary_lines),
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 48),
             font_size=11,
-            color=NSColor.colorWithCalibratedWhite_alpha_(0.75, 1.0),
+            color=self._secondary_text_color(),
             align=NSLeftTextAlignment,
         )
         self._content_view.addSubview_(summary_label)
@@ -756,6 +757,8 @@ class SetupWizard:
         self._add_navigation_buttons(
             back_title="Back",
             back_action=self._go_back_from_translation,
+            extra_title="Skip Translation",
+            extra_action=self._skip_translation_setup,
             next_title="Next",
             next_action=lambda: self._show_step(WizardStep.COMPLETE)
         )
@@ -845,7 +848,7 @@ class SetupWizard:
             "You can re-run this wizard from the menu anytime.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 112),
             font_size=13,
-            color=NSColor.colorWithCalibratedWhite_alpha_(0.8, 1.0),
+            color=self._secondary_text_color(),
             align=NSLeftTextAlignment
         )
         self._content_view.addSubview_(tips)
@@ -859,6 +862,114 @@ class SetupWizard:
         )
 
     # === UI Helper Methods ===
+
+    def _refresh_appearance(self):
+        """Apply colors from the current macOS appearance."""
+        self._is_dark_mode = self._detect_dark_mode()
+
+        if self._window:
+            try:
+                appearance_name = NSAppearanceNameDarkAqua if self._is_dark_mode else NSAppearanceNameAqua
+                self._window.setAppearance_(NSAppearance.appearanceNamed_(appearance_name))
+            except Exception:
+                pass
+            self._window.setBackgroundColor_(self._background_color())
+
+    def _detect_dark_mode(self) -> bool:
+        """Return whether the effective system appearance is dark."""
+        appearance = None
+
+        if self._window and hasattr(self._window, "effectiveAppearance"):
+            try:
+                appearance = self._window.effectiveAppearance()
+            except Exception:
+                appearance = None
+
+        if appearance is None:
+            try:
+                appearance = NSApplication.sharedApplication().effectiveAppearance()
+            except Exception:
+                appearance = None
+
+        if appearance is None:
+            return False
+
+        try:
+            match = appearance.bestMatchFromAppearancesWithNames_([
+                NSAppearanceNameAqua,
+                NSAppearanceNameDarkAqua,
+            ])
+            return match == NSAppearanceNameDarkAqua
+        except Exception:
+            return "dark" in str(appearance).lower()
+
+    def _background_color(self):
+        """Return the wizard background color for the current appearance."""
+        if self._is_dark_mode:
+            return NSColor.colorWithCalibratedWhite_alpha_(0.12, 1.0)
+        return NSColor.colorWithCalibratedWhite_alpha_(0.97, 1.0)
+
+    def _primary_text_color(self):
+        """Return the primary text color for the current appearance."""
+        if self._is_dark_mode:
+            return NSColor.whiteColor()
+        return NSColor.colorWithCalibratedWhite_alpha_(0.1, 1.0)
+
+    def _secondary_text_color(self):
+        """Return the secondary text color for the current appearance."""
+        if self._is_dark_mode:
+            return NSColor.colorWithCalibratedWhite_alpha_(0.75, 1.0)
+        return NSColor.colorWithCalibratedWhite_alpha_(0.35, 1.0)
+
+    def _muted_text_color(self):
+        """Return a muted text color for the current appearance."""
+        if self._is_dark_mode:
+            return NSColor.colorWithCalibratedWhite_alpha_(0.5, 1.0)
+        return NSColor.colorWithCalibratedWhite_alpha_(0.45, 1.0)
+
+    def _accent_text_color(self):
+        """Return the accent/info text color for the current appearance."""
+        if self._is_dark_mode:
+            return NSColor.colorWithCalibratedRed_green_blue_alpha_(0.6, 0.8, 1.0, 1.0)
+        return NSColor.colorWithCalibratedRed_green_blue_alpha_(0.16, 0.39, 0.78, 1.0)
+
+    def _get_step_sequence(self) -> list[WizardStep]:
+        """Return the visible step order for the current transcription mode."""
+        setup_step = WizardStep.CLOUD_SETUP if self._transcription_mode == "cloud" else WizardStep.LOCAL_SETUP
+        return [
+            WizardStep.WELCOME,
+            WizardStep.TRANSCRIPTION_MODE,
+            setup_step,
+            WizardStep.TRANSLATION,
+            WizardStep.COMPLETE,
+        ]
+
+    def _get_step_progress(self, step: WizardStep) -> tuple[int, int]:
+        """Return the 1-based step position and total visible steps."""
+        steps = self._get_step_sequence()
+        if step not in steps:
+            step = steps[0]
+        return steps.index(step) + 1, len(steps)
+
+    def _add_step_progress(self, step: WizardStep):
+        """Show the wizard progress header on every page."""
+        current, total = self._get_step_progress(step)
+        progress_label = self._create_label(
+            f"Step {current} of {total}",
+            NSMakeRect(self.PADDING, self.HEIGHT - 26, 140, 18),
+            font_size=11,
+            color=self._secondary_text_color(),
+        )
+        self._content_view.addSubview_(progress_label)
+
+        dot_text = " ".join("●" if index < current else "○" for index in range(total))
+        dot_label = self._create_label(
+            dot_text,
+            NSMakeRect(self.WIDTH - self.PADDING - 120, self.HEIGHT - 28, 120, 18),
+            font_size=11,
+            color=self._accent_text_color(),
+        )
+        self._content_view.addSubview_(dot_label)
 
     def _create_label(
         self,
@@ -882,7 +993,7 @@ class SetupWizard:
         else:
             label.setFont_(NSFont.systemFontOfSize_(font_size))
 
-        label.setTextColor_(color or NSColor.whiteColor())
+        label.setTextColor_(color or self._primary_text_color())
 
         if align is not None:
             label.setAlignment_(align)
@@ -975,6 +1086,8 @@ class SetupWizard:
         self,
         back_title: Optional[str] = None,
         back_action: Optional[Callable] = None,
+        extra_title: Optional[str] = None,
+        extra_action: Optional[Callable] = None,
         next_title: str = "Next",
         next_action: Optional[Callable] = None
     ):
@@ -997,6 +1110,14 @@ class SetupWizard:
                 action=back_action
             )
             self._content_view.addSubview_(back_btn)
+
+        if extra_title and extra_action:
+            extra_btn = self._create_button(
+                extra_title,
+                NSMakeRect(self.WIDTH - 2 * self.PADDING - 310, y, 120, 32),
+                action=extra_action,
+            )
+            self._content_view.addSubview_(extra_btn)
 
         # Next button
         if next_action:
@@ -1290,6 +1411,11 @@ class SetupWizard:
         """Continue from local setup to translation."""
         # Just continue - model download will happen when user first uses it
         self._show_step(WizardStep.TRANSLATION)
+
+    def _skip_translation_setup(self):
+        """Skip translation setup and continue to completion."""
+        self._translation_enabled = False
+        self._show_step(WizardStep.COMPLETE)
 
     def _go_back_from_translation(self):
         """Go back from translation to appropriate setup step."""
