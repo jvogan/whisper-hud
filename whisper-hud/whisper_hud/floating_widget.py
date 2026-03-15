@@ -24,7 +24,7 @@ try:
         NSTrackingMouseEnteredAndExited, NSTrackingActiveAlways,
         NSTrackingInVisibleRect,
         NSCursor, NSCompositingOperationSourceOver,
-        NSZeroRect
+        NSZeroRect, NSMenu, NSMenuItem
     )
     from PyObjCTools import AppHelper
     from objc import super as objc_super
@@ -64,6 +64,10 @@ class WidgetState(Enum):
     PROCESSING = "processing"
 
 
+DEFAULT_WIDGET_RIGHT_MARGIN = 20
+DEFAULT_WIDGET_BOTTOM_MARGIN = 100
+
+
 if HAS_APPKIT:
     class DraggableWindow(NSWindow):
         """A borderless window that can be dragged by clicking anywhere."""
@@ -77,13 +81,14 @@ if HAS_APPKIT:
     class WidgetView(NSView):
         """Custom view for the floating widget with drag support."""
 
-        def initWithFrame_onClick_onDragEnd_(self, frame, on_click, on_drag_end):
+        def initWithFrame_onClick_onDragEnd_onResetPosition_(self, frame, on_click, on_drag_end, on_reset_position):
             self = objc_super(WidgetView, self).initWithFrame_(frame)
             if self is None:
                 return None
 
             self._on_click = on_click
             self._on_drag_end = on_drag_end  # Callback when drag ends
+            self._on_reset_position = on_reset_position
             self._is_hovering = False
             self._state = WidgetState.IDLE
             self._initial_location = None
@@ -102,6 +107,21 @@ if HAS_APPKIT:
             self._setup_tracking()
 
             return self
+
+        def menuForEvent_(self, event):
+            menu = NSMenu.alloc().initWithTitle_("Floating Widget")
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                "Reset Position",
+                "resetPosition:",
+                "",
+            )
+            item.setTarget_(self)
+            menu.addItem_(item)
+            return menu
+
+        def resetPosition_(self, sender):
+            if self._on_reset_position:
+                self._on_reset_position()
 
         def setAppearance_(self, config):
             """Set the appearance configuration."""
@@ -468,6 +488,21 @@ class FloatingWidget:
         """Get current size dimensions."""
         return self.SIZES.get(self._size, self.SIZES["medium"])
 
+    def _get_default_position(self) -> Optional[tuple[float, float]]:
+        """Return the default position on the primary monitor."""
+        if not HAS_APPKIT:
+            return None
+
+        screen = NSScreen.mainScreen()
+        if not screen:
+            return None
+
+        screen_rect = screen.visibleFrame()
+        width, _height = self._get_dimensions()[0:2]
+        x = screen_rect.origin.x + screen_rect.size.width - width - DEFAULT_WIDGET_RIGHT_MARGIN
+        y = screen_rect.origin.y + DEFAULT_WIDGET_BOTTOM_MARGIN
+        return (x, y)
+
     def _ensure_window(self):
         """Create window if needed."""
         if not HAS_APPKIT or self._window is not None:
@@ -476,17 +511,14 @@ class FloatingWidget:
         dims = self._get_dimensions()
         width, height = dims[0], dims[1]
 
-        # Default position - bottom right of screen
-        screen = NSScreen.mainScreen()
-        if not screen:
+        default_position = self._get_default_position()
+        if not default_position:
             return
-        screen_rect = screen.visibleFrame()
 
         if self._position:
             x, y = self._position
         else:
-            x = screen_rect.origin.x + screen_rect.size.width - width - 20
-            y = screen_rect.origin.y + 100
+            x, y = default_position
 
         # Create borderless, draggable window
         self._window = DraggableWindow.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -509,10 +541,11 @@ class FloatingWidget:
         self._window.setMovableByWindowBackground_(True)
 
         # Create custom view with size info and drag end callback
-        self._view = WidgetView.alloc().initWithFrame_onClick_onDragEnd_(
+        self._view = WidgetView.alloc().initWithFrame_onClick_onDragEnd_onResetPosition_(
             NSMakeRect(0, 0, width, height),
             self._handle_click,
-            self._handle_drag_end
+            self._handle_drag_end,
+            self.reset_position,
         )
         self._view._dims = dims  # Pass dimensions to view
 
@@ -749,6 +782,25 @@ class FloatingWidget:
             except Exception:
                 pass
         return None
+
+    def reset_position(self):
+        """Reset the widget to its default position on the primary monitor."""
+        default_position = self._get_default_position()
+        if not default_position:
+            return
+
+        with self._lock:
+            self._position = default_position
+
+        def _reset():
+            if self._window:
+                self._window.setFrameOrigin_(default_position)
+
+        if HAS_APPKIT:
+            AppHelper.callAfter(_reset)
+
+        if self._on_position_changed:
+            self._on_position_changed(*default_position)
 
     def set_appearance(self, appearance_config: dict, image_processor=None):
         """

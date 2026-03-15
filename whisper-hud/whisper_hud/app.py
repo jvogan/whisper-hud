@@ -900,6 +900,10 @@ class WhisperHUDApp(rumps.App):
                 callback=lambda sender, s=size_id: self._set_widget_size(s)
             ))
         recording_menu.add(size_menu)
+        recording_menu.add(rumps.MenuItem(
+            "Reset Position",
+            callback=self._reset_widget_position
+        ))
 
         recording_menu.add(rumps.separator)
 
@@ -4525,6 +4529,14 @@ class WhisperHUDApp(rumps.App):
         """Save widget position to config when dragged."""
         self.config.widget_position = {"x": x, "y": y}
         self.config.save()
+
+    def _reset_widget_position(self, sender):
+        """Reset the floating widget to its primary-screen default position."""
+        self.config.widget_position = None
+        self.config.save()
+        if self.widget:
+            self.widget.reset_position()
+        self._schedule_menu_rebuild()
 
     # === Appearance Methods ===
 

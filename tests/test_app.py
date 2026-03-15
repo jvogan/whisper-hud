@@ -265,6 +265,10 @@ def test_build_menu_reflects_provider_availability(monkeypatch):
     assert "Hotkey" in settings_titles
     assert "Advanced & Support" in settings_titles
 
+    recording_menu = next(item for item in settings_menu.items if getattr(item, "title", None) == "Recording & Display")
+    recording_titles = _menu_titles(recording_menu)
+    assert "Reset Position" in recording_titles
+
 
 def test_hotkey_press_starts_recording():
     """Starting a hotkey turn should mark recording active and start the recorder."""

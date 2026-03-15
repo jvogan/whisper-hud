@@ -29,6 +29,8 @@ def _load_floating_widget_module(monkeypatch):
     appkit.NSCursor = MagicMock()
     appkit.NSCompositingOperationSourceOver = 0
     appkit.NSZeroRect = SimpleNamespace()
+    appkit.NSMenu = MagicMock()
+    appkit.NSMenuItem = MagicMock()
 
     pyobjc_tools = ModuleType("PyObjCTools")
     pyobjc_tools.AppHelper = SimpleNamespace(callAfter=lambda fn: fn())
@@ -125,3 +127,37 @@ def test_widget_hide_cancels_animation_timer(monkeypatch):
     assert widget._visible is False
     assert active_timer.cancelled is True
     widget._window.orderOut_.assert_called_once_with(None)
+
+
+def test_widget_reset_position_moves_to_primary_monitor_default(monkeypatch):
+    floating_widget = _load_floating_widget_module(monkeypatch)
+    screen_frame = SimpleNamespace(
+        origin=SimpleNamespace(x=50, y=25),
+        size=SimpleNamespace(width=1400, height=900),
+    )
+    floating_widget.NSScreen.mainScreen.return_value = SimpleNamespace(
+        visibleFrame=lambda: screen_frame
+    )
+
+    on_position_changed = MagicMock()
+    widget = floating_widget.FloatingWidget(
+        lambda: None,
+        lambda: None,
+        size="medium",
+        initial_position={"x": 100, "y": 200},
+        on_position_changed=on_position_changed,
+    )
+    widget._window = MagicMock()
+
+    widget.reset_position()
+
+    expected_position = (
+        screen_frame.origin.x
+        + screen_frame.size.width
+        - floating_widget.FloatingWidget.SIZES["medium"][0]
+        - floating_widget.DEFAULT_WIDGET_RIGHT_MARGIN,
+        screen_frame.origin.y + floating_widget.DEFAULT_WIDGET_BOTTOM_MARGIN,
+    )
+    assert widget._position == expected_position
+    widget._window.setFrameOrigin_.assert_called_once_with(expected_position)
+    on_position_changed.assert_called_once_with(*expected_position)
