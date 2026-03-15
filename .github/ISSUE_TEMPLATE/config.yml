@@ -1,8 +1,5 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
-  - name: Documentation
-    url: https://github.com/jvogan/whisper-hud#readme
-    about: Check the README for setup and usage information
   - name: Discussions
     url: https://github.com/jvogan/whisper-hud/discussions
-    about: Ask questions and discuss ideas with the community
+    about: Ask questions, share ideas, and discuss usage with the community

@@ -25,4 +25,17 @@ if [[ ! -f "$VENV_ACTIVATE" ]]; then
 fi
 
 source "$VENV_ACTIVATE"
+
+PYTHON_PATH="$(python -c 'import sys; print(sys.executable)')"
+APP_VERSION="$(python -c 'from whisper_hud import __version__; print(__version__)')"
+printf 'WhisperHUD v%s | Python: %s\n' "$APP_VERSION" "$PYTHON_PATH" >&2
+
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    MACOS_VERSION="$(sw_vers -productVersion 2>/dev/null || true)"
+    MACOS_MAJOR="${MACOS_VERSION%%.*}"
+    if [[ -n "$MACOS_MAJOR" ]] && [[ "$MACOS_MAJOR" =~ ^[0-9]+$ ]] && (( MACOS_MAJOR < 14 )); then
+        printf 'Apple Translation requires macOS 14+, this provider will be unavailable\n' >&2
+    fi
+fi
+
 exec python -m whisper_hud.main
