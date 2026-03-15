@@ -25,7 +25,7 @@ from .recorder import AudioRecorder
 from .transcribe import TranscriptionManager
 from .translate import TranslationManager
 from .providers.base import LiveTranscriptionSession, TranscriptionResult
-from .hotkey import HotkeyListener, HotkeyCapture, format_hotkey_display, string_to_key
+from .hotkey import HotkeyCapturePanel, HotkeyListener, format_hotkey_display, string_to_key
 from .hud import create_hud
 from .paste import insert_text, check_accessibility_permission, get_accessibility_error_message, open_accessibility_settings, escape_applescript_string
 from .paste_targets import PasteTargetManager, PasteTarget, TargetType
@@ -185,7 +185,7 @@ class WhisperHUDApp(rumps.App):
         self._recording_lock = threading.Lock()  # Dedicated lock for recording operations
         self._turn_counter = 0
         self._active_turn: Optional[ActiveTranscriptionTurn] = None
-        self._hotkey_capture: Optional[HotkeyCapture] = None
+        self._hotkey_capture_panel: Optional[HotkeyCapturePanel] = None
         self._is_capturing_hotkey = False
         self._setup_wizard = None
         self._level_monitor_thread: Optional[threading.Thread] = None
@@ -3813,32 +3813,19 @@ class WhisperHUDApp(rumps.App):
 
         # Pause the main hotkey listener during capture
         self.hotkey_listener.stop()
-
-        # Show notification to user
-        self._notify(
-            "WhisperHUD",
-            "Recording Hotkey",
-            "Press your desired key combination now..."
+        self._hotkey_capture_panel = HotkeyCapturePanel(
+            current_hotkey=self.config.hotkey,
+            on_confirm=self._on_hotkey_captured,
+            on_cancel=self._cancel_hotkey_capture,
         )
-
-        # Start capture
-        self._hotkey_capture = HotkeyCapture(
-            on_captured=self._on_hotkey_captured,
-            on_key_change=None  # We'll use notifications instead of live preview
-        )
-        self._hotkey_capture.start()
-
-        # Set a timeout to cancel capture after 10 seconds
-        def timeout():
-            if self._is_capturing_hotkey:
-                self._cancel_hotkey_capture()
-                self._notify(
-                    "WhisperHUD",
-                    "Hotkey Capture Cancelled",
-                    "No keys were pressed. Using previous hotkey."
-                )
-
-        threading.Timer(10.0, timeout).start()
+        if not self._hotkey_capture_panel.show():
+            self._hotkey_capture_panel = None
+            self._is_capturing_hotkey = False
+            self._restart_hotkey_listener()
+            rumps.alert(
+                title="Hotkey Configuration Unavailable",
+                message="The native hotkey capture panel could not be opened."
+            )
 
     def _on_hotkey_captured(self, key_set, key_names):
         """Called when hotkey capture is complete."""
@@ -3847,9 +3834,9 @@ class WhisperHUDApp(rumps.App):
 
         self._is_capturing_hotkey = False
 
-        if self._hotkey_capture:
-            self._hotkey_capture.stop()
-            self._hotkey_capture = None
+        if self._hotkey_capture_panel:
+            self._hotkey_capture_panel.close()
+            self._hotkey_capture_panel = None
 
         if key_names:
             # Save the new hotkey
@@ -3882,11 +3869,15 @@ class WhisperHUDApp(rumps.App):
 
     def _cancel_hotkey_capture(self):
         """Cancel hotkey capture and restore listener."""
+        if not self._is_capturing_hotkey and self._hotkey_capture_panel is None:
+            return
+
         self._is_capturing_hotkey = False
 
-        if self._hotkey_capture:
-            self._hotkey_capture.stop()
-            self._hotkey_capture = None
+        if self._hotkey_capture_panel:
+            panel = self._hotkey_capture_panel
+            self._hotkey_capture_panel = None
+            panel.close()
 
         self._restart_hotkey_listener()
 

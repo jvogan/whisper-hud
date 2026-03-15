@@ -10,13 +10,48 @@ Supports two modes:
 Also supports special keys like F-keys, media keys, and USB device keys (e.g., foot pedals).
 """
 
-from pynput import keyboard
-from typing import Callable, Optional, Set, List
 import threading
+import weakref
+from typing import Callable, Iterable, List, Optional, Set
+
+from pynput import keyboard
 
 from .logging_config import get_logger
 
 logger = get_logger("hotkey")
+
+try:
+    from AppKit import (
+        NSApp,
+        NSApplication,
+        NSBackingStoreBuffered,
+        NSBezelStyleRounded,
+        NSButton,
+        NSColor,
+        NSFont,
+        NSScreen,
+        NSTextAlignmentCenter,
+        NSTextField,
+        NSView,
+        NSWindow,
+        NSWindowStyleMaskTitled,
+        NSEvent,
+        NSEventTypeFlagsChanged,
+        NSEventTypeKeyDown,
+        NSEventMaskFlagsChanged,
+        NSEventMaskKeyDown,
+        NSEventModifierFlagCommand,
+        NSEventModifierFlagControl,
+        NSEventModifierFlagOption,
+        NSEventModifierFlagShift,
+        NSMakeRect,
+    )
+    from Foundation import NSObject
+    from objc import super as objc_super
+
+    HAS_APPKIT = True
+except ImportError:
+    HAS_APPKIT = False
 
 
 # Comprehensive key name mappings for display and serialization
@@ -56,6 +91,56 @@ KEY_DISPLAY_NAMES = {
     'media_volume_up': '🔊',
     'media_previous': '⏮',
     'media_next': '⏭',
+}
+
+MODIFIER_ORDER = ['cmd', 'ctrl', 'alt', 'shift']
+MODIFIER_KEYS = set(MODIFIER_ORDER)
+SYSTEM_SHORTCUT_WARNINGS = {
+    frozenset({'cmd', 'space'}): "Conflicts with Spotlight.",
+    frozenset({'cmd', 'tab'}): "Conflicts with macOS app switching.",
+    frozenset({'cmd', 'q'}): "Commonly quits the frontmost app.",
+    frozenset({'cmd', 'w'}): "Commonly closes the frontmost window.",
+    frozenset({'cmd', 'h'}): "Commonly hides the frontmost app.",
+    frozenset({'cmd', 'm'}): "Commonly minimizes the frontmost window.",
+    frozenset({'cmd', ','}): "Commonly opens app settings.",
+}
+KEYCODE_NAME_MAP = {
+    36: 'return',
+    48: 'tab',
+    49: 'space',
+    51: 'backspace',
+    53: 'escape',
+    71: 'clear',
+    76: 'enter',
+    115: 'home',
+    116: 'page_up',
+    117: 'delete',
+    119: 'end',
+    121: 'page_down',
+    123: 'left',
+    124: 'right',
+    125: 'down',
+    126: 'up',
+    122: 'f1',
+    120: 'f2',
+    99: 'f3',
+    118: 'f4',
+    96: 'f5',
+    97: 'f6',
+    98: 'f7',
+    100: 'f8',
+    101: 'f9',
+    109: 'f10',
+    103: 'f11',
+    111: 'f12',
+    105: 'f13',
+    107: 'f14',
+    113: 'f15',
+    106: 'f16',
+    64: 'f17',
+    79: 'f18',
+    80: 'f19',
+    90: 'f20',
 }
 
 
@@ -158,21 +243,328 @@ def string_to_key(name: str):
     return keyboard.KeyCode.from_char(name[0].lower()) if name else None
 
 
+def normalize_hotkey_names(key_names: Iterable[str]) -> List[str]:
+    """Normalize hotkey names for storage and display."""
+    normalized = []
+    seen = set()
+
+    for raw_name in key_names:
+        if not raw_name:
+            continue
+        name = raw_name.lower()
+        if name in ('cmd_l', 'cmd_r'):
+            name = 'cmd'
+        elif name in ('shift_l', 'shift_r'):
+            name = 'shift'
+        elif name in ('ctrl_l', 'ctrl_r'):
+            name = 'ctrl'
+        elif name in ('alt_l', 'alt_r', 'alt_gr'):
+            name = 'alt'
+        elif name == 'esc':
+            name = 'escape'
+        elif name == 'enter':
+            name = 'return'
+
+        if name not in seen:
+            normalized.append(name)
+            seen.add(name)
+
+    return sorted(
+        normalized,
+        key=lambda key: (MODIFIER_ORDER.index(key) if key in MODIFIER_ORDER else 100, key),
+    )
+
+
+def get_hotkey_conflict_warning(key_names: Iterable[str]) -> Optional[str]:
+    """Return a warning for common system shortcuts that are risky to override."""
+    normalized = frozenset(normalize_hotkey_names(key_names))
+    return SYSTEM_SHORTCUT_WARNINGS.get(normalized)
+
+
 def format_hotkey_display(key_names: List[str]) -> str:
     """Format a list of key names for display with symbols."""
     parts = []
-    # Sort modifiers first
-    modifier_order = ['cmd', 'ctrl', 'alt', 'shift']
-    sorted_keys = sorted(key_names, key=lambda k: (
-        modifier_order.index(k.lower()) if k.lower() in modifier_order else 100,
-        k.lower()
-    ))
+    sorted_keys = normalize_hotkey_names(key_names)
 
     for name in sorted_keys:
         display = KEY_DISPLAY_NAMES.get(name.lower(), name.upper())
         parts.append(display)
 
-    return ''.join(parts) if all(len(p) <= 2 for p in parts) else ' + '.join(parts)
+    return ''.join(parts)
+
+
+def modifier_flags_to_names(flags: int) -> List[str]:
+    """Convert NSEvent modifier flags into serialized key names."""
+    if not HAS_APPKIT:
+        return []
+
+    modifiers = []
+    if flags & NSEventModifierFlagCommand:
+        modifiers.append('cmd')
+    if flags & NSEventModifierFlagControl:
+        modifiers.append('ctrl')
+    if flags & NSEventModifierFlagOption:
+        modifiers.append('alt')
+    if flags & NSEventModifierFlagShift:
+        modifiers.append('shift')
+    return normalize_hotkey_names(modifiers)
+
+
+def event_to_key_name(event) -> Optional[str]:
+    """Convert an NSEvent keyDown event into a serialized key name."""
+    key_code = int(event.keyCode())
+    if key_code in KEYCODE_NAME_MAP:
+        return KEYCODE_NAME_MAP[key_code]
+
+    characters = event.charactersIgnoringModifiers()
+    if not characters:
+        return None
+
+    char = characters[0].lower()
+    if char == ' ':
+        return 'space'
+    if char.isprintable():
+        return char
+    return None
+
+
+def is_modifier_only_hotkey(key_names: Iterable[str]) -> bool:
+    """Return True when the hotkey contains only modifier keys."""
+    normalized = normalize_hotkey_names(key_names)
+    return bool(normalized) and all(name in MODIFIER_KEYS for name in normalized)
+
+
+if HAS_APPKIT:
+    class _HotkeyCaptureActionHandler(NSObject):
+        """Bridge Cocoa button actions back into the pure-python panel controller."""
+
+        def initWithPanel_(self, panel):
+            self = objc_super(_HotkeyCaptureActionHandler, self).init()
+            if self is None:
+                return None
+            self._panel_ref = weakref.ref(panel)
+            return self
+
+        def confirm_(self, _sender):
+            panel = self._panel_ref()
+            if panel:
+                panel.confirm_capture()
+
+        def cancel_(self, _sender):
+            panel = self._panel_ref()
+            if panel:
+                panel.cancel()
+
+
+class HotkeyCapturePanel:
+    """Native key-capture panel for configuring the app hotkey."""
+
+    def __init__(
+        self,
+        current_hotkey: Iterable[str],
+        on_confirm: Callable[[Set, List[str]], None],
+        on_cancel: Optional[Callable[[], None]] = None,
+    ):
+        self.current_hotkey = normalize_hotkey_names(current_hotkey)
+        self.on_confirm = on_confirm
+        self.on_cancel = on_cancel
+
+        self.captured_key_names = self.current_hotkey.copy()
+        self.conflict_warning = get_hotkey_conflict_warning(self.current_hotkey)
+
+        self._window = None
+        self._event_monitor = None
+        self._action_handler = None
+        self._current_value_label = None
+        self._preview_value_label = None
+        self._warning_label = None
+        self._save_button = None
+
+    def show(self) -> bool:
+        """Open the key-capture panel."""
+        if not HAS_APPKIT:
+            logger.warning("Hotkey capture panel requested without AppKit support")
+            return False
+
+        if self._window is None:
+            self._build_window()
+
+        self.present_candidate(self.current_hotkey)
+        self._event_monitor = NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
+            NSEventMaskKeyDown | NSEventMaskFlagsChanged,
+            self._handle_event,
+        )
+        self._window.center()
+        self._window.makeKeyAndOrderFront_(None)
+        app = NSApplication.sharedApplication() if NSApplication else NSApp()
+        if app:
+            app.activateIgnoringOtherApps_(True)
+        return True
+
+    def close(self):
+        """Dismiss the panel and remove any active event monitor."""
+        if HAS_APPKIT and self._event_monitor is not None:
+            NSEvent.removeMonitor_(self._event_monitor)
+            self._event_monitor = None
+
+        if self._window is not None:
+            self._window.orderOut_(None)
+            self._window.close()
+            self._window = None
+
+        self._current_value_label = None
+        self._preview_value_label = None
+        self._warning_label = None
+        self._save_button = None
+        self._action_handler = None
+
+    def cancel(self):
+        """Cancel without changing the configured hotkey."""
+        self.close()
+        if self.on_cancel:
+            self.on_cancel()
+
+    def present_candidate(self, key_names: Iterable[str]):
+        """Update the preview with a candidate key combination."""
+        self.captured_key_names = normalize_hotkey_names(key_names)
+        self.conflict_warning = get_hotkey_conflict_warning(self.captured_key_names)
+        self._refresh_ui_state()
+
+    def confirm_capture(self):
+        """Confirm the currently displayed hotkey candidate."""
+        if not self.captured_key_names:
+            return
+
+        if is_modifier_only_hotkey(self.captured_key_names):
+            self.conflict_warning = "Choose a hotkey that includes a non-modifier key."
+            self._refresh_ui_state()
+            return
+
+        final_keys = set()
+        for name in self.captured_key_names:
+            key = string_to_key(name)
+            if key:
+                final_keys.add(key)
+
+        self.close()
+        self.on_confirm(final_keys, self.captured_key_names.copy())
+
+    def _handle_event(self, event):
+        """Consume key events while the capture panel is focused."""
+        event_type = int(event.type())
+        if event_type == int(NSEventTypeFlagsChanged):
+            self.present_candidate(modifier_flags_to_names(int(event.modifierFlags())))
+            return None
+        if event_type != int(NSEventTypeKeyDown):
+            return event
+
+        key_code = int(event.keyCode())
+        if key_code == 53:
+            self.cancel()
+            return None
+
+        modifiers = modifier_flags_to_names(int(event.modifierFlags()))
+        key_name = event_to_key_name(event)
+        if key_name == 'escape':
+            self.cancel()
+            return None
+
+        candidate = modifiers + ([key_name] if key_name else [])
+        if candidate:
+            self.present_candidate(candidate)
+        return None
+
+    def _refresh_ui_state(self):
+        """Sync current capture state into the panel labels."""
+        current_display = format_hotkey_display(self.current_hotkey) or "Not set"
+        preview_display = format_hotkey_display(self.captured_key_names) or "Press your desired hotkey combination"
+        warning_text = self.conflict_warning or ""
+        can_save = bool(self.captured_key_names) and not is_modifier_only_hotkey(self.captured_key_names)
+
+        if self._current_value_label is not None:
+            self._current_value_label.setStringValue_(current_display)
+        if self._preview_value_label is not None:
+            self._preview_value_label.setStringValue_(preview_display)
+        if self._warning_label is not None:
+            self._warning_label.setStringValue_(warning_text)
+            if HAS_APPKIT:
+                color = NSColor.systemRedColor() if warning_text else NSColor.secondaryLabelColor()
+                self._warning_label.setTextColor_(color)
+        if self._save_button is not None:
+            self._save_button.setEnabled_(can_save)
+
+    def _build_window(self):
+        """Create the native capture panel."""
+        screen = NSScreen.mainScreen()
+        frame = screen.frame() if screen else None
+        width = 440
+        height = 220
+        x_pos = 200 if frame is None else int((frame.size.width - width) / 2)
+        y_pos = 300 if frame is None else int((frame.size.height - height) / 2)
+
+        self._window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            NSMakeRect(x_pos, y_pos, width, height),
+            NSWindowStyleMaskTitled,
+            NSBackingStoreBuffered,
+            False,
+        )
+        self._window.setTitle_("Configure Hotkey")
+        self._window.setReleasedWhenClosed_(False)
+
+        content = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
+        self._window.setContentView_(content)
+
+        title = self._make_label(NSMakeRect(20, 170, width - 40, 24), 15, True)
+        title.setStringValue_("Press your desired hotkey combination")
+        content.addSubview_(title)
+
+        current_label = self._make_label(NSMakeRect(20, 138, width - 40, 18), 11, False)
+        current_label.setStringValue_("Current hotkey")
+        current_label.setTextColor_(NSColor.secondaryLabelColor())
+        content.addSubview_(current_label)
+
+        self._current_value_label = self._make_label(NSMakeRect(20, 114, width - 40, 22), 13, True)
+        content.addSubview_(self._current_value_label)
+
+        preview_label = self._make_label(NSMakeRect(20, 84, width - 40, 18), 11, False)
+        preview_label.setStringValue_("Captured combination")
+        preview_label.setTextColor_(NSColor.secondaryLabelColor())
+        content.addSubview_(preview_label)
+
+        self._preview_value_label = self._make_label(NSMakeRect(20, 56, width - 40, 22), 16, True)
+        content.addSubview_(self._preview_value_label)
+
+        self._warning_label = self._make_label(NSMakeRect(20, 32, width - 40, 16), 11, False)
+        self._warning_label.setTextColor_(NSColor.secondaryLabelColor())
+        content.addSubview_(self._warning_label)
+
+        self._action_handler = _HotkeyCaptureActionHandler.alloc().initWithPanel_(self)
+
+        self._save_button = NSButton.alloc().initWithFrame_(NSMakeRect(width - 110, 8, 90, 28))
+        self._save_button.setTitle_("Save")
+        self._save_button.setBezelStyle_(NSBezelStyleRounded)
+        self._save_button.setTarget_(self._action_handler)
+        self._save_button.setAction_("confirm:")
+        content.addSubview_(self._save_button)
+
+        cancel_button = NSButton.alloc().initWithFrame_(NSMakeRect(width - 210, 8, 90, 28))
+        cancel_button.setTitle_("Cancel")
+        cancel_button.setBezelStyle_(NSBezelStyleRounded)
+        cancel_button.setTarget_(self._action_handler)
+        cancel_button.setAction_("cancel:")
+        content.addSubview_(cancel_button)
+
+    @staticmethod
+    def _make_label(frame, font_size: int, bold: bool):
+        label = NSTextField.alloc().initWithFrame_(frame)
+        label.setBezeled_(False)
+        label.setDrawsBackground_(False)
+        label.setEditable_(False)
+        label.setSelectable_(False)
+        label.setAlignment_(NSTextAlignmentCenter)
+        font = NSFont.boldSystemFontOfSize_(font_size) if bold else NSFont.systemFontOfSize_(font_size)
+        label.setFont_(font)
+        return label
 
 
 class HotkeyListener:

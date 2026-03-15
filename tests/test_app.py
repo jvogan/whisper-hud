@@ -57,6 +57,20 @@ class ImmediateThread:
         self._target()
 
 
+class FakeCapturePanel:
+    """Minimal hotkey capture panel test double."""
+
+    instances = []
+
+    def __init__(self, current_hotkey, on_confirm, on_cancel=None):
+        self.current_hotkey = current_hotkey
+        self.on_confirm = on_confirm
+        self.on_cancel = on_cancel
+        self.show = MagicMock(return_value=True)
+        self.close = MagicMock()
+        FakeCapturePanel.instances.append(self)
+
+
 def _build_recording_app():
     """Construct a partial app instance for recording-flow tests."""
     app = WhisperHUDApp.__new__(WhisperHUDApp)
@@ -65,6 +79,8 @@ def _build_recording_app():
     app._is_recording = False
     app._turn_counter = 0
     app._active_turn = None
+    app._is_capturing_hotkey = False
+    app._hotkey_capture_panel = None
     app.ICON_RECORDING = "recording"
     app.ICON_ERROR = "error"
     app.ICON_SUCCESS = "success"
@@ -457,4 +473,64 @@ def test_select_provider_updates_config_and_rebuilds_menu():
 
     assert app.config.default_provider == "gemini"
     app.config.save.assert_called_once_with()
+    app._schedule_menu_rebuild.assert_called_once_with()
+
+
+def test_hotkey_config_opens_capture_panel_with_existing_hotkey(monkeypatch):
+    app = _build_recording_app()
+    app.hotkey_listener = MagicMock()
+    monkeypatch.setattr("whisper_hud.app.HotkeyCapturePanel", FakeCapturePanel)
+    FakeCapturePanel.instances.clear()
+
+    app._change_hotkey(None)
+
+    assert app._is_capturing_hotkey is True
+    app.hotkey_listener.stop.assert_called_once_with()
+    assert len(FakeCapturePanel.instances) == 1
+    assert FakeCapturePanel.instances[0].current_hotkey == ["cmd", "shift", "space"]
+    FakeCapturePanel.instances[0].show.assert_called_once_with()
+
+
+def test_hotkey_config_cancel_restores_listener():
+    app = _build_recording_app()
+    app._is_capturing_hotkey = True
+    app._restart_hotkey_listener = MagicMock()
+    panel = FakeCapturePanel(["cmd", "shift", "space"], MagicMock(), MagicMock())
+    app._hotkey_capture_panel = panel
+
+    app._cancel_hotkey_capture()
+
+    assert app._is_capturing_hotkey is False
+    assert app._hotkey_capture_panel is None
+    panel.close.assert_called_once_with()
+    app._restart_hotkey_listener.assert_called_once_with()
+
+
+def test_hotkey_config_capture_saves_and_restarts_listener(monkeypatch):
+    class FakeHotkeyListener:
+        def __init__(self, on_start, on_stop, hotkey, mode):
+            self.on_start = on_start
+            self.on_stop = on_stop
+            self.hotkey = hotkey
+            self.mode = mode
+            self.start = MagicMock()
+
+    app = _build_recording_app()
+    app.hotkey_listener = MagicMock()
+    app._is_capturing_hotkey = True
+    app._hotkey_capture_panel = FakeCapturePanel(["cmd", "shift", "space"], MagicMock(), MagicMock())
+    app._refresh_widget_tooltip = MagicMock()
+    app._schedule_menu_rebuild = MagicMock()
+    app._build_hotkey_set = MagicMock(return_value={"new-hotkey"})
+    monkeypatch.setattr("whisper_hud.app.HotkeyListener", FakeHotkeyListener)
+
+    app._on_hotkey_captured({"new-hotkey"}, ["cmd", "alt", "r"])
+
+    assert app.config.hotkey == ["cmd", "alt", "r"]
+    app.config.save.assert_called_once_with()
+    assert isinstance(app.hotkey_listener, FakeHotkeyListener)
+    assert app.hotkey_listener.hotkey == {"new-hotkey"}
+    app.hotkey_listener.start.assert_called_once_with()
+    app._notify.assert_called_once_with("WhisperHUD", "Hotkey Changed", "New hotkey: ⌘⌥R")
+    app._refresh_widget_tooltip.assert_called_once_with()
     app._schedule_menu_rebuild.assert_called_once_with()
