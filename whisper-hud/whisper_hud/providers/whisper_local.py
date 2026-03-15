@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Optional, Callable
 from .base import TranscriptionProvider, TranscriptionResult
 
-
 # Model cache directory
 CACHE_DIR = Path.home() / ".cache" / "whisper-hud" / "models"
 
@@ -204,6 +203,7 @@ class WhisperLocalProvider(TranscriptionProvider):
         # Check if the model directory exists with expected files
         try:
             from huggingface_hub import try_to_load_from_cache
+
             model_name = f"Systran/faster-whisper-{self.model}"
             # Check if model is in cache
             cached = try_to_load_from_cache(model_name, "model.bin")
@@ -234,10 +234,7 @@ class WhisperLocalProvider(TranscriptionProvider):
                 )
 
             except ImportError:
-                raise RuntimeError(
-                    "faster-whisper not installed. "
-                    "Install with: pip install faster-whisper"
-                )
+                raise RuntimeError("faster-whisper not installed. " "Install with: pip install faster-whisper")
             except Exception as e:
                 raise RuntimeError(f"Failed to load Whisper model: {e}")
 
@@ -261,9 +258,8 @@ class WhisperLocalProvider(TranscriptionProvider):
             # Write audio to temp file (faster-whisper needs a file path)
             # Prefix enables orphan cleanup if app crashes
             import tempfile
-            with tempfile.NamedTemporaryFile(
-                prefix="whisper_hud_", suffix=".wav", delete=False
-            ) as f:
+
+            with tempfile.NamedTemporaryFile(prefix="whisper_hud_", suffix=".wav", delete=False) as f:
                 f.write(audio_bytes)
                 temp_path = f.name
             try:
@@ -290,6 +286,7 @@ class WhisperLocalProvider(TranscriptionProvider):
             finally:
                 # Securely delete temp file (overwrite before unlink)
                 from ..encryption import secure_delete
+
                 secure_delete(temp_path)
 
             duration = time.time() - start_time
@@ -300,7 +297,7 @@ class WhisperLocalProvider(TranscriptionProvider):
                 cost_estimate=0.0,  # Free - local processing
                 provider=self.name,
                 model=self.model,
-                language=info.language if hasattr(info, 'language') else None
+                language=info.language if hasattr(info, "language") else None,
             )
 
         except Exception as e:
@@ -321,23 +318,26 @@ class WhisperLocalProvider(TranscriptionProvider):
         models = []
         for model_id, config in self.MODELS.items():
             downloaded = self._is_specific_model_downloaded(model_id)
-            models.append({
-                "id": model_id,
-                "name": config["name"],
-                "description": config["description"],
-                "cost_per_minute": 0.0,
-                "size_mb": config["size_mb"],
-                "vram_gb": config["vram_gb"],
-                "downloaded": downloaded,
-                "category": config.get("category", "balanced"),
-                "recommended": config.get("recommended", False),
-            })
+            models.append(
+                {
+                    "id": model_id,
+                    "name": config["name"],
+                    "description": config["description"],
+                    "cost_per_minute": 0.0,
+                    "size_mb": config["size_mb"],
+                    "vram_gb": config["vram_gb"],
+                    "downloaded": downloaded,
+                    "category": config.get("category", "balanced"),
+                    "recommended": config.get("recommended", False),
+                }
+            )
         return models
 
     def _is_specific_model_downloaded(self, model_id: str) -> bool:
         """Check if a specific model is downloaded."""
         try:
             from huggingface_hub import try_to_load_from_cache
+
             model_name = f"Systran/faster-whisper-{model_id}"
             cached = try_to_load_from_cache(model_name, "model.bin")
             return cached is not None
@@ -355,10 +355,7 @@ class WhisperLocalProvider(TranscriptionProvider):
         """Get the current model ID."""
         return self.model
 
-    def download_model(
-        self,
-        progress_callback: Optional[Callable[[str, float], None]] = None
-    ) -> bool:
+    def download_model(self, progress_callback: Optional[Callable[[str, float], None]] = None) -> bool:
         """
         Download the current model.
 
@@ -375,14 +372,11 @@ class WhisperLocalProvider(TranscriptionProvider):
             model_config = self.MODELS[self.model]
 
             if progress_callback:
-                progress_callback(
-                    f"Downloading {model_config['name']} ({model_config['size_mb']}MB)...",
-                    0.0
-                )
+                progress_callback(f"Downloading {model_config['name']} ({model_config['size_mb']}MB)...", 0.0)
 
             # Download with progress tracking
             def progress_hook(progress):
-                if progress_callback and hasattr(progress, 'total'):
+                if progress_callback and hasattr(progress, "total"):
                     pct = (progress.completed / progress.total) * 100 if progress.total > 0 else 0
                     progress_callback(f"Downloading... {pct:.0f}%", pct)
 
@@ -414,11 +408,7 @@ class WhisperLocalProvider(TranscriptionProvider):
         """faster-whisper supports streaming via segments."""
         return True
 
-    def transcribe_streaming(
-        self,
-        audio_bytes: bytes,
-        on_chunk: Callable[[str], None]
-    ) -> TranscriptionResult:
+    def transcribe_streaming(self, audio_bytes: bytes, on_chunk: Callable[[str], None]) -> TranscriptionResult:
         """
         Transcribe audio with streaming output.
 
@@ -437,9 +427,8 @@ class WhisperLocalProvider(TranscriptionProvider):
             # Write audio to temp file
             # Prefix enables orphan cleanup if app crashes
             import tempfile
-            with tempfile.NamedTemporaryFile(
-                prefix="whisper_hud_", suffix=".wav", delete=False
-            ) as f:
+
+            with tempfile.NamedTemporaryFile(prefix="whisper_hud_", suffix=".wav", delete=False) as f:
                 f.write(audio_bytes)
                 temp_path = f.name
             try:
@@ -465,6 +454,7 @@ class WhisperLocalProvider(TranscriptionProvider):
             finally:
                 # Securely delete temp file
                 from ..encryption import secure_delete
+
                 secure_delete(temp_path)
 
             duration = time.time() - start_time
@@ -475,7 +465,7 @@ class WhisperLocalProvider(TranscriptionProvider):
                 cost_estimate=0.0,
                 provider=self.name,
                 model=self.model,
-                language=info.language if hasattr(info, 'language') else None
+                language=info.language if hasattr(info, "language") else None,
             )
 
         except Exception as e:

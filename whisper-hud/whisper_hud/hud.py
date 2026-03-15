@@ -21,12 +21,19 @@ logger = get_logger("hud")
 
 try:
     from AppKit import (
-        NSWindow, NSView, NSColor, NSFont,
-        NSWindowStyleMaskBorderless, NSBackingStoreBuffered,
-        NSFloatingWindowLevel, NSScreen, NSTextField, NSWorkspace,
+        NSWindow,
+        NSView,
+        NSColor,
+        NSFont,
+        NSWindowStyleMaskBorderless,
+        NSBackingStoreBuffered,
+        NSFloatingWindowLevel,
+        NSScreen,
+        NSTextField,
+        NSWorkspace,
         NSMakeRect,
         NSWindowCollectionBehaviorCanJoinAllSpaces,
-        NSWindowCollectionBehaviorStationary
+        NSWindowCollectionBehaviorStationary,
     )
     from Quartz import (
         CGWindowListCopyWindowInfo,
@@ -35,6 +42,7 @@ try:
     )
     from PyObjCTools import AppHelper
     from objc import super as objc_super
+
     HAS_APPKIT = True
 except ImportError:
     HAS_APPKIT = False
@@ -44,6 +52,7 @@ except ImportError:
 
 class HUDState(Enum):
     """HUD display states."""
+
     HIDDEN = "hidden"
     RECORDING = "recording"
     PROCESSING = "processing"
@@ -52,6 +61,7 @@ class HUDState(Enum):
 
 
 if HAS_APPKIT:
+
     class HUDContentView(NSView):
         """Content view that lets the full HUD surface dismiss error state on click."""
 
@@ -73,7 +83,7 @@ def _hex_to_cgcolor(hex_color: str):
         return None
 
     try:
-        hex_color = hex_color.lstrip('#')
+        hex_color = hex_color.lstrip("#")
         if len(hex_color) == 6:
             r = int(hex_color[0:2], 16) / 255.0
             g = int(hex_color[2:4], 16) / 255.0
@@ -101,8 +111,8 @@ class HUD:
     DEFAULT_COLORS = {
         "recording": "#F85149",  # Red
         "processing": "#F0883E",  # Orange/Yellow
-        "success": "#3FB950",    # Green
-        "error": "#F85149"       # Red
+        "success": "#3FB950",  # Green
+        "error": "#F85149",  # Red
     }
     DEFAULT_WIDTH = 260
     DEFAULT_HEIGHT = 44
@@ -142,7 +152,7 @@ class HUD:
             HUDState.RECORDING: "recording",
             HUDState.PROCESSING: "processing",
             HUDState.SUCCESS: "success",
-            HUDState.ERROR: "error"
+            HUDState.ERROR: "error",
         }
 
         state_name = state_map.get(state)
@@ -170,7 +180,7 @@ class HUD:
             HUDState.RECORDING: NSColor.redColor(),
             HUDState.PROCESSING: NSColor.systemYellowColor(),
             HUDState.SUCCESS: NSColor.systemGreenColor(),
-            HUDState.ERROR: NSColor.systemRedColor()
+            HUDState.ERROR: NSColor.systemRedColor(),
         }
         return color_map.get(state, NSColor.redColor()).CGColor()
 
@@ -309,10 +319,7 @@ class HUD:
 
         # Create borderless window
         self._window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            frame,
-            NSWindowStyleMaskBorderless,
-            NSBackingStoreBuffered,
-            False
+            frame, NSWindowStyleMaskBorderless, NSBackingStoreBuffered, False
         )
 
         # Configure window
@@ -322,8 +329,7 @@ class HUD:
         self._window.setHasShadow_(True)
         self._window.setIgnoresMouseEvents_(True)
         self._window.setCollectionBehavior_(
-            NSWindowCollectionBehaviorCanJoinAllSpaces
-            | NSWindowCollectionBehaviorStationary
+            NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary
         )
 
         # Create rounded background view
@@ -407,6 +413,7 @@ class HUD:
             # Use square root for better perception of loudness changes
             # Higher multiplier makes quiet sounds more visible
             import math
+
             num_lit = int(min(5, math.sqrt(level) * 8)) if level > 0.02 else 0
 
             for i, bar in enumerate(self._level_bars):
@@ -422,9 +429,7 @@ class HUD:
                     bar_layer.setBackgroundColor_(color.CGColor())
                 else:
                     # Unlit bar - dim gray
-                    bar_layer.setBackgroundColor_(
-                        NSColor.colorWithCalibratedWhite_alpha_(0.3, 1.0).CGColor()
-                    )
+                    bar_layer.setBackgroundColor_(NSColor.colorWithCalibratedWhite_alpha_(0.3, 1.0).CGColor())
 
         try:
             AppHelper.callAfter(_update_bars)
@@ -502,9 +507,7 @@ class HUD:
                 bar.setHidden_(not show_level_bars)
                 if show_level_bars:
                     # Reset to dim state
-                    bar.layer().setBackgroundColor_(
-                        NSColor.colorWithCalibratedWhite_alpha_(0.3, 1.0).CGColor()
-                    )
+                    bar.layer().setBackgroundColor_(NSColor.colorWithCalibratedWhite_alpha_(0.3, 1.0).CGColor())
 
             self._window.orderFront_(None)
 

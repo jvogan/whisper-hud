@@ -76,8 +76,7 @@ def _unicode_character_id_segments(value: str) -> list[str]:
 
     utf16_bytes = value.encode("utf-16-be")
     code_units = [
-        int.from_bytes(utf16_bytes[index:index + 2], byteorder="big")
-        for index in range(0, len(utf16_bytes), 2)
+        int.from_bytes(utf16_bytes[index : index + 2], byteorder="big") for index in range(0, len(utf16_bytes), 2)
     ]
     return [f"(character id {code_unit})" for code_unit in code_units]
 
@@ -132,10 +131,7 @@ def _as_applescript_string_expression(value: str) -> str:
 
 
 def insert_text(
-    text: str,
-    restore_clipboard: bool = True,
-    target_app: Optional[str] = None,
-    return_focus: bool = True
+    text: str, restore_clipboard: bool = True, target_app: Optional[str] = None, return_focus: bool = True
 ) -> bool:
     """
     Insert text at current cursor position.
@@ -179,9 +175,7 @@ def insert_text(
         if target_app:
             safe_app = escape_applescript_string(target_app)
             activate_result = subprocess.run(
-                ['osascript', '-e', f'tell application "{safe_app}" to activate'],
-                capture_output=True,
-                timeout=5
+                ["osascript", "-e", f'tell application "{safe_app}" to activate'], capture_output=True, timeout=5
             )
             if activate_result.returncode != 0:
                 logger.warning(f"Failed to activate app: {target_app}")
@@ -190,17 +184,13 @@ def insert_text(
             time.sleep(0.15)
 
         # Simulate Cmd+V using AppleScript
-        applescript = '''
+        applescript = """
         tell application "System Events"
             keystroke "v" using command down
         end tell
-        '''
+        """
 
-        result = subprocess.run(
-            ['osascript', '-e', applescript],
-            capture_output=True,
-            timeout=5
-        )
+        result = subprocess.run(["osascript", "-e", applescript], capture_output=True, timeout=5)
 
         if result.returncode != 0:
             logger.error(f"AppleScript error: {result.stderr.decode()}")
@@ -211,9 +201,7 @@ def insert_text(
             time.sleep(0.1)
             safe_app = escape_applescript_string(original_app)
             subprocess.run(
-                ['osascript', '-e', f'tell application "{safe_app}" to activate'],
-                capture_output=True,
-                timeout=5
+                ["osascript", "-e", f'tell application "{safe_app}" to activate'], capture_output=True, timeout=5
             )
 
         return True
@@ -255,17 +243,13 @@ def insert_text_direct(text: str) -> bool:
     try:
         applescript_text = _as_applescript_string_expression(text)
 
-        applescript = f'''
+        applescript = f"""
         tell application "System Events"
             keystroke {applescript_text}
         end tell
-        '''
+        """
 
-        result = subprocess.run(
-            ['osascript', '-e', applescript],
-            capture_output=True,
-            timeout=10
-        )
+        result = subprocess.run(["osascript", "-e", applescript], capture_output=True, timeout=10)
 
         return result.returncode == 0
 
@@ -282,17 +266,12 @@ def get_frontmost_app() -> Optional[str]:
         App name if successful, None otherwise
     """
     try:
-        applescript = '''
+        applescript = """
         tell application "System Events"
             return name of first process whose frontmost is true
         end tell
-        '''
-        result = subprocess.run(
-            ['osascript', '-e', applescript],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
+        """
+        result = subprocess.run(["osascript", "-e", applescript], capture_output=True, text=True, timeout=5)
         if result.returncode == 0:
             return result.stdout.strip()
     except Exception as e:
@@ -309,16 +288,12 @@ def check_accessibility_permission() -> bool:
     """
     try:
         # Try a simple AppleScript that requires Accessibility
-        applescript = '''
+        applescript = """
         tell application "System Events"
             return name of first process whose frontmost is true
         end tell
-        '''
-        result = subprocess.run(
-            ['osascript', '-e', applescript],
-            capture_output=True,
-            timeout=5
-        )
+        """
+        result = subprocess.run(["osascript", "-e", applescript], capture_output=True, timeout=5)
         return result.returncode == 0
     except Exception:
         return False
@@ -352,27 +327,23 @@ def open_accessibility_settings() -> bool:
     """
     try:
         # macOS 13+ uses System Settings with this URL
-        applescript = '''
+        applescript = """
         tell application "System Settings"
             activate
             delay 0.5
         end tell
         do shell script "open x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-        '''
-        result = subprocess.run(
-            ['osascript', '-e', applescript],
-            capture_output=True,
-            timeout=10
-        )
+        """
+        result = subprocess.run(["osascript", "-e", applescript], capture_output=True, timeout=10)
         return result.returncode == 0
     except Exception as e:
         logger.error(f"Failed to open accessibility settings: {e}")
         # Fallback: try older System Preferences approach
         try:
             subprocess.run(
-                ['open', 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'],
+                ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"],
                 capture_output=True,
-                timeout=5
+                timeout=5,
             )
             return True
         except Exception:

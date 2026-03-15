@@ -34,6 +34,7 @@ def _get_user_packs_dir() -> Path:
 @dataclass
 class CharacterPackState:
     """Represents a single state's icon in a character pack."""
+
     file: str
     description: str = ""
     full_path: str = ""
@@ -42,6 +43,7 @@ class CharacterPackState:
 @dataclass
 class CharacterPack:
     """Represents a character pack with icons for different states."""
+
     id: str
     name: str
     description: str = ""
@@ -56,11 +58,9 @@ class CharacterPack:
     states: Dict[str, CharacterPackState] = field(default_factory=dict)
 
     # Recommended settings
-    settings: Dict[str, Any] = field(default_factory=lambda: {
-        "shape_mode": "alpha",
-        "apply_state_tint": False,
-        "recommended_size": "large"
-    })
+    settings: Dict[str, Any] = field(
+        default_factory=lambda: {"shape_mode": "alpha", "apply_state_tint": False, "recommended_size": "large"}
+    )
 
     def get_icon_path(self, state: str) -> Optional[str]:
         """Get the full path to an icon for a specific state."""
@@ -70,11 +70,7 @@ class CharacterPack:
 
     def get_all_icon_paths(self) -> Dict[str, str]:
         """Get a dict of state -> full path for all icons."""
-        return {
-            state: info.full_path
-            for state, info in self.states.items()
-            if info.full_path
-        }
+        return {state: info.full_path for state, info in self.states.items() if info.full_path}
 
     def to_appearance_config(self) -> Dict[str, Any]:
         """Convert pack to widget appearance custom_icon config format."""
@@ -86,7 +82,7 @@ class CharacterPack:
             "apply_state_tint": self.settings.get("apply_state_tint", False),
             "tint_opacity": self.settings.get("tint_opacity", 0.3),
             "shape_mode": self.settings.get("shape_mode", "alpha"),
-            "character_pack": self.id
+            "character_pack": self.id,
         }
 
 
@@ -106,7 +102,7 @@ def load_pack_manifest(pack_dir: Path) -> Optional[CharacterPack]:
         return None
 
     try:
-        with open(manifest_path, 'r') as f:
+        with open(manifest_path, "r") as f:
             data = json.load(f)
 
         pack_id = data.get("id", pack_dir.name)
@@ -118,7 +114,7 @@ def load_pack_manifest(pack_dir: Path) -> Optional[CharacterPack]:
             version=data.get("version", "1.0.0"),
             preview_image=data.get("preview_image", ""),
             pack_dir=str(pack_dir),
-            settings=data.get("settings", {})
+            settings=data.get("settings", {}),
         )
 
         # Load state icons
@@ -137,9 +133,7 @@ def load_pack_manifest(pack_dir: Path) -> Optional[CharacterPack]:
                 full_path = pack_dir / file_name
                 if full_path.exists():
                     pack.states[state_name] = CharacterPackState(
-                        file=file_name,
-                        description=description,
-                        full_path=str(full_path)
+                        file=file_name, description=description, full_path=str(full_path)
                     )
                 else:
                     logger.warning(f"Icon file not found: {full_path}")
@@ -233,7 +227,7 @@ def get_available_packs() -> List[Dict[str, Any]]:
             "description": pack.description,
             "builtin": pack.builtin,
             "preview_path": pack.preview_path,
-            "state_count": len(pack.states)
+            "state_count": len(pack.states),
         }
         for pack in packs
     ]
@@ -317,7 +311,7 @@ class CharacterPackManager:
             "apply_state_tint": True,
             "tint_opacity": 0.3,
             "shape_mode": "auto",
-            "character_pack": None
+            "character_pack": None,
         }
         self._config.save()
         logger.info("Cleared character pack, reverted to default")
@@ -338,13 +332,15 @@ class CharacterPackManager:
 
         result = []
         for pack in packs:
-            result.append({
-                "id": pack.id,
-                "name": pack.name,
-                "description": pack.description,
-                "active": pack.id == current_pack_id,
-                "builtin": pack.builtin,
-            })
+            result.append(
+                {
+                    "id": pack.id,
+                    "name": pack.name,
+                    "description": pack.description,
+                    "active": pack.id == current_pack_id,
+                    "builtin": pack.builtin,
+                }
+            )
 
         return result
 
@@ -396,11 +392,7 @@ def install_pack_from_directory(source_dir: str) -> Optional[CharacterPack]:
 
 
 def save_user_pack(
-    pack_id: str,
-    pack_name: str,
-    description: str,
-    processed_images: Dict[str, Any],
-    image_processor
+    pack_id: str, pack_name: str, description: str, processed_images: Dict[str, Any], image_processor
 ) -> Tuple[bool, str]:
     """
     Save a user-created character pack using atomic operations.
@@ -422,7 +414,7 @@ def save_user_pack(
     import tempfile
 
     # Validate pack_id
-    if not pack_id or not pack_id.replace('-', '').replace('_', '').isalnum():
+    if not pack_id or not pack_id.replace("-", "").replace("_", "").isalnum():
         return False, "Pack ID must be alphanumeric (dashes and underscores allowed)"
 
     # Required states
@@ -483,16 +475,12 @@ def save_user_pack(
             "author": "User Created",
             "version": "1.0.0",
             "states": state_files,
-            "settings": {
-                "shape_mode": "alpha",
-                "apply_state_tint": False,
-                "recommended_size": "large"
-            }
+            "settings": {"shape_mode": "alpha", "apply_state_tint": False, "recommended_size": "large"},
         }
 
         # Write manifest to temp
         manifest_path = temp_dir / "manifest.json"
-        with open(manifest_path, 'w') as f:
+        with open(manifest_path, "w") as f:
             json.dump(manifest, f, indent=2)
         try:
             os.chmod(manifest_path, 0o600)
@@ -535,6 +523,7 @@ def delete_user_pack(pack_id: str) -> Tuple[bool, str]:
         Tuple of (success, error_message)
     """
     import shutil
+
     user_dir = _get_user_packs_dir()
     pack_dir = user_dir / pack_id
 

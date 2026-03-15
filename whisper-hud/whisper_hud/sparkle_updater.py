@@ -55,7 +55,8 @@ def _load_sparkle():
                 if sparkle_bundle and sparkle_bundle.load():
                     # Import SUUpdater class
                     from objc import lookUpClass
-                    _SUUpdater = lookUpClass('SUUpdater')
+
+                    _SUUpdater = lookUpClass("SUUpdater")
                     if _SUUpdater:
                         _sparkle_available = True
                         logger.info("Sparkle framework loaded successfully")
@@ -66,7 +67,8 @@ def _load_sparkle():
         # Try system-wide Sparkle (for development)
         try:
             from objc import lookUpClass
-            _SUUpdater = lookUpClass('SUUpdater')
+
+            _SUUpdater = lookUpClass("SUUpdater")
             if _SUUpdater:
                 _sparkle_available = True
                 logger.info("Sparkle framework loaded from system")
@@ -93,7 +95,7 @@ class SparkleUpdater:
     Falls back gracefully if Sparkle is not available.
     """
 
-    _instance: Optional['SparkleUpdater'] = None
+    _instance: Optional["SparkleUpdater"] = None
 
     def __init__(self):
         """Initialize the updater. Use SparkleUpdater.shared() instead."""
@@ -104,7 +106,7 @@ class SparkleUpdater:
         self._initialized = False
 
     @classmethod
-    def shared(cls) -> 'SparkleUpdater':
+    def shared(cls) -> "SparkleUpdater":
         """Get the shared updater instance."""
         if cls._instance is None:
             cls._instance = cls()
@@ -247,6 +249,7 @@ class SparkleUpdater:
         """Show a dialog when updates aren't available."""
         try:
             import rumps
+
             rumps.alert(
                 title="Updates Not Available",
                 message=(
@@ -254,7 +257,7 @@ class SparkleUpdater:
                     "Please check the GitHub releases page for the latest version:\n"
                     "https://github.com/jvogan/whisper-hud/releases"
                 ),
-                ok="OK"
+                ok="OK",
             )
         except Exception:
             logger.info("Updates not available - please check GitHub releases")

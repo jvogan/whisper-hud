@@ -32,6 +32,7 @@ MAIN_SCRIPT = "whisper-hud/whisper_hud/main.py"
 # Get version from package
 try:
     from whisper_hud import __version__
+
     APP_VERSION = __version__
 except ImportError:
     pass
@@ -63,19 +64,22 @@ def _relpath(path: Path) -> str:
 # Data files to include in the app bundle
 DATA_FILES = [
     # Assets
-    ("assets/icons", [
-        _relpath(ICONS_DIR / "AppIcon.icns"),
-        _relpath(ICONS_DIR / "icon.svg"),
-    ]),
-    ("assets/icons/icon.iconset", [
-        _relpath(p) for p in (ICONS_DIR / "icon.iconset").glob("*.png")
-    ]),
-    ("assets/dithered", [
-        _relpath(p) for p in (ASSETS_DIR / "dithered").glob("*.png")
-    ] if (ASSETS_DIR / "dithered").exists() else []),
-    ("assets/ascii", [
-        _relpath(p) for p in (ASSETS_DIR / "ascii").glob("*.txt")
-    ] if (ASSETS_DIR / "ascii").exists() else []),
+    (
+        "assets/icons",
+        [
+            _relpath(ICONS_DIR / "AppIcon.icns"),
+            _relpath(ICONS_DIR / "icon.svg"),
+        ],
+    ),
+    ("assets/icons/icon.iconset", [_relpath(p) for p in (ICONS_DIR / "icon.iconset").glob("*.png")]),
+    (
+        "assets/dithered",
+        [_relpath(p) for p in (ASSETS_DIR / "dithered").glob("*.png")] if (ASSETS_DIR / "dithered").exists() else [],
+    ),
+    (
+        "assets/ascii",
+        [_relpath(p) for p in (ASSETS_DIR / "ascii").glob("*.txt")] if (ASSETS_DIR / "ascii").exists() else [],
+    ),
 ]
 
 # Apple Translation helper (optional)
@@ -88,53 +92,43 @@ DATA_FILES = [(dest, files) for dest, files in DATA_FILES if files]
 
 # Base Info.plist
 plist = {
-        # App identification
-        "CFBundleName": APP_NAME,
-        "CFBundleDisplayName": APP_NAME,
-        "CFBundleIdentifier": APP_BUNDLE_ID,
-        "CFBundleVersion": APP_VERSION,
-        "CFBundleShortVersionString": APP_VERSION,
-        "CFBundleExecutable": APP_NAME,
-
-        # App behavior
-        "LSUIElement": True,  # Menu bar app - no dock icon
-        "LSMinimumSystemVersion": "12.0",  # macOS Monterey+
-        "NSHighResolutionCapable": True,
-
-        # Required permissions
-        "NSMicrophoneUsageDescription": (
-            "WhisperHUD needs microphone access to transcribe your voice. "
-            "Audio is processed locally or sent to your configured transcription provider."
-        ),
-        "NSAppleEventsUsageDescription": (
-            "WhisperHUD needs to control other applications to paste transcribed text "
-            "at the cursor position in any app."
-        ),
-
-        # Accessibility
-        "NSAccessibilityUsageDescription": (
-            "WhisperHUD needs accessibility access to insert transcribed text "
-            "at your cursor position and detect the active application."
-        ),
-
-        # Privacy descriptions
-        "NSDesktopFolderUsageDescription": (
-            "WhisperHUD may need access to save audio files or transcriptions."
-        ),
-
-        # Copyright
-        "NSHumanReadableCopyright": f"Copyright 2024-{CURRENT_YEAR} WhisperHUD. All rights reserved.",
-
-        # Document types (none for menu bar app)
-        "CFBundleDocumentTypes": [],
-
-        # URL schemes (optional, for deep linking)
-        "CFBundleURLTypes": [
-            {
-                "CFBundleURLName": APP_BUNDLE_ID,
-                "CFBundleURLSchemes": ["whisperhud"],
-            }
-        ],
+    # App identification
+    "CFBundleName": APP_NAME,
+    "CFBundleDisplayName": APP_NAME,
+    "CFBundleIdentifier": APP_BUNDLE_ID,
+    "CFBundleVersion": APP_VERSION,
+    "CFBundleShortVersionString": APP_VERSION,
+    "CFBundleExecutable": APP_NAME,
+    # App behavior
+    "LSUIElement": True,  # Menu bar app - no dock icon
+    "LSMinimumSystemVersion": "12.0",  # macOS Monterey+
+    "NSHighResolutionCapable": True,
+    # Required permissions
+    "NSMicrophoneUsageDescription": (
+        "WhisperHUD needs microphone access to transcribe your voice. "
+        "Audio is processed locally or sent to your configured transcription provider."
+    ),
+    "NSAppleEventsUsageDescription": (
+        "WhisperHUD needs to control other applications to paste transcribed text " "at the cursor position in any app."
+    ),
+    # Accessibility
+    "NSAccessibilityUsageDescription": (
+        "WhisperHUD needs accessibility access to insert transcribed text "
+        "at your cursor position and detect the active application."
+    ),
+    # Privacy descriptions
+    "NSDesktopFolderUsageDescription": ("WhisperHUD may need access to save audio files or transcriptions."),
+    # Copyright
+    "NSHumanReadableCopyright": f"Copyright 2024-{CURRENT_YEAR} WhisperHUD. All rights reserved.",
+    # Document types (none for menu bar app)
+    "CFBundleDocumentTypes": [],
+    # URL schemes (optional, for deep linking)
+    "CFBundleURLTypes": [
+        {
+            "CFBundleURLName": APP_BUNDLE_ID,
+            "CFBundleURLSchemes": ["whisperhud"],
+        }
+    ],
 }
 
 # Sparkle auto-update configuration (optional)
@@ -150,7 +144,6 @@ OPTIONS = {
     "argv_emulation": False,  # Menu bar apps don't need this
     "iconfile": str(APP_ICON) if APP_ICON.exists() else None,
     "plist": plist,
-
     # Include these Python packages
     "packages": [
         "rumps",
@@ -168,7 +161,6 @@ OPTIONS = {
         "Cocoa",
         "Quartz",
     ],
-
     # Exclude these to reduce bundle size
     "excludes": [
         "tkinter",
@@ -185,7 +177,6 @@ OPTIONS = {
         "tests",
         "unittest",
     ],
-
     # Include these specific modules
     "includes": [
         "whisper_hud",
@@ -224,17 +215,13 @@ OPTIONS = {
         "whisper_hud.providers.translation.openai_translate",
         "whisper_hud.providers.translation.anthropic_translate",
     ],
-
     # Framework paths (will be populated by build script if Sparkle is available)
     "frameworks": [],
-
     # Resources to copy into bundle
     "resources": [],
-
     # Optimization
     "optimize": 2,  # -OO optimization
     "compressed": True,
-
     # Build options
     "strip": True,  # Strip debug symbols
     "semi_standalone": False,  # Full standalone (include Python framework)

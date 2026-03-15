@@ -61,7 +61,7 @@ class TestPaste:
         assert "System Settings" in message or "System Preferences" in message
         assert "WhisperHUD" in message
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_check_accessibility_permission_granted(self, mock_run):
         """Test accessibility check when permission is granted."""
         from whisper_hud.paste import check_accessibility_permission
@@ -71,7 +71,7 @@ class TestPaste:
         result = check_accessibility_permission()
         assert result is True
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_check_accessibility_permission_denied(self, mock_run):
         """Test accessibility check when permission is denied."""
         from whisper_hud.paste import check_accessibility_permission
@@ -81,20 +81,17 @@ class TestPaste:
         result = check_accessibility_permission()
         assert result is False
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_get_frontmost_app(self, mock_run):
         """Test getting frontmost application name."""
         from whisper_hud.paste import get_frontmost_app
 
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="Safari\n"
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="Safari\n")
 
         result = get_frontmost_app()
         assert result == "Safari"
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_get_frontmost_app_failure(self, mock_run):
         """Test frontmost app detection failure."""
         from whisper_hud.paste import get_frontmost_app
@@ -114,10 +111,10 @@ class TestPaste:
         result = insert_text(None)
         assert result is False
 
-    @patch('whisper_hud.paste.time.sleep')
-    @patch('whisper_hud.paste.pyperclip.copy')
-    @patch('whisper_hud.paste.pyperclip.paste')
-    @patch('whisper_hud.paste.subprocess.run')
+    @patch("whisper_hud.paste.time.sleep")
+    @patch("whisper_hud.paste.pyperclip.copy")
+    @patch("whisper_hud.paste.pyperclip.paste")
+    @patch("whisper_hud.paste.subprocess.run")
     def test_insert_text_pastes_and_restores_clipboard(
         self,
         mock_run,
@@ -135,14 +132,14 @@ class TestPaste:
 
         assert result is True
         assert mock_run.call_count == 1
-        assert mock_run.call_args.args[0][0:2] == ['osascript', '-e']
+        assert mock_run.call_args.args[0][0:2] == ["osascript", "-e"]
         assert 'keystroke "v" using command down' in mock_run.call_args.args[0][2]
         assert mock_copy.call_args_list == [call("hello world"), call("original clipboard")]
 
-    @patch('whisper_hud.paste.time.sleep')
-    @patch('whisper_hud.paste.pyperclip.copy')
-    @patch('whisper_hud.paste.pyperclip.paste')
-    @patch('whisper_hud.paste.subprocess.run')
+    @patch("whisper_hud.paste.time.sleep")
+    @patch("whisper_hud.paste.pyperclip.copy")
+    @patch("whisper_hud.paste.pyperclip.paste")
+    @patch("whisper_hud.paste.subprocess.run")
     def test_insert_text_restores_clipboard_when_paste_raises(
         self,
         mock_run,
@@ -161,10 +158,10 @@ class TestPaste:
         assert result is False
         assert mock_copy.call_args_list == [call("hello world"), call("original clipboard")]
 
-    @patch('whisper_hud.paste.time.sleep')
-    @patch('whisper_hud.paste.pyperclip.copy')
-    @patch('whisper_hud.paste.pyperclip.paste')
-    @patch('whisper_hud.paste.subprocess.run')
+    @patch("whisper_hud.paste.time.sleep")
+    @patch("whisper_hud.paste.pyperclip.copy")
+    @patch("whisper_hud.paste.pyperclip.paste")
+    @patch("whisper_hud.paste.subprocess.run")
     def test_insert_text_returns_false_when_applescript_fails_without_restoring_changed_clipboard(
         self,
         mock_run,
@@ -183,10 +180,10 @@ class TestPaste:
         assert result is False
         mock_copy.assert_called_once_with("hello world")
 
-    @patch('whisper_hud.paste.time.sleep')
-    @patch('whisper_hud.paste.pyperclip.copy')
-    @patch('whisper_hud.paste.pyperclip.paste')
-    @patch('whisper_hud.paste.subprocess.run')
+    @patch("whisper_hud.paste.time.sleep")
+    @patch("whisper_hud.paste.pyperclip.copy")
+    @patch("whisper_hud.paste.pyperclip.paste")
+    @patch("whisper_hud.paste.subprocess.run")
     def test_insert_text_target_app_activation_and_focus_restore(
         self,
         mock_run,
@@ -204,7 +201,7 @@ class TestPaste:
             MagicMock(returncode=0),
         ]
 
-        with patch('whisper_hud.paste.get_frontmost_app', return_value="Safari"):
+        with patch("whisper_hud.paste.get_frontmost_app", return_value="Safari"):
             result = insert_text("hello world", target_app="Notes", return_focus=True)
 
         assert result is True
@@ -215,7 +212,7 @@ class TestPaste:
         assert 'keystroke "v" using command down' in mock_run.call_args_list[1].args[0][2]
         assert mock_run.call_args_list[2].args[0][2] == 'tell application "Safari" to activate'
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_insert_text_direct_preserves_newlines(self, mock_run):
         """Test direct insertion uses AppleScript newline expressions."""
         from whisper_hud.paste import insert_text_direct
@@ -229,7 +226,7 @@ class TestPaste:
         script = mock_run.call_args.args[0][2]
         assert 'keystroke "line 1" & (ASCII character 10) & "line 2"' in script
 
-    @patch('whisper_hud.paste.subprocess.run')
+    @patch("whisper_hud.paste.subprocess.run")
     def test_insert_text_direct_short_text_uses_keystroke_script(self, mock_run):
         """Short direct insertion should use AppleScript keystrokes."""
         from whisper_hud.paste import insert_text_direct
@@ -242,7 +239,7 @@ class TestPaste:
         script = mock_run.call_args.args[0][2]
         assert 'keystroke "say \\"hi\\""' in script
 
-    @patch('whisper_hud.paste.subprocess.run')
+    @patch("whisper_hud.paste.subprocess.run")
     def test_insert_text_direct_unicode_uses_character_ids(self, mock_run):
         """Unicode direct insertion should use character ids instead of raw literals."""
         from whisper_hud.paste import insert_text_direct
@@ -253,9 +250,9 @@ class TestPaste:
 
         assert result is True
         script = mock_run.call_args.args[0][2]
-        assert 'keystroke (character id 55357) & (character id 56898)' in script
+        assert "keystroke (character id 55357) & (character id 56898)" in script
 
-    @patch('whisper_hud.paste.insert_text', return_value=True)
+    @patch("whisper_hud.paste.insert_text", return_value=True)
     def test_insert_text_direct_long_text_falls_back_to_clipboard(self, mock_insert_text):
         """Long direct insertion should fall back to the clipboard-based path."""
         from whisper_hud.paste import insert_text_direct
@@ -265,7 +262,7 @@ class TestPaste:
         assert result is True
         mock_insert_text.assert_called_once_with("x" * 51, restore_clipboard=True)
 
-    @patch('whisper_hud.paste.subprocess.run', side_effect=RuntimeError("boom"))
+    @patch("whisper_hud.paste.subprocess.run", side_effect=RuntimeError("boom"))
     def test_insert_text_direct_failure_returns_false(self, _mock_run):
         """Direct insertion should fail closed when AppleScript execution raises."""
         from whisper_hud.paste import insert_text_direct
@@ -274,7 +271,7 @@ class TestPaste:
 
         assert result is False
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_open_accessibility_settings_success(self, mock_run):
         """Opening accessibility settings should return True on success."""
         from whisper_hud.paste import open_accessibility_settings
@@ -284,9 +281,9 @@ class TestPaste:
         result = open_accessibility_settings()
 
         assert result is True
-        assert mock_run.call_args.args[0][0:2] == ['osascript', '-e']
+        assert mock_run.call_args.args[0][0:2] == ["osascript", "-e"]
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_open_accessibility_settings_falls_back_to_open(self, mock_run):
         """Fallback open command should be used when AppleScript launch fails."""
         from whisper_hud.paste import open_accessibility_settings
@@ -297,11 +294,11 @@ class TestPaste:
 
         assert result is True
         assert mock_run.call_args_list[1].args[0] == [
-            'open',
-            'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+            "open",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
         ]
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_open_accessibility_settings_returns_false_when_fallback_fails(self, mock_run):
         """Opening accessibility settings should return False if both launch paths fail."""
         from whisper_hud.paste import open_accessibility_settings
@@ -312,10 +309,10 @@ class TestPaste:
 
         assert result is False
 
-    @patch('whisper_hud.paste.time.sleep')
-    @patch('whisper_hud.paste.pyperclip.copy')
-    @patch('whisper_hud.paste.pyperclip.paste')
-    @patch('whisper_hud.paste.subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='osascript', timeout=5))
+    @patch("whisper_hud.paste.time.sleep")
+    @patch("whisper_hud.paste.pyperclip.copy")
+    @patch("whisper_hud.paste.pyperclip.paste")
+    @patch("whisper_hud.paste.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="osascript", timeout=5))
     def test_insert_text_timeout_returns_false(
         self,
         _mock_run,

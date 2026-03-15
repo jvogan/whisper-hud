@@ -140,16 +140,10 @@ class OpenAITranslateProvider(TranslationProvider):
         target_name = self.SUPPORTED_LANGUAGES.get(target_lang, target_lang)
 
         if not source_lang or source_lang == "auto":
-            intro = (
-                "You are a professional translator. Detect the source language "
-                f"and translate to {target_name}."
-            )
+            intro = "You are a professional translator. Detect the source language " f"and translate to {target_name}."
         else:
             source_name = self.SUPPORTED_LANGUAGES.get(source_lang, source_lang)
-            intro = (
-                "You are a professional translator. "
-                f"Translate text from {source_name} to {target_name}."
-            )
+            intro = "You are a professional translator. " f"Translate text from {source_name} to {target_name}."
 
         return (
             f"{intro}\n\n"
@@ -326,9 +320,7 @@ class OpenAITranslateProvider(TranslationProvider):
                         final_text = cumulative_text
             else:
                 # Backward-compatible fallback path.
-                events = responses_api.create(
-                    **self._build_request_kwargs(text, source_lang, target_lang, stream=True)
-                )
+                events = responses_api.create(**self._build_request_kwargs(text, source_lang, target_lang, stream=True))
                 for event in events:
                     delta = self._extract_delta_text(event)
                     if not delta:

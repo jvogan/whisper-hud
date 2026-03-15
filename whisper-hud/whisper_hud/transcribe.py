@@ -96,77 +96,89 @@ class TranscriptionManager:
         providers: list[ProviderInfo] = []
 
         openai_provider = OpenAITranscribeProvider()
-        providers.append({
-            "id": "openai",
-            "name": "OpenAI",
-            "display_name": "OpenAI",
-            "configured": False,
-            "category": "cloud",
-            "requires_download": False,
-            "models": openai_provider.get_models(),
-        })
+        providers.append(
+            {
+                "id": "openai",
+                "name": "OpenAI",
+                "display_name": "OpenAI",
+                "configured": False,
+                "category": "cloud",
+                "requires_download": False,
+                "models": openai_provider.get_models(),
+            }
+        )
 
         openai_realtime_provider = OpenAIRealtimeProvider()
-        providers.append({
-            "id": "openai_realtime",
-            "name": "OpenAI Realtime",
-            "display_name": "OpenAI Realtime",
-            "configured": False,
-            "category": "cloud",
-            "requires_download": False,
-            "models": openai_realtime_provider.get_models(),
-        })
+        providers.append(
+            {
+                "id": "openai_realtime",
+                "name": "OpenAI Realtime",
+                "display_name": "OpenAI Realtime",
+                "configured": False,
+                "category": "cloud",
+                "requires_download": False,
+                "models": openai_realtime_provider.get_models(),
+            }
+        )
 
         gemini_provider = GeminiProvider()
-        providers.append({
-            "id": "gemini",
-            "name": "Google Gemini",
-            "display_name": "Google Gemini",
-            "configured": False,
-            "category": "cloud",
-            "requires_download": False,
-            "models": gemini_provider.get_models(),
-        })
+        providers.append(
+            {
+                "id": "gemini",
+                "name": "Google Gemini",
+                "display_name": "Google Gemini",
+                "configured": False,
+                "category": "cloud",
+                "requires_download": False,
+                "models": gemini_provider.get_models(),
+            }
+        )
 
         apple_provider = AppleSpeechProvider()
-        providers.append({
-            "id": "apple",
-            "name": "Apple (Built-in)",
-            "display_name": "Apple (Built-in)",
-            "configured": apple_provider.is_configured(),
-            "category": "local",
-            "requires_download": False,
-            "models": apple_provider.get_models(),
-            "availability_message": AppleSpeechProvider.get_availability_message()
-        })
+        providers.append(
+            {
+                "id": "apple",
+                "name": "Apple (Built-in)",
+                "display_name": "Apple (Built-in)",
+                "configured": apple_provider.is_configured(),
+                "category": "local",
+                "requires_download": False,
+                "models": apple_provider.get_models(),
+                "availability_message": AppleSpeechProvider.get_availability_message(),
+            }
+        )
 
         whisper_provider = WhisperLocalProvider()
-        providers.append({
-            "id": "whisper_local",
-            "name": "Whisper Local",
-            "display_name": "Whisper Local",
-            "configured": whisper_provider.is_configured(),
-            "category": "local",
-            "requires_download": True,
-            "models": whisper_provider.get_models(),
-            "is_installed": WhisperLocalProvider.is_faster_whisper_installed(),
-            "availability_message": WhisperLocalProvider.get_availability_message()
-        })
+        providers.append(
+            {
+                "id": "whisper_local",
+                "name": "Whisper Local",
+                "display_name": "Whisper Local",
+                "configured": whisper_provider.is_configured(),
+                "category": "local",
+                "requires_download": True,
+                "models": whisper_provider.get_models(),
+                "is_installed": WhisperLocalProvider.is_faster_whisper_installed(),
+                "availability_message": WhisperLocalProvider.get_availability_message(),
+            }
+        )
 
         if platform.system() == "Darwin":
             parakeet_provider = ParakeetProvider()
             is_apple_silicon = ParakeetProvider.is_apple_silicon()
-            providers.append({
-                "id": "parakeet",
-                "name": "Parakeet" + (" (Apple Silicon)" if is_apple_silicon else " (requires Apple Silicon)"),
-                "display_name": "Parakeet",
-                "configured": parakeet_provider.is_configured() if is_apple_silicon else False,
-                "category": "local",
-                "requires_download": True,
-                "models": parakeet_provider.get_models() if is_apple_silicon else [],
-                "is_installed": ParakeetProvider.is_parakeet_installed() if is_apple_silicon else False,
-                "availability_message": ParakeetProvider.get_availability_message()
-            })
+            providers.append(
+                {
+                    "id": "parakeet",
+                    "name": "Parakeet" + (" (Apple Silicon)" if is_apple_silicon else " (requires Apple Silicon)"),
+                    "display_name": "Parakeet",
+                    "configured": parakeet_provider.is_configured() if is_apple_silicon else False,
+                    "category": "local",
+                    "requires_download": True,
+                    "models": parakeet_provider.get_models() if is_apple_silicon else [],
+                    "is_installed": ParakeetProvider.is_parakeet_installed() if is_apple_silicon else False,
+                    "availability_message": ParakeetProvider.get_availability_message(),
+                }
+            )
 
         return providers
 
@@ -197,11 +209,7 @@ class TranscriptionManager:
             self.config.set_provider_model(provider_id, model_id)
             self._invalidate_available_providers_cache()
 
-    def transcribe(
-        self,
-        audio_bytes: bytes,
-        provider_id: Optional[str] = None
-    ) -> TranscriptionResult:
+    def transcribe(self, audio_bytes: bytes, provider_id: Optional[str] = None) -> TranscriptionResult:
         """
         Transcribe audio using specified or default provider.
 
@@ -229,8 +237,7 @@ class TranscriptionManager:
                 provider_id = provider.name
             else:
                 raise ValueError(
-                    f"Provider '{provider_id}' is not configured. "
-                    f"Please configure it in the settings menu."
+                    f"Provider '{provider_id}' is not configured. " f"Please configure it in the settings menu."
                 )
 
         result = provider.transcribe(audio_bytes)
@@ -291,10 +298,7 @@ class TranscriptionManager:
         return None
 
     def transcribe_streaming(
-        self,
-        audio_bytes: bytes,
-        on_chunk: Callable[[str], None],
-        provider_id: Optional[str] = None
+        self, audio_bytes: bytes, on_chunk: Callable[[str], None], provider_id: Optional[str] = None
     ) -> TranscriptionResult:
         """
         Transcribe audio with streaming output.
@@ -334,9 +338,7 @@ class TranscriptionManager:
         return result
 
     def download_model(
-        self,
-        provider_id: str,
-        progress_callback: Optional[Callable[[str, float], None]] = None
+        self, provider_id: str, progress_callback: Optional[Callable[[str, float], None]] = None
     ) -> bool:
         """
         Download model for a provider that requires it.
@@ -354,7 +356,7 @@ class TranscriptionManager:
                 progress_callback(f"Unknown provider: {provider_id}", 0.0)
             return False
 
-        if hasattr(provider, 'download_model'):
+        if hasattr(provider, "download_model"):
             success = provider.download_model(progress_callback)
             if success:
                 self._invalidate_available_providers_cache()
@@ -383,17 +385,17 @@ class TranscriptionManager:
             "requires_download": provider_id in ["whisper_local", "parakeet"],
         }
 
-        if hasattr(provider, 'is_model_downloaded'):
+        if hasattr(provider, "is_model_downloaded"):
             info["downloaded"] = provider.is_model_downloaded()
         else:
             info["downloaded"] = True
 
-        if hasattr(provider, 'get_download_size'):
+        if hasattr(provider, "get_download_size"):
             info["size_mb"] = provider.get_download_size()
         else:
             info["size_mb"] = 0
 
-        if hasattr(provider, 'check_disk_space'):
+        if hasattr(provider, "check_disk_space"):
             size_mb = info.get("size_mb", 0)
             has_space, available = provider.check_disk_space(size_mb)
             info["has_disk_space"] = has_space
@@ -406,10 +408,7 @@ class TranscriptionManager:
 
     def get_stats(self) -> dict[str, int | float]:
         """Get transcription statistics."""
-        return {
-            "total_transcriptions": self.config.total_transcriptions,
-            "total_cost": self.config.total_cost
-        }
+        return {"total_transcriptions": self.config.total_transcriptions, "total_cost": self.config.total_cost}
 
     def reload_config(self) -> None:
         """Reload configuration from disk."""

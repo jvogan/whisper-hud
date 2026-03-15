@@ -21,7 +21,7 @@ def remove_green_screen(img: Image.Image) -> Image.Image:
         Image with green replaced by transparency
     """
     # Convert to RGBA
-    img = img.convert('RGBA')
+    img = img.convert("RGBA")
     data = np.array(img, dtype=np.float32)
 
     # Extract RGB channels (0-255)
@@ -62,37 +62,20 @@ def remove_green_better(img: Image.Image) -> Image.Image:
     """
     Better green screen removal using color distance.
     """
-    img = img.convert('RGBA')
+    img = img.convert("RGBA")
     data = np.array(img, dtype=np.float32)
 
     r, g, b = data[:, :, 0], data[:, :, 1], data[:, :, 2]
 
     # Detect bright green background
-    is_bright_green = (
-        (g > 100) &
-        (g > r + 30) &
-        (g > b + 30)
-    )
+    is_bright_green = (g > 100) & (g > r + 30) & (g > b + 30)
 
     # Detect darker green/teal lines (the borders)
     # These have g > r and g > b but are darker overall
-    is_dark_green = (
-        (g > 50) &
-        (g > r) &
-        (g > b) &
-        (r < 100) &
-        (b < 100)
-    )
+    is_dark_green = (g > 50) & (g > r) & (g > b) & (r < 100) & (b < 100)
 
     # Detect grayish-green (anti-aliasing artifacts)
-    is_gray_green = (
-        (g > r) &
-        (g > b) &
-        (g - r > 5) &
-        (g - b > 5) &
-        (r < 180) &
-        (b < 180)
-    )
+    is_gray_green = (g > r) & (g > b) & (g - r > 5) & (g - b > 5) & (r < 180) & (b < 180)
 
     # Combine all green masks
     is_green = is_bright_green | is_dark_green | is_gray_green
@@ -124,7 +107,7 @@ def clean_edges(img: Image.Image, iterations: int = 2) -> Image.Image:
                 if dy == 0 and dx == 0:
                     continue
                 shifted = np.roll(np.roll(alpha, dy, axis=0), dx, axis=1)
-                has_transparent_neighbor |= (shifted == 0)
+                has_transparent_neighbor |= shifted == 0
 
         # Remove pixels that have transparent neighbors AND have some green tint
         r, g, b = data[:, :, 0], data[:, :, 1], data[:, :, 2]
@@ -188,7 +171,7 @@ def split_sprite_sheet(sprite_path: str, output_dir: str):
 
         # Create a square canvas - NO padding, panda fills the entire space
         max_dim = max(panel_trimmed.size)
-        canvas = Image.new('RGBA', (max_dim, max_dim), (0, 0, 0, 0))
+        canvas = Image.new("RGBA", (max_dim, max_dim), (0, 0, 0, 0))
 
         # Center the panda on the square canvas
         x_offset = (max_dim - panel_trimmed.width) // 2
@@ -200,21 +183,19 @@ def split_sprite_sheet(sprite_path: str, output_dir: str):
 
         # Save
         output_file = output_path / f"{state_name}.png"
-        final.save(output_file, 'PNG')
+        final.save(output_file, "PNG")
         print(f"Created {output_file} - {description}")
 
     # For success state, reuse the writing panda
     recording_img = Image.open(output_path / "recording.png")
-    recording_img.save(output_path / "success.png", 'PNG')
+    recording_img.save(output_path / "success.png", "PNG")
     print(f"Created {output_path / 'success.png'} - Reused writing panda for success")
 
     print(f"\nDone! Created {len(states) + 1} panda icons in {output_dir}")
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Split a panda sprite sheet into icons."
-    )
+    parser = argparse.ArgumentParser(description="Split a panda sprite sheet into icons.")
     parser.add_argument(
         "sprite_sheet",
         help="Path to the sprite sheet image.",

@@ -13,10 +13,10 @@ Usage:
 from pathlib import Path
 from typing import Optional
 
-
 # ============================================================================
 # ASSET PATHS
 # ============================================================================
+
 
 def _find_assets_dir() -> Optional[Path]:
     """Locate the assets directory relative to this module."""
@@ -24,8 +24,8 @@ def _find_assets_dir() -> Optional[Path]:
     module_dir = Path(__file__).parent
     candidates = [
         module_dir.parent.parent / "assets",  # whisper-hud/whisper_hud -> whisper-hud/../assets
-        module_dir.parent / "assets",          # Alternative location
-        Path.cwd() / "assets",                 # Current working directory
+        module_dir.parent / "assets",  # Alternative location
+        Path.cwd() / "assets",  # Current working directory
     ]
 
     for path in candidates:
@@ -109,6 +109,7 @@ ASSETS = AssetPaths()
 # ============================================================================
 # COLOR PALETTE
 # ============================================================================
+
 
 class Colors:
     """Official WhisperHUD color palette."""
@@ -260,6 +261,7 @@ def get_state_ascii(state: str) -> str:
 # MENU BAR ICONS (Emoji)
 # ============================================================================
 
+
 class MenuBarIcons:
     """Menu bar emoji icons for different states."""
 
@@ -284,8 +286,8 @@ APPEARANCE_THEMES = {
             "recording": {"background": "#D92626", "icon": "#FFFFFF"},
             "processing": {"background": "#BF8C19", "icon": "#FFFFFF"},
             "success": {"background": "#3FB950", "icon": "#FFFFFF"},
-            "error": {"background": "#F85149", "icon": "#FFFFFF"}
-        }
+            "error": {"background": "#F85149", "icon": "#FFFFFF"},
+        },
     },
     "dark_red": {
         "name": "Dark Red",
@@ -294,8 +296,8 @@ APPEARANCE_THEMES = {
             "recording": {"background": "#8B0000", "icon": "#FFFFFF"},
             "processing": {"background": "#B8860B", "icon": "#FFFFFF"},
             "success": {"background": "#3FB950", "icon": "#FFFFFF"},
-            "error": {"background": "#FF4444", "icon": "#FFFFFF"}
-        }
+            "error": {"background": "#FF4444", "icon": "#FFFFFF"},
+        },
     },
     "ocean_blue": {
         "name": "Ocean Blue",
@@ -304,8 +306,8 @@ APPEARANCE_THEMES = {
             "recording": {"background": "#C0392B", "icon": "#FFFFFF"},
             "processing": {"background": "#F39C12", "icon": "#FFFFFF"},
             "success": {"background": "#27AE60", "icon": "#FFFFFF"},
-            "error": {"background": "#E74C3C", "icon": "#FFFFFF"}
-        }
+            "error": {"background": "#E74C3C", "icon": "#FFFFFF"},
+        },
     },
     "forest_green": {
         "name": "Forest Green",
@@ -314,8 +316,8 @@ APPEARANCE_THEMES = {
             "recording": {"background": "#D32F2F", "icon": "#FFFFFF"},
             "processing": {"background": "#FFA000", "icon": "#FFFFFF"},
             "success": {"background": "#4CAF50", "icon": "#FFFFFF"},
-            "error": {"background": "#E53935", "icon": "#FFFFFF"}
-        }
+            "error": {"background": "#E53935", "icon": "#FFFFFF"},
+        },
     },
     "sunset_orange": {
         "name": "Sunset Orange",
@@ -324,8 +326,8 @@ APPEARANCE_THEMES = {
             "recording": {"background": "#C62828", "icon": "#FFFFFF"},
             "processing": {"background": "#FFB300", "icon": "#FFFFFF"},
             "success": {"background": "#66BB6A", "icon": "#FFFFFF"},
-            "error": {"background": "#EF5350", "icon": "#FFFFFF"}
-        }
+            "error": {"background": "#EF5350", "icon": "#FFFFFF"},
+        },
     },
     "purple_night": {
         "name": "Purple Night",
@@ -334,8 +336,8 @@ APPEARANCE_THEMES = {
             "recording": {"background": "#AD1457", "icon": "#FFFFFF"},
             "processing": {"background": "#FF6F00", "icon": "#FFFFFF"},
             "success": {"background": "#4DB6AC", "icon": "#FFFFFF"},
-            "error": {"background": "#D81B60", "icon": "#FFFFFF"}
-        }
+            "error": {"background": "#D81B60", "icon": "#FFFFFF"},
+        },
     },
     "monochrome": {
         "name": "Monochrome",
@@ -344,9 +346,9 @@ APPEARANCE_THEMES = {
             "recording": {"background": "#666666", "icon": "#FFFFFF"},
             "processing": {"background": "#999999", "icon": "#FFFFFF"},
             "success": {"background": "#808080", "icon": "#FFFFFF"},
-            "error": {"background": "#555555", "icon": "#FFFFFF"}
-        }
-    }
+            "error": {"background": "#555555", "icon": "#FFFFFF"},
+        },
+    },
 }
 
 

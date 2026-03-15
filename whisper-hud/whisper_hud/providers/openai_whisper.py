@@ -32,26 +32,26 @@ class OpenAITranscribeProvider(TranscriptionProvider):
             "id": "gpt-4o-transcribe",
             "name": "GPT-4o Transcribe",
             "description": "Best accuracy, handles accents and noise well",
-            "cost_per_minute": 0.006
+            "cost_per_minute": 0.006,
         },
         {
             "id": "gpt-4o-transcribe-diarize",
             "name": "GPT-4o Transcribe Diarize",
             "description": "Speaker-aware transcript (HUD shows plain text)",
-            "cost_per_minute": 0.006
+            "cost_per_minute": 0.006,
         },
         {
             "id": "gpt-4o-mini-transcribe",
             "name": "GPT-4o Mini Transcribe",
             "description": "Fast and affordable, good for clear audio",
-            "cost_per_minute": 0.003
+            "cost_per_minute": 0.003,
         },
         {
             "id": "whisper-1",
             "name": "Whisper v2",
             "description": "Classic Whisper model, reliable",
-            "cost_per_minute": 0.006
-        }
+            "cost_per_minute": 0.006,
+        },
     ]
 
     def __init__(self, model: str = "gpt-4o-transcribe"):
@@ -75,9 +75,7 @@ class OpenAITranscribeProvider(TranscriptionProvider):
         try:
             return import_module("openai").OpenAI
         except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                "openai package not installed. Install with: pip install openai"
-            ) from exc
+            raise RuntimeError("openai package not installed. Install with: pip install openai") from exc
 
     def is_available(self) -> bool:
         """Check whether the SDK is importable and an API key is configured."""
@@ -91,11 +89,7 @@ class OpenAITranscribeProvider(TranscriptionProvider):
         """Transcribe audio using OpenAI API."""
         if not audio_bytes:
             return TranscriptionResult(
-                text="",
-                duration_seconds=0,
-                cost_estimate=0,
-                provider=self.name,
-                model=self.model
+                text="", duration_seconds=0, cost_estimate=0, provider=self.name, model=self.model
             )
 
         # Create file-like object for API
@@ -103,10 +97,7 @@ class OpenAITranscribeProvider(TranscriptionProvider):
         audio_file.name = "recording.wav"
 
         # Get the model config for cost calculation
-        model_config = next(
-            (m for m in self.MODELS if m["id"] == self.model),
-            self.MODELS[0]
-        )
+        model_config = next((m for m in self.MODELS if m["id"] == self.model), self.MODELS[0])
 
         # Call transcription API
         # gpt-4o-transcribe models support json or text output
@@ -115,19 +106,14 @@ class OpenAITranscribeProvider(TranscriptionProvider):
         try:
             if self.model == "whisper-1":
                 response = self.client.audio.transcriptions.create(
-                    model=self.model,
-                    file=audio_file,
-                    response_format="verbose_json"
+                    model=self.model, file=audio_file, response_format="verbose_json"
                 )
                 duration = response.duration
                 text = response.text.strip()
                 language = response.language
             elif self.model == "gpt-4o-transcribe-diarize":
                 response = self.client.audio.transcriptions.create(
-                    model=self.model,
-                    file=audio_file,
-                    response_format="diarized_json",
-                    chunking_strategy="auto"
+                    model=self.model, file=audio_file, response_format="diarized_json", chunking_strategy="auto"
                 )
                 text = self._extract_text(response)
                 # Estimate duration from audio bytes (16kHz, 16-bit mono = 32KB/sec)
@@ -136,9 +122,7 @@ class OpenAITranscribeProvider(TranscriptionProvider):
             else:
                 # gpt-4o-transcribe models
                 response = self.client.audio.transcriptions.create(
-                    model=self.model,
-                    file=audio_file,
-                    response_format="json"
+                    model=self.model, file=audio_file, response_format="json"
                 )
                 text = response.text.strip()
                 # Estimate duration from audio bytes (16kHz, 16-bit mono = 32KB/sec)
@@ -157,7 +141,7 @@ class OpenAITranscribeProvider(TranscriptionProvider):
             cost_estimate=cost,
             provider=self.name,
             model=self.model,
-            language=language
+            language=language,
         )
 
     def is_configured(self) -> bool:

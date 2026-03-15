@@ -195,12 +195,11 @@ class GeminiTranslateProvider(TranslationProvider):
         """Get or create the Gemini client."""
         if self._client is None:
             from ...keychain import get_api_key
+
             try:
                 from google import genai
             except ImportError:
-                raise RuntimeError(
-                    "google-genai package not installed. Install with: pip install google-genai"
-                )
+                raise RuntimeError("google-genai package not installed. Install with: pip install google-genai")
 
             api_key = get_api_key("gemini")
             if not api_key:
@@ -224,11 +223,7 @@ class GeminiTranslateProvider(TranslationProvider):
         """
         if not text.strip():
             return TranslationResult(
-                text="",
-                source_lang=source_lang,
-                target_lang=target_lang,
-                provider=self.name,
-                model=self.model
+                text="", source_lang=source_lang, target_lang=target_lang, provider=self.name, model=self.model
             )
 
         attempt_models = [self.model]
@@ -258,10 +253,7 @@ class GeminiTranslateProvider(TranslationProvider):
                     break
                 except Exception as e:
                     last_error = e
-                    should_retry = (
-                        index < len(attempt_models) - 1
-                        and self._is_model_not_found_error(e)
-                    )
+                    should_retry = index < len(attempt_models) - 1 and self._is_model_not_found_error(e)
                     if not should_retry:
                         raise
 
@@ -272,11 +264,7 @@ class GeminiTranslateProvider(TranslationProvider):
                 self.model = used_model
 
             return TranslationResult(
-                text=result_text,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                provider=self.name,
-                model=used_model
+                text=result_text, source_lang=source_lang, target_lang=target_lang, provider=self.name, model=used_model
             )
 
         except Exception as e:
@@ -320,6 +308,7 @@ Text to translate:
     def is_available(self) -> bool:
         """Check if Gemini API key is configured."""
         from ...keychain import get_api_key
+
         return bool(get_api_key("gemini"))
 
     def get_model_status(self) -> dict:
@@ -329,7 +318,7 @@ Text to translate:
             "downloaded": True,  # Cloud-based, always available
             "size_gb": 0,
             "ram_required": "N/A (cloud)",
-            "requires_download": False
+            "requires_download": False,
         }
 
     def download_model(self, progress_callback: Optional[Callable[[str], None]] = None) -> bool:
@@ -343,11 +332,7 @@ Text to translate:
         return True
 
     def translate_streaming(
-        self,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        on_chunk: Callable[[str], None]
+        self, text: str, source_lang: str, target_lang: str, on_chunk: Callable[[str], None]
     ) -> TranslationResult:
         """
         Translate text with streaming output.
@@ -363,11 +348,7 @@ Text to translate:
         """
         if not text.strip():
             return TranslationResult(
-                text="",
-                source_lang=source_lang,
-                target_lang=target_lang,
-                provider=self.name,
-                model=self.model
+                text="", source_lang=source_lang, target_lang=target_lang, provider=self.name, model=self.model
             )
 
         attempt_models = [self.model]
@@ -405,10 +386,7 @@ Text to translate:
                     break
                 except Exception as e:
                     last_error = e
-                    should_retry = (
-                        index < len(attempt_models) - 1
-                        and self._is_model_not_found_error(e)
-                    )
+                    should_retry = index < len(attempt_models) - 1 and self._is_model_not_found_error(e)
                     if not should_retry:
                         raise
 
@@ -419,11 +397,7 @@ Text to translate:
                 self.model = used_model
 
             return TranslationResult(
-                text=final_text,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                provider=self.name,
-                model=used_model
+                text=final_text, source_lang=source_lang, target_lang=target_lang, provider=self.name, model=used_model
             )
 
         except Exception as e:

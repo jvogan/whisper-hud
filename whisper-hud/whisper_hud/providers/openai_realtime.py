@@ -99,10 +99,7 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
             with self._state_lock:
                 self._pending_audio.append((encoded_audio, duration_seconds))
                 self._pending_audio_seconds += duration_seconds
-                while (
-                    self._pending_audio
-                    and self._pending_audio_seconds > self.PRECONNECT_BUFFER_SECONDS
-                ):
+                while self._pending_audio and self._pending_audio_seconds > self.PRECONNECT_BUFFER_SECONDS:
                     _, dropped_seconds = self._pending_audio.popleft()
                     self._pending_audio_seconds -= dropped_seconds
             return

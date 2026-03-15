@@ -19,19 +19,34 @@ logger = get_logger("appearance_editor")
 
 try:
     from AppKit import (
-        NSWindow, NSView, NSButton, NSTextField, NSColor, NSFont,
-        NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
-        NSBackingStoreBuffered, NSScreen, NSMakeRect,
-        NSColorWell, NSSlider, NSBezierPath,
-        NSOpenPanel, NSApplication,
+        NSWindow,
+        NSView,
+        NSButton,
+        NSTextField,
+        NSColor,
+        NSFont,
+        NSWindowStyleMaskTitled,
+        NSWindowStyleMaskClosable,
+        NSBackingStoreBuffered,
+        NSScreen,
+        NSMakeRect,
+        NSColorWell,
+        NSSlider,
+        NSBezierPath,
+        NSOpenPanel,
+        NSApplication,
         NSTextAlignmentCenter,
         NSBezelStyleRounded,
-        NSCompositingOperationSourceOver, NSZeroRect,
-        NSControlStateValueOn, NSControlStateValueOff,
-        NSObject, NSAlert
+        NSCompositingOperationSourceOver,
+        NSZeroRect,
+        NSControlStateValueOn,
+        NSControlStateValueOff,
+        NSObject,
+        NSAlert,
     )
     from PyObjCTools import AppHelper
     from objc import super as objc_super
+
     HAS_APPKIT = True
 except ImportError:
     HAS_APPKIT = False
@@ -44,7 +59,7 @@ STATE_LABELS = {
     "recording": "Recording",
     "processing": "Processing",
     "success": "Success",
-    "error": "Error"
+    "error": "Error",
 }
 
 
@@ -54,12 +69,12 @@ def _get_default_widget_appearance() -> dict:
     return deepcopy(default_factory())
 
 
-def _hex_to_nscolor(hex_color: str) -> 'NSColor':
+def _hex_to_nscolor(hex_color: str) -> "NSColor":
     """Convert hex color string to NSColor."""
     if not HAS_APPKIT:
         return None
     try:
-        hex_color = hex_color.lstrip('#')
+        hex_color = hex_color.lstrip("#")
         if len(hex_color) >= 6:
             r = int(hex_color[0:2], 16) / 255.0
             g = int(hex_color[2:4], 16) / 255.0
@@ -70,7 +85,7 @@ def _hex_to_nscolor(hex_color: str) -> 'NSColor':
     return NSColor.whiteColor()
 
 
-def _nscolor_to_hex(color: 'NSColor') -> str:
+def _nscolor_to_hex(color: "NSColor") -> str:
     """Convert NSColor to hex string."""
     if not HAS_APPKIT or not color:
         return "#FFFFFF"
@@ -88,6 +103,7 @@ def _nscolor_to_hex(color: 'NSColor') -> str:
 
 
 if HAS_APPKIT:
+
     class PreviewWidgetView(NSView):
         """Preview widget that displays current appearance."""
 
@@ -134,10 +150,7 @@ if HAS_APPKIT:
                 # Subtle glow behind icon
                 bg_color = _hex_to_nscolor(self._bg_color)
                 glow_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                    bg_color.redComponent(),
-                    bg_color.greenComponent(),
-                    bg_color.blueComponent(),
-                    0.3
+                    bg_color.redComponent(), bg_color.greenComponent(), bg_color.blueComponent(), 0.3
                 )
                 glow_color.setFill()
                 glow_rect = NSMakeRect(x, y, size, size)
@@ -159,10 +172,7 @@ if HAS_APPKIT:
 
             if self._custom_icon:
                 self._custom_icon.drawInRect_fromRect_operation_fraction_(
-                    icon_rect,
-                    NSZeroRect,
-                    NSCompositingOperationSourceOver,
-                    1.0
+                    icon_rect, NSZeroRect, NSCompositingOperationSourceOver, 1.0
                 )
             else:
                 icon_path = NSBezierPath.bezierPathWithOvalInRect_(icon_rect)
@@ -248,6 +258,7 @@ class AppearanceEditorWindow:
 
     def _apply_missing_defaults(self):
         """Backfill any missing appearance settings from the factory defaults."""
+
         def _merge_defaults(target, defaults):
             for key, value in defaults.items():
                 if key not in target:
@@ -294,7 +305,7 @@ class AppearanceEditorWindow:
             NSMakeRect(x, y, width, height),
             NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
             NSBackingStoreBuffered,
-            False
+            False,
         )
         self._window.setTitle_("Customize Appearance")
         self._window.setReleasedWhenClosed_(False)
@@ -584,18 +595,16 @@ class AppearanceEditorWindow:
 
             colors = self._working_config.get("colors", {}).get(state, {})
             preview = PreviewWidgetView.alloc().initWithFrame_(NSMakeRect(x_pos + 10, height - 385, 60, 60))
-            preview.setColors_iconColor_(
-                colors.get("background", "#232329"),
-                colors.get("icon", "#66A5FF")
-            )
+            preview.setColors_iconColor_(colors.get("background", "#232329"), colors.get("icon", "#66A5FF"))
 
             # Load custom icon preview if enabled
             if current_path and custom_icon.get("enabled", False):
                 icon_image = self._image_processor.get_preview(
-                    current_path, 60,
+                    current_path,
+                    60,
                     colors.get("icon", "") if apply_tint and state != "idle" else "",
                     tint_opacity if apply_tint else 0,
-                    current_shape_mode
+                    current_shape_mode,
                 )
                 preview.setCustomIcon_(icon_image)
 
@@ -676,8 +685,7 @@ class AppearanceEditorWindow:
                     if state in self._preview_views:
                         colors = self._working_config["colors"][state]
                         self._preview_views[state].setColors_iconColor_(
-                            colors.get("background", "#232329"),
-                            colors.get("icon", "#66A5FF")
+                            colors.get("background", "#232329"), colors.get("icon", "#66A5FF")
                         )
                     self._update_icon_previews()
                 break
@@ -768,10 +776,7 @@ class AppearanceEditorWindow:
             if key in self._preview_views:
                 preview = self._preview_views[key]
                 colors = self._working_config.get("colors", {}).get(state, {})
-                preview.setColors_iconColor_(
-                    colors.get("background", "#232329"),
-                    colors.get("icon", "#66A5FF")
-                )
+                preview.setColors_iconColor_(colors.get("background", "#232329"), colors.get("icon", "#66A5FF"))
                 preview.setUseCustomShape_(use_custom_shape)
 
                 if path and custom_icon.get("enabled", False):

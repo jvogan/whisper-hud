@@ -27,7 +27,13 @@ from .translate import TranslationManager
 from .providers.base import LiveTranscriptionSession, TranscriptionResult
 from .hotkey import HotkeyCapturePanel, HotkeyListener, format_hotkey_display, string_to_key
 from .hud import create_hud
-from .paste import insert_text, check_accessibility_permission, get_accessibility_error_message, open_accessibility_settings, escape_applescript_string
+from .paste import (
+    insert_text,
+    check_accessibility_permission,
+    get_accessibility_error_message,
+    open_accessibility_settings,
+    escape_applescript_string,
+)
 from .paste_targets import PasteTargetManager, PasteTarget, TargetType
 from .config import Config
 from .keychain import (
@@ -102,12 +108,7 @@ class WhisperHUDApp(rumps.App):
     ICON_DOWNLOADING = MenuBarIcons.DOWNLOADING
 
     def __init__(self):
-        super().__init__(
-            "WhisperHUD",
-            icon=None,
-            title=self.ICON_IDLE,
-            quit_button=None  # We'll add our own quit
-        )
+        super().__init__("WhisperHUD", icon=None, title=self.ICON_IDLE, quit_button=None)  # We'll add our own quit
 
         self._menu_is_open = False
         self._pending_menu_rebuild = False
@@ -126,6 +127,7 @@ class WhisperHUDApp(rumps.App):
 
         # Validate saved audio device is still valid before using it
         from .recorder import is_valid_input_device, get_device_name
+
         if self.config.audio_input_device is not None:
             if not is_valid_input_device(self.config.audio_input_device):
                 saved_device = self.config.audio_input_device
@@ -171,7 +173,7 @@ class WhisperHUDApp(rumps.App):
             on_record_stop=self._widget_stop_recording,
             size=self.config.widget_size,
             initial_position=self.config.widget_position,
-            on_position_changed=self._save_widget_position
+            on_position_changed=self._save_widget_position,
         )
         self._refresh_widget_tooltip()
 
@@ -208,7 +210,7 @@ class WhisperHUDApp(rumps.App):
             on_start=self._start_recording,
             on_stop=self._stop_recording,
             hotkey=hotkey_set,
-            mode=self.config.hotkey_mode
+            mode=self.config.hotkey_mode,
         )
         self.hotkey_listener.start()
 
@@ -254,10 +256,7 @@ class WhisperHUDApp(rumps.App):
         """
         if self._is_cloud_transcription_provider(self.config.default_provider):
             return True
-        return (
-            self.config.translation_enabled
-            and self._is_cloud_translation_provider(self.config.translation_provider)
-        )
+        return self.config.translation_enabled and self._is_cloud_translation_provider(self.config.translation_provider)
 
     def _get_configured_cloud_providers(self) -> list[str]:
         """Return configured cloud providers when keychain lookup is needed."""
@@ -294,10 +293,7 @@ class WhisperHUDApp(rumps.App):
         """Return True when current settings require cloud API key access."""
         if self._is_cloud_transcription_provider(self.config.default_provider):
             return True
-        return (
-            self.config.translation_enabled
-            and self._is_cloud_translation_provider(self.config.translation_provider)
-        )
+        return self.config.translation_enabled and self._is_cloud_translation_provider(self.config.translation_provider)
 
     def _ensure_cloud_credentials_ready(self, allow_create: bool = False) -> bool:
         """
@@ -367,9 +363,7 @@ class WhisperHUDApp(rumps.App):
                     "then unlock once in this session."
                 )
             elif not message:
-                message = (
-                    "Unlock your passphrase in Privacy & Security, then try again."
-                )
+                message = "Unlock your passphrase in Privacy & Security, then try again."
             rumps.alert(
                 title="History Encryption Locked",
                 message=message,
@@ -403,10 +397,7 @@ class WhisperHUDApp(rumps.App):
             return True
 
         if not allow_create:
-            rumps.alert(
-                title="Passphrase Required",
-                message="Create a passphrase first to store API keys securely."
-            )
+            rumps.alert(title="Passphrase Required", message="Create a passphrase first to store API keys securely.")
             return False
 
         first = self._applescript_input_dialog(
@@ -421,10 +412,7 @@ class WhisperHUDApp(rumps.App):
             return False
 
         if len(first) < 8:
-            rumps.alert(
-                title="Passphrase Too Short",
-                message="Use at least 8 characters."
-            )
+            rumps.alert(title="Passphrase Too Short", message="Use at least 8 characters.")
             return False
 
         second = self._applescript_input_dialog(
@@ -459,10 +447,7 @@ class WhisperHUDApp(rumps.App):
             if ok:
                 return keys
 
-        rumps.alert(
-            title="Storage Error",
-            message=message or "Could not access existing API keys."
-        )
+        rumps.alert(title="Storage Error", message=message or "Could not access existing API keys.")
         return None
 
     def _set_credential_storage_mode(self, mode: str) -> None:
@@ -504,8 +489,7 @@ class WhisperHUDApp(rumps.App):
             self.config.credential_storage_mode = current_mode
             self.config.save()
             rumps.alert(
-                title="Storage Switch Failed",
-                message=message or "Could not migrate API keys to the selected mode."
+                title="Storage Switch Failed", message=message or "Could not migrate API keys to the selected mode."
             )
             return
 
@@ -536,11 +520,7 @@ class WhisperHUDApp(rumps.App):
                     f"Details: {cleanup_message}"
                 ),
             )
-        self._notify(
-            "WhisperHUD",
-            "Credential Storage Updated",
-            f"Now using: {get_storage_mode_label(target_mode)}"
-        )
+        self._notify("WhisperHUD", "Credential Storage Updated", f"Now using: {get_storage_mode_label(target_mode)}")
 
     def _unlock_api_key_store(self, _):
         """Unlock passphrase-based API key storage."""
@@ -562,10 +542,7 @@ class WhisperHUDApp(rumps.App):
     def _change_api_key_passphrase(self, _):
         """Change passphrase used for encrypted API key storage."""
         if not self._is_passphrase_mode():
-            rumps.alert(
-                title="Unavailable",
-                message="Switch to Passphrase storage mode first."
-            )
+            rumps.alert(title="Unavailable", message="Switch to Passphrase storage mode first.")
             return
 
         if not has_passphrase_store():
@@ -614,6 +591,7 @@ class WhisperHUDApp(rumps.App):
         if threading.current_thread() is not threading.main_thread():
             try:
                 from PyObjCTools import AppHelper
+
                 AppHelper.callAfter(self._build_menu)
                 return
             except Exception:
@@ -689,9 +667,7 @@ class WhisperHUDApp(rumps.App):
             provider_obj = self.transcriber.get_provider(p["id"])
             provider_models = provider_obj.get_models() if provider_obj else []
             provider_callback = (
-                (lambda sender, pid=p["id"]: self._open_provider_setup(pid))
-                if not is_configured
-                else None
+                (lambda sender, pid=p["id"]: self._open_provider_setup(pid)) if not is_configured else None
             )
 
             if len(provider_models) > 1:
@@ -701,32 +677,40 @@ class WhisperHUDApp(rumps.App):
                     is_model_selected = is_provider_selected and model["id"] == current_model_id
                     model_prefix = "● " if is_model_selected else "   "
                     suffix = " ★" if model.get("recommended") else ""
-                    provider_submenu.add(rumps.MenuItem(
-                        f"{model_prefix}{model['name']}{suffix}",
-                        callback=lambda sender, pid=p["id"], mid=model["id"]: self._select_provider_and_model(pid, mid)
-                    ))
+                    provider_submenu.add(
+                        rumps.MenuItem(
+                            f"{model_prefix}{model['name']}{suffix}",
+                            callback=lambda sender, pid=p["id"], mid=model["id"]: self._select_provider_and_model(
+                                pid, mid
+                            ),
+                        )
+                    )
                 providers_menu.add(provider_submenu)
             elif len(provider_models) == 1:
                 # Single model - just select provider directly
                 model = provider_models[0]
-                providers_menu.add(rumps.MenuItem(
-                    f"{prefix}{p['name']} {status_icon}",
-                    callback=(
-                        provider_callback
-                        if provider_callback is not None
-                        else lambda sender, pid=p["id"], mid=model["id"]: self._select_provider_and_model(pid, mid)
+                providers_menu.add(
+                    rumps.MenuItem(
+                        f"{prefix}{p['name']} {status_icon}",
+                        callback=(
+                            provider_callback
+                            if provider_callback is not None
+                            else lambda sender, pid=p["id"], mid=model["id"]: self._select_provider_and_model(pid, mid)
+                        ),
                     )
-                ))
+                )
             else:
                 # No models defined
-                providers_menu.add(rumps.MenuItem(
-                    f"{prefix}{p['name']} {status_icon}",
-                    callback=(
-                        provider_callback
-                        if provider_callback is not None
-                        else lambda sender, pid=p["id"]: self._select_provider(pid)
+                providers_menu.add(
+                    rumps.MenuItem(
+                        f"{prefix}{p['name']} {status_icon}",
+                        callback=(
+                            provider_callback
+                            if provider_callback is not None
+                            else lambda sender, pid=p["id"]: self._select_provider(pid)
+                        ),
                     )
-                ))
+                )
 
         providers_menu.add(rumps.separator)
 
@@ -779,34 +763,46 @@ class WhisperHUDApp(rumps.App):
                         for model in cat_models:
                             is_model_selected = is_provider_selected and model["id"] == current_model_id
                             model_prefix = "● " if is_model_selected else "   "
-                            downloaded = model.get('downloaded', True)
+                            downloaded = model.get("downloaded", True)
                             suffix = " ★" if model.get("recommended") else ""
                             if not downloaded:
                                 suffix += " [download]"
-                            provider_submenu.add(rumps.MenuItem(
-                                f"{model_prefix}{model['name']}{suffix}",
-                                callback=lambda sender, pid=p["id"], mid=model["id"], dl=downloaded, prov=p: self._select_provider_model_or_download(pid, mid, dl, prov)
-                            ))
+                            provider_submenu.add(
+                                rumps.MenuItem(
+                                    f"{model_prefix}{model['name']}{suffix}",
+                                    callback=lambda sender, pid=p["id"], mid=model[
+                                        "id"
+                                    ], dl=downloaded, prov=p: self._select_provider_model_or_download(
+                                        pid, mid, dl, prov
+                                    ),
+                                )
+                            )
                 else:
                     for model in provider_models:
                         is_model_selected = is_provider_selected and model["id"] == current_model_id
                         model_prefix = "● " if is_model_selected else "   "
-                        downloaded = model.get('downloaded', True)
+                        downloaded = model.get("downloaded", True)
                         suffix = " ★" if model.get("recommended") else ""
                         if not downloaded:
                             suffix += " [download]"
-                        provider_submenu.add(rumps.MenuItem(
-                            f"{model_prefix}{model['name']}{suffix}",
-                            callback=lambda sender, pid=p["id"], mid=model["id"], dl=downloaded, prov=p: self._select_provider_model_or_download(pid, mid, dl, prov)
-                        ))
+                        provider_submenu.add(
+                            rumps.MenuItem(
+                                f"{model_prefix}{model['name']}{suffix}",
+                                callback=lambda sender, pid=p["id"], mid=model[
+                                    "id"
+                                ], dl=downloaded, prov=p: self._select_provider_model_or_download(pid, mid, dl, prov),
+                            )
+                        )
 
                 providers_menu.add(provider_submenu)
             else:
                 # Single or no models - select provider directly
-                providers_menu.add(rumps.MenuItem(
-                    f"{prefix}{name} {status_icon}",
-                    callback=lambda sender, pid=p["id"], prov=p: self._select_or_download_provider(pid, prov)
-                ))
+                providers_menu.add(
+                    rumps.MenuItem(
+                        f"{prefix}{name} {status_icon}",
+                        callback=lambda sender, pid=p["id"], prov=p: self._select_or_download_provider(pid, prov),
+                    )
+                )
 
         providers_menu.add(rumps.separator)
         providers_menu.add(rumps.MenuItem("── API Keys ──", callback=None))
@@ -837,27 +833,18 @@ class WhisperHUDApp(rumps.App):
             gemini_status = "Locked" if passphrase_locked else (mask_api_key(gemini_key) if gemini_key else "Not set")
 
             anthropic_key = None if passphrase_locked else get_api_key("anthropic")
-            anthropic_status = "Locked" if passphrase_locked else (
-                mask_api_key(anthropic_key) if anthropic_key else "Not set"
+            anthropic_status = (
+                "Locked" if passphrase_locked else (mask_api_key(anthropic_key) if anthropic_key else "Not set")
             )
 
         # OpenAI
-        keys_menu.add(rumps.MenuItem(
-            f"OpenAI: {openai_status}",
-            callback=self._set_openai_key
-        ))
+        keys_menu.add(rumps.MenuItem(f"OpenAI: {openai_status}", callback=self._set_openai_key))
 
         # Gemini
-        keys_menu.add(rumps.MenuItem(
-            f"Gemini: {gemini_status}",
-            callback=self._set_gemini_key
-        ))
+        keys_menu.add(rumps.MenuItem(f"Gemini: {gemini_status}", callback=self._set_gemini_key))
 
         # Anthropic
-        keys_menu.add(rumps.MenuItem(
-            f"Anthropic: {anthropic_status}",
-            callback=self._set_anthropic_key
-        ))
+        keys_menu.add(rumps.MenuItem(f"Anthropic: {anthropic_status}", callback=self._set_anthropic_key))
 
         if defer_keychain_reads:
             keys_menu.add(rumps.separator)
@@ -871,21 +858,22 @@ class WhisperHUDApp(rumps.App):
         configured_providers = configured
         if configured_providers:
             for provider in configured_providers:
-                delete_keys_menu.add(rumps.MenuItem(
-                    f"Delete {self._get_provider_display_name(provider)} Key",
-                    callback=lambda s, p=provider: self._delete_api_key(p)
-                ))
+                delete_keys_menu.add(
+                    rumps.MenuItem(
+                        f"Delete {self._get_provider_display_name(provider)} Key",
+                        callback=lambda s, p=provider: self._delete_api_key(p),
+                    )
+                )
         else:
             for provider in ["openai", "gemini", "anthropic"]:
-                delete_keys_menu.add(rumps.MenuItem(
-                    f"Delete {self._get_provider_display_name(provider)} Key",
-                    callback=lambda s, p=provider: self._delete_api_key(p)
-                ))
+                delete_keys_menu.add(
+                    rumps.MenuItem(
+                        f"Delete {self._get_provider_display_name(provider)} Key",
+                        callback=lambda s, p=provider: self._delete_api_key(p),
+                    )
+                )
         delete_keys_menu.add(rumps.separator)
-        delete_keys_menu.add(rumps.MenuItem(
-            "Delete All API Keys",
-            callback=self._delete_all_api_keys
-        ))
+        delete_keys_menu.add(rumps.MenuItem("Delete All API Keys", callback=self._delete_all_api_keys))
         providers_menu.add(rumps.separator)
         providers_menu.add(delete_keys_menu)
 
@@ -898,36 +886,38 @@ class WhisperHUDApp(rumps.App):
 
         recording_menu = rumps.MenuItem("Recording & Display")
 
-        recording_menu.add(rumps.MenuItem(
-            f"{'✓ ' if self.config.show_widget else '   '}Show floating button",
-            callback=self._toggle_widget
-        ))
+        recording_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.show_widget else '   '}Show floating button", callback=self._toggle_widget
+            )
+        )
 
         # Widget size submenu
         size_menu = rumps.MenuItem("   Button size")
-        for size_id, size_name in [("small", "Small"), ("medium", "Medium"), ("large", "Large"), ("xlarge", "Extra Large")]:
+        for size_id, size_name in [
+            ("small", "Small"),
+            ("medium", "Medium"),
+            ("large", "Large"),
+            ("xlarge", "Extra Large"),
+        ]:
             is_selected = self.config.widget_size == size_id
             prefix = "● " if is_selected else "   "
-            size_menu.add(rumps.MenuItem(
-                f"{prefix}{size_name}",
-                callback=lambda sender, s=size_id: self._set_widget_size(s)
-            ))
+            size_menu.add(
+                rumps.MenuItem(f"{prefix}{size_name}", callback=lambda sender, s=size_id: self._set_widget_size(s))
+            )
         recording_menu.add(size_menu)
-        recording_menu.add(rumps.MenuItem(
-            "Reset Position",
-            callback=self._reset_widget_position
-        ))
+        recording_menu.add(rumps.MenuItem("Reset Position", callback=self._reset_widget_position))
 
         recording_menu.add(rumps.separator)
 
-        recording_menu.add(rumps.MenuItem(
-            f"{'✓ ' if self.config.show_hud else '   '}Show HUD overlay",
-            callback=self._toggle_hud
-        ))
-        recording_menu.add(rumps.MenuItem(
-            f"{'✓ ' if self.config.auto_stop else '   '}Auto-stop on silence",
-            callback=self._toggle_auto_stop
-        ))
+        recording_menu.add(
+            rumps.MenuItem(f"{'✓ ' if self.config.show_hud else '   '}Show HUD overlay", callback=self._toggle_hud)
+        )
+        recording_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.auto_stop else '   '}Auto-stop on silence", callback=self._toggle_auto_stop
+            )
+        )
 
         # Max recording duration submenu
         max_dur_menu = rumps.MenuItem("Max recording duration")
@@ -942,35 +932,39 @@ class WhisperHUDApp(rumps.App):
         for seconds, label in duration_options:
             is_selected = self.config.max_recording_duration == seconds
             prefix = "● " if is_selected else "   "
-            max_dur_menu.add(rumps.MenuItem(
-                f"{prefix}{label}",
-                callback=lambda s, sec=seconds: self._set_max_duration(sec)
-            ))
+            max_dur_menu.add(
+                rumps.MenuItem(f"{prefix}{label}", callback=lambda s, sec=seconds: self._set_max_duration(sec))
+            )
         recording_menu.add(max_dur_menu)
 
-        recording_menu.add(rumps.MenuItem(
-            f"{'✓ ' if self.config.auto_paste else '   '}Auto-paste text",
-            callback=self._toggle_auto_paste
-        ))
-        recording_menu.add(rumps.MenuItem(
-            f"{'✓ ' if self.config.restore_clipboard else '   '}Restore clipboard",
-            callback=self._toggle_restore_clipboard
-        ))
+        recording_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.auto_paste else '   '}Auto-paste text", callback=self._toggle_auto_paste
+            )
+        )
+        recording_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.restore_clipboard else '   '}Restore clipboard",
+                callback=self._toggle_restore_clipboard,
+            )
+        )
         # History toggle (disabled in private mode)
         if self.config.private_mode:
-            recording_menu.add(rumps.MenuItem(
-                "   Save transcription history (disabled in private mode)",
-                callback=None
-            ))
+            recording_menu.add(
+                rumps.MenuItem("   Save transcription history (disabled in private mode)", callback=None)
+            )
         else:
-            recording_menu.add(rumps.MenuItem(
-                f"{'✓ ' if self.config.history_enabled else '   '}Save transcription history",
-                callback=self._toggle_history
-            ))
-        recording_menu.add(rumps.MenuItem(
-            f"{'✓ ' if self.config.play_sound else '   '}Play sound on completion",
-            callback=self._toggle_play_sound
-        ))
+            recording_menu.add(
+                rumps.MenuItem(
+                    f"{'✓ ' if self.config.history_enabled else '   '}Save transcription history",
+                    callback=self._toggle_history,
+                )
+            )
+        recording_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.play_sound else '   '}Play sound on completion", callback=self._toggle_play_sound
+            )
+        )
 
         recording_menu.add(rumps.separator)
 
@@ -979,23 +973,11 @@ class WhisperHUDApp(rumps.App):
 
         # Private mode - maximum privacy option
         if self.config.private_mode:
-            privacy_menu.add(rumps.MenuItem(
-                "✓ Private Mode enabled",
-                callback=None
-            ))
-            privacy_menu.add(rumps.MenuItem(
-                "   Turn off Private Mode",
-                callback=self._toggle_private_mode
-            ))
+            privacy_menu.add(rumps.MenuItem("✓ Private Mode enabled", callback=None))
+            privacy_menu.add(rumps.MenuItem("   Turn off Private Mode", callback=self._toggle_private_mode))
         else:
-            privacy_menu.add(rumps.MenuItem(
-                "🔒 Enable Private Mode...",
-                callback=self._toggle_private_mode
-            ))
-            privacy_menu.add(rumps.MenuItem(
-                "   No transcriptions saved to disk",
-                callback=None
-            ))
+            privacy_menu.add(rumps.MenuItem("🔒 Enable Private Mode...", callback=self._toggle_private_mode))
+            privacy_menu.add(rumps.MenuItem("   No transcriptions saved to disk", callback=None))
 
         privacy_menu.add(rumps.separator)
 
@@ -1009,10 +991,11 @@ class WhisperHUDApp(rumps.App):
         ]
         for mode_id, mode_label in mode_items:
             prefix = "● " if current_storage_mode == mode_id else "   "
-            storage_menu.add(rumps.MenuItem(
-                f"{prefix}{mode_label}",
-                callback=lambda s, m=mode_id: self._set_credential_storage_mode(m)
-            ))
+            storage_menu.add(
+                rumps.MenuItem(
+                    f"{prefix}{mode_label}", callback=lambda s, m=mode_id: self._set_credential_storage_mode(m)
+                )
+            )
 
         if current_storage_mode == "passphrase":
             storage_menu.add(rumps.separator)
@@ -1030,79 +1013,66 @@ class WhisperHUDApp(rumps.App):
 
         # Encrypt history - only when not in private mode
         if self.config.private_mode:
-            privacy_menu.add(rumps.MenuItem(
-                "🔐 Encryption (not needed in Private Mode)",
-                callback=None
-            ))
+            privacy_menu.add(rumps.MenuItem("🔐 Encryption (not needed in Private Mode)", callback=None))
         else:
             from .encryption import is_cryptography_installed
+
             if self.config.history_encrypted:
-                privacy_menu.add(rumps.MenuItem(
-                    "✓ History encryption enabled",
-                    callback=None
-                ))
-                privacy_menu.add(rumps.MenuItem(
-                    "   Turn off encryption...",
-                    callback=self._toggle_history_encryption
-                ))
+                privacy_menu.add(rumps.MenuItem("✓ History encryption enabled", callback=None))
+                privacy_menu.add(rumps.MenuItem("   Turn off encryption...", callback=self._toggle_history_encryption))
             elif is_cryptography_installed():
-                privacy_menu.add(rumps.MenuItem(
-                    "🔐 Encrypt saved history...",
-                    callback=self._toggle_history_encryption
-                ))
-                privacy_menu.add(rumps.MenuItem(
-                    "   Protects transcriptions at rest",
-                    callback=None
-                ))
+                privacy_menu.add(
+                    rumps.MenuItem("🔐 Encrypt saved history...", callback=self._toggle_history_encryption)
+                )
+                privacy_menu.add(rumps.MenuItem("   Protects transcriptions at rest", callback=None))
             else:
-                privacy_menu.add(rumps.MenuItem(
-                    "🔐 Set up encryption...",
-                    callback=self._setup_encryption
-                ))
-                privacy_menu.add(rumps.MenuItem(
-                    "   One-time setup required",
-                    callback=None
-                ))
+                privacy_menu.add(rumps.MenuItem("🔐 Set up encryption...", callback=self._setup_encryption))
+                privacy_menu.add(rumps.MenuItem("   One-time setup required", callback=None))
 
         settings_menu.add(privacy_menu)
-        recording_menu.add(rumps.MenuItem(
-            f"{'✓ ' if self.config.show_notifications else '   '}Show notifications",
-            callback=self._toggle_notifications
-        ))
+        recording_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.show_notifications else '   '}Show notifications",
+                callback=self._toggle_notifications,
+            )
+        )
 
         recording_menu.add(rumps.separator)
 
-        recording_menu.add(rumps.MenuItem(
-            f"{'✓ ' if self.config.streaming_enabled else '   '}Live streaming display",
-            callback=self._toggle_streaming
-        ))
+        recording_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.streaming_enabled else '   '}Live streaming display",
+                callback=self._toggle_streaming,
+            )
+        )
 
         recording_menu.add(rumps.separator)
 
         # === Audio Input Device ===
         from .recorder import get_input_devices
+
         devices = get_input_devices()
         device_menu = rumps.MenuItem("Audio Input Device")
 
         # System default option
         is_default = self.config.audio_input_device is None
-        device_menu.add(rumps.MenuItem(
-            f"{'● ' if is_default else '   '}System Default",
-            callback=lambda s: self._set_audio_device(None)
-        ))
+        device_menu.add(
+            rumps.MenuItem(
+                f"{'● ' if is_default else '   '}System Default", callback=lambda s: self._set_audio_device(None)
+            )
+        )
 
         device_menu.add(rumps.separator)
 
         # List available devices
         for device in devices:
-            is_selected = self.config.audio_input_device == device['id']
+            is_selected = self.config.audio_input_device == device["id"]
             prefix = "● " if is_selected else "   "
             # Truncate long device names
-            name = device['name'][:35] + "..." if len(device['name']) > 38 else device['name']
-            device_menu.add(rumps.MenuItem(
-                f"{prefix}{name}",
-                callback=lambda s, d=device['id']: self._set_audio_device(d)
-            ))
+            name = device["name"][:35] + "..." if len(device["name"]) > 38 else device["name"]
+            device_menu.add(
+                rumps.MenuItem(f"{prefix}{name}", callback=lambda s, d=device["id"]: self._set_audio_device(d))
+            )
 
         recording_menu.add(device_menu)
 
@@ -1110,11 +1080,11 @@ class WhisperHUDApp(rumps.App):
 
         # === Launch at Login ===
         from .launch_agent import is_launch_at_login_enabled
+
         launch_enabled = is_launch_at_login_enabled()
-        recording_menu.add(rumps.MenuItem(
-            f"{'✓ ' if launch_enabled else '   '}Launch at login",
-            callback=self._toggle_launch_at_login
-        ))
+        recording_menu.add(
+            rumps.MenuItem(f"{'✓ ' if launch_enabled else '   '}Launch at login", callback=self._toggle_launch_at_login)
+        )
 
         settings_menu.add(recording_menu)
         settings_menu.add(rumps.separator)
@@ -1132,10 +1102,9 @@ class WhisperHUDApp(rumps.App):
         for theme_id, theme_name in get_available_themes():
             is_selected = current_theme == theme_id
             prefix = "● " if is_selected else "   "
-            appearance_menu.add(rumps.MenuItem(
-                f"{prefix}{theme_name}",
-                callback=lambda s, tid=theme_id: self._apply_theme(tid)
-            ))
+            appearance_menu.add(
+                rumps.MenuItem(f"{prefix}{theme_name}", callback=lambda s, tid=theme_id: self._apply_theme(tid))
+            )
 
         appearance_menu.add(rumps.separator)
 
@@ -1148,41 +1117,32 @@ class WhisperHUDApp(rumps.App):
 
         # Default (no pack) option
         is_default = current_pack_id is None
-        appearance_menu.add(rumps.MenuItem(
-            f"{'● ' if is_default else '   '}Default (circle icon)",
-            callback=self._clear_character_pack
-        ))
+        appearance_menu.add(
+            rumps.MenuItem(f"{'● ' if is_default else '   '}Default (circle icon)", callback=self._clear_character_pack)
+        )
 
         # Add each available pack
         for pack in available_packs:
             is_selected = pack["active"]
             prefix = "● " if is_selected else "   "
-            appearance_menu.add(rumps.MenuItem(
-                f"{prefix}{pack['name']}",
-                callback=lambda s, pid=pack["id"]: self._apply_character_pack(pid)
-            ))
+            appearance_menu.add(
+                rumps.MenuItem(
+                    f"{prefix}{pack['name']}", callback=lambda s, pid=pack["id"]: self._apply_character_pack(pid)
+                )
+            )
 
         appearance_menu.add(rumps.separator)
 
         # Create new pack option
-        appearance_menu.add(rumps.MenuItem(
-            "Create Character Pack...",
-            callback=self._open_pack_creator
-        ))
+        appearance_menu.add(rumps.MenuItem("Create Character Pack...", callback=self._open_pack_creator))
 
         appearance_menu.add(rumps.separator)
 
         # Customize option
-        appearance_menu.add(rumps.MenuItem(
-            "Customize Colors & Icon...",
-            callback=self._open_appearance_editor
-        ))
+        appearance_menu.add(rumps.MenuItem("Customize Colors & Icon...", callback=self._open_appearance_editor))
 
         # Reset option
-        appearance_menu.add(rumps.MenuItem(
-            "Reset to Default",
-            callback=self._reset_appearance
-        ))
+        appearance_menu.add(rumps.MenuItem("Reset to Default", callback=self._reset_appearance))
 
         settings_menu.add(appearance_menu)
 
@@ -1194,8 +1154,7 @@ class WhisperHUDApp(rumps.App):
         target_stale = False
         if target_enabled:
             target_stale = not self._is_target_available_cached(
-                self.config.paste_target_type,
-                self.config.paste_target_identifier
+                self.config.paste_target_type, self.config.paste_target_identifier
             )
 
         if target_enabled:
@@ -1210,23 +1169,15 @@ class WhisperHUDApp(rumps.App):
         # Current status at top
         if target_enabled:
             if target_stale:
-                paste_target_menu.add(rumps.MenuItem(
-                    f"⚠️ Target unavailable: {self._get_paste_target_display_name()}",
-                    callback=None
-                ))
-                paste_target_menu.add(rumps.MenuItem(
-                    "   Will use focused window as fallback",
-                    callback=None
-                ))
+                paste_target_menu.add(
+                    rumps.MenuItem(f"⚠️ Target unavailable: {self._get_paste_target_display_name()}", callback=None)
+                )
+                paste_target_menu.add(rumps.MenuItem("   Will use focused window as fallback", callback=None))
             else:
-                paste_target_menu.add(rumps.MenuItem(
-                    f"📍 Locked to: {self._get_paste_target_display_name()}",
-                    callback=None
-                ))
-            paste_target_menu.add(rumps.MenuItem(
-                "   Disable target lock",
-                callback=self._disable_paste_target
-            ))
+                paste_target_menu.add(
+                    rumps.MenuItem(f"📍 Locked to: {self._get_paste_target_display_name()}", callback=None)
+                )
+            paste_target_menu.add(rumps.MenuItem("   Disable target lock", callback=self._disable_paste_target))
             paste_target_menu.add(rumps.separator)
 
         # Recent targets first (most likely what user wants)
@@ -1235,55 +1186,70 @@ class WhisperHUDApp(rumps.App):
             paste_target_menu.add(rumps.MenuItem("── Quick Select ──", callback=None))
             for target_key in recent_targets[:4]:  # Show up to 4 recent
                 target_type, target_id = target_key.split(":", 1)
-                is_selected = (target_enabled
-                               and self.config.paste_target_type == target_type
-                               and self.config.paste_target_identifier == target_id)
+                is_selected = (
+                    target_enabled
+                    and self.config.paste_target_type == target_type
+                    and self.config.paste_target_identifier == target_id
+                )
                 display_name = self._format_target_for_menu(target_type, target_id)
-                paste_target_menu.add(rumps.MenuItem(
-                    f"{'● ' if is_selected else '   '}{display_name}",
-                    callback=lambda s, t=target_type, i=target_id: self._set_paste_target(t, i)
-                ))
+                paste_target_menu.add(
+                    rumps.MenuItem(
+                        f"{'● ' if is_selected else '   '}{display_name}",
+                        callback=lambda s, t=target_type, i=target_id: self._set_paste_target(t, i),
+                    )
+                )
             paste_target_menu.add(rumps.separator)
 
         # Focused (default) - selecting this disables target lock
         is_focused = not target_enabled
-        paste_target_menu.add(rumps.MenuItem(
-            f"{'● ' if is_focused else '   '}Focused Window (default)",
-            callback=lambda s: self._set_paste_target("focused", "", notify=False)
-        ))
+        paste_target_menu.add(
+            rumps.MenuItem(
+                f"{'● ' if is_focused else '   '}Focused Window (default)",
+                callback=lambda s: self._set_paste_target("focused", "", notify=False),
+            )
+        )
 
         # tmux sessions (if any) - these don't require focus change
-        tmux_sessions = self._cached_tmux_sessions if hasattr(self, '_cached_tmux_sessions') else []
+        tmux_sessions = self._cached_tmux_sessions if hasattr(self, "_cached_tmux_sessions") else []
         if tmux_sessions:
             paste_target_menu.add(rumps.MenuItem("── tmux (no focus change) ──", callback=None))
             for session in tmux_sessions:
-                is_selected = (target_enabled and self.config.paste_target_type == "tmux"
-                               and self.config.paste_target_identifier == session)
-                paste_target_menu.add(rumps.MenuItem(
-                    f"{'● ' if is_selected else '   '}{session}",
-                    callback=lambda s, sess=session: self._set_paste_target("tmux", sess)
-                ))
+                is_selected = (
+                    target_enabled
+                    and self.config.paste_target_type == "tmux"
+                    and self.config.paste_target_identifier == session
+                )
+                paste_target_menu.add(
+                    rumps.MenuItem(
+                        f"{'● ' if is_selected else '   '}{session}",
+                        callback=lambda s, sess=session: self._set_paste_target("tmux", sess),
+                    )
+                )
 
         # iTerm2 (no focus change - uses AppleScript write)
-        has_iterm = hasattr(self, '_cached_iterm2_running') and self._cached_iterm2_running
+        has_iterm = hasattr(self, "_cached_iterm2_running") and self._cached_iterm2_running
         if has_iterm:
             is_selected = target_enabled and self.config.paste_target_type == "iterm2"
-            paste_target_menu.add(rumps.MenuItem(
-                f"{'● ' if is_selected else '   '}iTerm2 (no focus change)",
-                callback=lambda s: self._set_paste_target("iterm2", "iTerm2")
-            ))
+            paste_target_menu.add(
+                rumps.MenuItem(
+                    f"{'● ' if is_selected else '   '}iTerm2 (no focus change)",
+                    callback=lambda s: self._set_paste_target("iterm2", "iTerm2"),
+                )
+            )
 
         # Terminal.app (requires focus change, but kept for compatibility)
-        has_terminal = hasattr(self, '_cached_terminal_running') and self._cached_terminal_running
+        has_terminal = hasattr(self, "_cached_terminal_running") and self._cached_terminal_running
         if has_terminal:
             is_selected = target_enabled and self.config.paste_target_type == "terminal"
-            paste_target_menu.add(rumps.MenuItem(
-                f"{'● ' if is_selected else '   '}Terminal.app",
-                callback=lambda s: self._set_paste_target("terminal", "Terminal")
-            ))
+            paste_target_menu.add(
+                rumps.MenuItem(
+                    f"{'● ' if is_selected else '   '}Terminal.app",
+                    callback=lambda s: self._set_paste_target("terminal", "Terminal"),
+                )
+            )
 
         # Running apps - use submenu if more than 8 apps
-        running_apps = self._cached_running_apps if hasattr(self, '_cached_running_apps') else []
+        running_apps = self._cached_running_apps if hasattr(self, "_cached_running_apps") else []
         # Filter out terminals since they have special handling above
         running_apps = [a for a in running_apps if a not in ("iTerm2", "Terminal")]
 
@@ -1292,31 +1258,43 @@ class WhisperHUDApp(rumps.App):
                 # Show directly in menu for quick access
                 paste_target_menu.add(rumps.MenuItem("── Apps ──", callback=None))
                 for app in running_apps:
-                    is_selected = (target_enabled and self.config.paste_target_type == "app"
-                                   and self.config.paste_target_identifier == app)
-                    paste_target_menu.add(rumps.MenuItem(
-                        f"{'● ' if is_selected else '   '}{app}",
-                        callback=lambda s, a=app: self._set_paste_target("app", a)
-                    ))
+                    is_selected = (
+                        target_enabled
+                        and self.config.paste_target_type == "app"
+                        and self.config.paste_target_identifier == app
+                    )
+                    paste_target_menu.add(
+                        rumps.MenuItem(
+                            f"{'● ' if is_selected else '   '}{app}",
+                            callback=lambda s, a=app: self._set_paste_target("app", a),
+                        )
+                    )
             else:
                 # Use submenu to keep main menu clean
                 apps_submenu = rumps.MenuItem(f"Apps ({len(running_apps)} running)")
                 for app in running_apps:
-                    is_selected = (target_enabled and self.config.paste_target_type == "app"
-                                   and self.config.paste_target_identifier == app)
-                    apps_submenu.add(rumps.MenuItem(
-                        f"{'● ' if is_selected else '   '}{app}",
-                        callback=lambda s, a=app: self._set_paste_target("app", a)
-                    ))
+                    is_selected = (
+                        target_enabled
+                        and self.config.paste_target_type == "app"
+                        and self.config.paste_target_identifier == app
+                    )
+                    apps_submenu.add(
+                        rumps.MenuItem(
+                            f"{'● ' if is_selected else '   '}{app}",
+                            callback=lambda s, a=app: self._set_paste_target("app", a),
+                        )
+                    )
                 paste_target_menu.add(apps_submenu)
 
         # Settings for app targets (only show when an app target is selected)
         if target_enabled and self.config.paste_target_type == "app":
             paste_target_menu.add(rumps.separator)
-            paste_target_menu.add(rumps.MenuItem(
-                f"{'✓ ' if self.config.paste_target_return_focus else '   '}Return focus after paste",
-                callback=self._toggle_paste_return_focus
-            ))
+            paste_target_menu.add(
+                rumps.MenuItem(
+                    f"{'✓ ' if self.config.paste_target_return_focus else '   '}Return focus after paste",
+                    callback=self._toggle_paste_return_focus,
+                )
+            )
 
         # Refresh option
         paste_target_menu.add(rumps.separator)
@@ -1330,10 +1308,12 @@ class WhisperHUDApp(rumps.App):
         translation_menu = rumps.MenuItem("Translation")
 
         # Enable/disable toggle
-        translation_menu.add(rumps.MenuItem(
-            f"{'✓ ' if self.config.translation_enabled else '   '}Enable translation",
-            callback=self._toggle_translation
-        ))
+        translation_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.translation_enabled else '   '}Enable translation",
+                callback=self._toggle_translation,
+            )
+        )
 
         translation_menu.add(rumps.separator)
 
@@ -1343,22 +1323,25 @@ class WhisperHUDApp(rumps.App):
 
         if not self.config.translation_enabled:
             translation_menu.add(rumps.MenuItem("Translation is currently off", callback=None))
-            translation_menu.add(rumps.MenuItem(
-                f"Current selection: {current_trans_provider_name} ({current_trans_model})",
-                callback=None,
-            ))
-            translation_menu.add(rumps.MenuItem(
-                "Enable translation to choose provider, model, and languages",
-                callback=None,
-            ))
+            translation_menu.add(
+                rumps.MenuItem(
+                    f"Current selection: {current_trans_provider_name} ({current_trans_model})",
+                    callback=None,
+                )
+            )
+            translation_menu.add(
+                rumps.MenuItem(
+                    "Enable translation to choose provider, model, and languages",
+                    callback=None,
+                )
+            )
         else:
             # Combined Provider/Model submenu - hovering shows models as submenu
             trans_provider_menu = rumps.MenuItem("Provider & model")
             trans_provider_menu.add(rumps.MenuItem("Legend: ✓ ready  ○ needs setup  … checking", callback=None))
             trans_provider_menu.add(rumps.separator)
             trans_providers = self.translator.get_available_providers(
-                check_availability=False,
-                availability_override=self._translation_availability
+                check_availability=False, availability_override=self._translation_availability
             )
             provider_ids = [tp["id"] for tp in trans_providers]
 
@@ -1370,17 +1353,13 @@ class WhisperHUDApp(rumps.App):
                     self._translation_availability_last_checked = now
 
                     should_check_cloud_translation = (
-                        self.config.translation_enabled
-                        and self._is_cloud_translation_provider(current_trans_provider)
+                        self.config.translation_enabled and self._is_cloud_translation_provider(current_trans_provider)
                     )
 
                     def _check_translation_availability():
                         results = {}
                         for pid in provider_ids:
-                            if (
-                                self._is_cloud_translation_provider(pid)
-                                and not should_check_cloud_translation
-                            ):
+                            if self._is_cloud_translation_provider(pid) and not should_check_cloud_translation:
                                 continue
                             provider = self.translator.get_provider(pid)
                             try:
@@ -1396,6 +1375,7 @@ class WhisperHUDApp(rumps.App):
 
                         try:
                             from PyObjCTools import AppHelper
+
                             AppHelper.callAfter(_apply)
                         except Exception:
                             _apply()
@@ -1425,16 +1405,22 @@ class WhisperHUDApp(rumps.App):
                         is_model_selected = is_provider_selected and current_trans_model == model_info["id"]
                         model_prefix = "● " if is_model_selected else "   "
                         suffix = " ★" if model_info.get("recommended") else ""
-                        provider_submenu.add(rumps.MenuItem(
-                            f"{model_prefix}{model_info['name']}{suffix}",
-                            callback=lambda sender, pid=tp["id"], mid=model_info["id"]: self._set_translation_provider_and_model(pid, mid)
-                        ))
+                        provider_submenu.add(
+                            rumps.MenuItem(
+                                f"{model_prefix}{model_info['name']}{suffix}",
+                                callback=lambda sender, pid=tp["id"], mid=model_info[
+                                    "id"
+                                ]: self._set_translation_provider_and_model(pid, mid),
+                            )
+                        )
                 else:
                     # Provider with no model selection (e.g., Apple)
-                    provider_submenu.add(rumps.MenuItem(
-                        "● Use this provider" if is_provider_selected else "   Use this provider",
-                        callback=lambda sender, pid=tp["id"]: self._set_translation_provider(pid)
-                    ))
+                    provider_submenu.add(
+                        rumps.MenuItem(
+                            "● Use this provider" if is_provider_selected else "   Use this provider",
+                            callback=lambda sender, pid=tp["id"]: self._set_translation_provider(pid),
+                        )
+                    )
 
                 trans_provider_menu.add(provider_submenu)
 
@@ -1468,11 +1454,7 @@ class WhisperHUDApp(rumps.App):
                         else:
                             categories["balanced"].append(model_info)
 
-                    category_labels = {
-                        "speed": "── Fast ──",
-                        "balanced": "── Balanced ──",
-                        "quality": "── Quality ──"
-                    }
+                    category_labels = {"speed": "── Fast ──", "balanced": "── Balanced ──", "quality": "── Quality ──"}
 
                     for cat_id in ["speed", "balanced", "quality"]:
                         cat_models = categories[cat_id]
@@ -1485,15 +1467,21 @@ class WhisperHUDApp(rumps.App):
                             is_model_selected = is_provider_selected and current_trans_model == model_info["id"]
                             model_prefix = "● " if is_model_selected else "   "
                             suffix = " ★" if model_info.get("recommended") else ""
-                            provider_submenu.add(rumps.MenuItem(
-                                f"{model_prefix}{model_info['name']}{suffix}",
-                                callback=lambda sender, pid=tp["id"], mid=model_info["id"]: self._set_translation_provider_and_model(pid, mid)
-                            ))
+                            provider_submenu.add(
+                                rumps.MenuItem(
+                                    f"{model_prefix}{model_info['name']}{suffix}",
+                                    callback=lambda sender, pid=tp["id"], mid=model_info[
+                                        "id"
+                                    ]: self._set_translation_provider_and_model(pid, mid),
+                                )
+                            )
                 else:
-                    provider_submenu.add(rumps.MenuItem(
-                        "● Use this provider" if is_provider_selected else "   Use this provider",
-                        callback=lambda sender, pid=tp["id"]: self._set_translation_provider(pid)
-                    ))
+                    provider_submenu.add(
+                        rumps.MenuItem(
+                            "● Use this provider" if is_provider_selected else "   Use this provider",
+                            callback=lambda sender, pid=tp["id"]: self._set_translation_provider(pid),
+                        )
+                    )
 
                 trans_provider_menu.add(provider_submenu)
 
@@ -1505,10 +1493,7 @@ class WhisperHUDApp(rumps.App):
 
             # Group languages for easier navigation
             common_langs = ["en", "zh", "zh-TW", "es", "fr", "de", "it", "pt", "ja", "ko", "ar", "ru"]
-            other_langs = sorted(
-                [k for k in languages.keys() if k not in common_langs],
-                key=lambda x: languages[x]
-            )
+            other_langs = sorted([k for k in languages.keys() if k not in common_langs], key=lambda x: languages[x])
 
             # Recent languages first (if any)
             recent_targets = [c for c in self.config.recent_target_languages if c in languages]
@@ -1517,10 +1502,12 @@ class WhisperHUDApp(rumps.App):
                 for code in recent_targets:
                     is_selected = self.config.target_language == code
                     prefix = "● " if is_selected else "   "
-                    lang_menu.add(rumps.MenuItem(
-                        f"{prefix}{languages[code]} ({code})",
-                        callback=lambda sender, c=code: self._set_target_language(c)
-                    ))
+                    lang_menu.add(
+                        rumps.MenuItem(
+                            f"{prefix}{languages[code]} ({code})",
+                            callback=lambda sender, c=code: self._set_target_language(c),
+                        )
+                    )
                 lang_menu.add(rumps.separator)
 
             # Common languages
@@ -1529,10 +1516,12 @@ class WhisperHUDApp(rumps.App):
                 if code in languages and code not in recent_targets:
                     is_selected = self.config.target_language == code
                     prefix = "● " if is_selected else "   "
-                    lang_menu.add(rumps.MenuItem(
-                        f"{prefix}{languages[code]} ({code})",
-                        callback=lambda sender, c=code: self._set_target_language(c)
-                    ))
+                    lang_menu.add(
+                        rumps.MenuItem(
+                            f"{prefix}{languages[code]} ({code})",
+                            callback=lambda sender, c=code: self._set_target_language(c),
+                        )
+                    )
 
             lang_menu.add(rumps.separator)
             lang_menu.add(rumps.MenuItem("── All Languages ──", callback=None))
@@ -1540,10 +1529,12 @@ class WhisperHUDApp(rumps.App):
                 if code not in recent_targets:  # Skip if already in recent
                     is_selected = self.config.target_language == code
                     prefix = "● " if is_selected else "   "
-                    lang_menu.add(rumps.MenuItem(
-                        f"{prefix}{languages[code]} ({code})",
-                        callback=lambda sender, c=code: self._set_target_language(c)
-                    ))
+                    lang_menu.add(
+                        rumps.MenuItem(
+                            f"{prefix}{languages[code]} ({code})",
+                            callback=lambda sender, c=code: self._set_target_language(c),
+                        )
+                    )
 
             translation_menu.add(lang_menu)
 
@@ -1553,10 +1544,9 @@ class WhisperHUDApp(rumps.App):
 
             # Auto-detect option always at top
             src_prefix = "● " if self.config.source_language == "auto" else "   "
-            source_menu.add(rumps.MenuItem(
-                f"{src_prefix}Auto (detect)",
-                callback=lambda sender: self._set_source_language("auto")
-            ))
+            source_menu.add(
+                rumps.MenuItem(f"{src_prefix}Auto (detect)", callback=lambda sender: self._set_source_language("auto"))
+            )
             source_menu.add(rumps.separator)
 
             # Recent languages (if any)
@@ -1566,10 +1556,12 @@ class WhisperHUDApp(rumps.App):
                 for code in recent_sources:
                     is_selected = self.config.source_language == code
                     prefix = "● " if is_selected else "   "
-                    source_menu.add(rumps.MenuItem(
-                        f"{prefix}{languages[code]} ({code})",
-                        callback=lambda sender, c=code: self._set_source_language(c)
-                    ))
+                    source_menu.add(
+                        rumps.MenuItem(
+                            f"{prefix}{languages[code]} ({code})",
+                            callback=lambda sender, c=code: self._set_source_language(c),
+                        )
+                    )
                 source_menu.add(rumps.separator)
 
             # Common languages
@@ -1578,33 +1570,33 @@ class WhisperHUDApp(rumps.App):
                 if code in languages and code not in recent_sources:
                     is_selected = self.config.source_language == code
                     prefix = "● " if is_selected else "   "
-                    source_menu.add(rumps.MenuItem(
-                        f"{prefix}{languages[code]} ({code})",
-                        callback=lambda sender, c=code: self._set_source_language(c)
-                    ))
+                    source_menu.add(
+                        rumps.MenuItem(
+                            f"{prefix}{languages[code]} ({code})",
+                            callback=lambda sender, c=code: self._set_source_language(c),
+                        )
+                    )
 
             source_menu.add(rumps.separator)
             source_menu.add(rumps.MenuItem("── All Languages ──", callback=None))
             source_other_langs = sorted(
-                [k for k in languages.keys() if k not in source_common],
-                key=lambda x: languages[x]
+                [k for k in languages.keys() if k not in source_common], key=lambda x: languages[x]
             )
             for code in source_other_langs:
                 if code not in recent_sources:  # Skip if already in recent
                     is_selected = self.config.source_language == code
                     prefix = "● " if is_selected else "   "
-                    source_menu.add(rumps.MenuItem(
-                        f"{prefix}{languages[code]} ({code})",
-                        callback=lambda sender, c=code: self._set_source_language(c)
-                    ))
+                    source_menu.add(
+                        rumps.MenuItem(
+                            f"{prefix}{languages[code]} ({code})",
+                            callback=lambda sender, c=code: self._set_source_language(c),
+                        )
+                    )
 
             translation_menu.add(source_menu)
 
             # Quick swap for English/Chinese
-            translation_menu.add(rumps.MenuItem(
-                "Swap EN ↔ ZH",
-                callback=self._swap_translation_languages
-            ))
+            translation_menu.add(rumps.MenuItem("Swap EN ↔ ZH", callback=self._swap_translation_languages))
 
             translation_menu.add(rumps.separator)
 
@@ -1612,31 +1604,32 @@ class WhisperHUDApp(rumps.App):
             # Note: We avoid calling get_status() here as it makes blocking network calls
             if self.translator.get_current_provider() == "ollama":
                 # Show generic setup option - detailed status checked when clicked
-                translation_menu.add(rumps.MenuItem(
-                    "Ollama Setup...",
-                    callback=self._show_ollama_setup
-                ))
+                translation_menu.add(rumps.MenuItem("Ollama Setup...", callback=self._show_ollama_setup))
 
                 translation_menu.add(rumps.separator)
 
                 # Auto-start Ollama toggle (doesn't need network call)
-                translation_menu.add(rumps.MenuItem(
-                    f"{'✓ ' if self.config.ollama_auto_start else '   '}Auto-start Ollama",
-                    callback=self._toggle_ollama_auto_start
-                ))
+                translation_menu.add(
+                    rumps.MenuItem(
+                        f"{'✓ ' if self.config.ollama_auto_start else '   '}Auto-start Ollama",
+                        callback=self._toggle_ollama_auto_start,
+                    )
+                )
 
         self.menu.add(translation_menu)
 
         stats = self.transcriber.get_stats()
         history_menu = rumps.MenuItem("History & Stats")
-        history_menu.add(rumps.MenuItem(
-            f"Transcriptions: {stats['total_transcriptions']} • ${stats['total_cost']:.4f}",
-            callback=None
-        ))
-        history_menu.add(rumps.MenuItem(
-            f"Reset Statistics ({stats['total_transcriptions']} transcriptions)",
-            callback=self._reset_statistics
-        ))
+        history_menu.add(
+            rumps.MenuItem(
+                f"Transcriptions: {stats['total_transcriptions']} • ${stats['total_cost']:.4f}", callback=None
+            )
+        )
+        history_menu.add(
+            rumps.MenuItem(
+                f"Reset Statistics ({stats['total_transcriptions']} transcriptions)", callback=self._reset_statistics
+            )
+        )
         history_menu.add(rumps.separator)
 
         history_items = self.config.get_history(limit=10) if self.config.history_enabled else []
@@ -1654,6 +1647,7 @@ class WhisperHUDApp(rumps.App):
 
                 # Format timestamp
                 import datetime
+
                 ts = item.get("timestamp", 0)
                 dt = datetime.datetime.fromtimestamp(ts)
                 time_str = dt.strftime("%H:%M")
@@ -1661,10 +1655,11 @@ class WhisperHUDApp(rumps.App):
                 # Show translation indicator if translated
                 translated = "→" if item.get("translated") else ""
 
-                history_menu.add(rumps.MenuItem(
-                    f"{time_str} {translated} {truncated}",
-                    callback=lambda s, idx=i: self._copy_from_history(idx)
-                ))
+                history_menu.add(
+                    rumps.MenuItem(
+                        f"{time_str} {translated} {truncated}", callback=lambda s, idx=i: self._copy_from_history(idx)
+                    )
+                )
 
             history_menu.add(rumps.separator)
         else:
@@ -1672,23 +1667,18 @@ class WhisperHUDApp(rumps.App):
 
         history_menu.add(rumps.separator)
         if self.config.private_mode:
-            history_menu.add(rumps.MenuItem(
-                "Clear History (Private Mode—nothing saved)",
-                callback=None
-            ))
+            history_menu.add(rumps.MenuItem("Clear History (Private Mode—nothing saved)", callback=None))
         else:
             history_count = len(self.config.history) if self.config.history_enabled else 0
             if history_count > 0:
                 encryption_note = " 🔐" if self.config.history_encrypted else ""
-                history_menu.add(rumps.MenuItem(
-                    f"Clear History ({history_count} items{encryption_note})",
-                    callback=self._clear_history
-                ))
+                history_menu.add(
+                    rumps.MenuItem(
+                        f"Clear History ({history_count} items{encryption_note})", callback=self._clear_history
+                    )
+                )
             else:
-                history_menu.add(rumps.MenuItem(
-                    "Clear History (empty)",
-                    callback=None
-                ))
+                history_menu.add(rumps.MenuItem("Clear History (empty)", callback=None))
         settings_menu.add(history_menu)
         settings_menu.add(rumps.separator)
 
@@ -1698,44 +1688,36 @@ class WhisperHUDApp(rumps.App):
         # Current hotkey display
         hotkey_display = format_hotkey_display(self.config.hotkey)
         mode_text = "hold" if self.config.hotkey_mode == "push_to_talk" else "press"
-        hotkey_menu.add(rumps.MenuItem(
-            f"Current: {hotkey_display} ({mode_text})",
-            callback=None
-        ))
+        hotkey_menu.add(rumps.MenuItem(f"Current: {hotkey_display} ({mode_text})", callback=None))
 
         hotkey_menu.add(rumps.separator)
 
         # Change hotkey
-        hotkey_menu.add(rumps.MenuItem(
-            "Change Hotkey...",
-            callback=self._change_hotkey
-        ))
+        hotkey_menu.add(rumps.MenuItem("Change Hotkey...", callback=self._change_hotkey))
 
         # Reset to default
-        hotkey_menu.add(rumps.MenuItem(
-            "Reset to Default (⌘⇧Space)",
-            callback=self._reset_hotkey
-        ))
+        hotkey_menu.add(rumps.MenuItem("Reset to Default (⌘⇧Space)", callback=self._reset_hotkey))
 
         hotkey_menu.add(rumps.separator)
 
         # Mode selection
         is_push_to_talk = self.config.hotkey_mode == "push_to_talk"
-        hotkey_menu.add(rumps.MenuItem(
-            f"{'● ' if is_push_to_talk else '   '}Hold to record (push-to-talk)",
-            callback=lambda _: self._set_hotkey_mode("push_to_talk")
-        ))
-        hotkey_menu.add(rumps.MenuItem(
-            f"{'● ' if not is_push_to_talk else '   '}Press to toggle recording",
-            callback=lambda _: self._set_hotkey_mode("toggle")
-        ))
+        hotkey_menu.add(
+            rumps.MenuItem(
+                f"{'● ' if is_push_to_talk else '   '}Hold to record (push-to-talk)",
+                callback=lambda _: self._set_hotkey_mode("push_to_talk"),
+            )
+        )
+        hotkey_menu.add(
+            rumps.MenuItem(
+                f"{'● ' if not is_push_to_talk else '   '}Press to toggle recording",
+                callback=lambda _: self._set_hotkey_mode("toggle"),
+            )
+        )
         hotkey_hint = format_hotkey_display(self.config.hotkey)
         hint_action = "Hold" if self.config.hotkey_mode == "push_to_talk" else "Press"
         hotkey_menu.add(rumps.separator)
-        hotkey_menu.add(rumps.MenuItem(
-            f"{hint_action} {hotkey_hint} to record",
-            callback=None
-        ))
+        hotkey_menu.add(rumps.MenuItem(f"{hint_action} {hotkey_hint} to record", callback=None))
         settings_menu.add(hotkey_menu)
         settings_menu.add(rumps.separator)
 
@@ -1743,30 +1725,18 @@ class WhisperHUDApp(rumps.App):
         data_menu = rumps.MenuItem("Data & Privacy")
 
         # Clear image cache
-        data_menu.add(rumps.MenuItem(
-            "Clear Image Cache",
-            callback=self._clear_image_cache
-        ))
+        data_menu.add(rumps.MenuItem("Clear Image Cache", callback=self._clear_image_cache))
 
         data_menu.add(rumps.separator)
 
         # Export/Import settings
-        data_menu.add(rumps.MenuItem(
-            "Export Settings...",
-            callback=self._export_settings
-        ))
-        data_menu.add(rumps.MenuItem(
-            "Import Settings...",
-            callback=self._import_settings
-        ))
+        data_menu.add(rumps.MenuItem("Export Settings...", callback=self._export_settings))
+        data_menu.add(rumps.MenuItem("Import Settings...", callback=self._import_settings))
 
         data_menu.add(rumps.separator)
 
         # Reset all settings
-        data_menu.add(rumps.MenuItem(
-            "Reset All Settings...",
-            callback=self._reset_all_settings
-        ))
+        data_menu.add(rumps.MenuItem("Reset All Settings...", callback=self._reset_all_settings))
 
         settings_menu.add(data_menu)
         settings_menu.add(rumps.separator)
@@ -1777,6 +1747,7 @@ class WhisperHUDApp(rumps.App):
         advanced_menu.add(rumps.separator)
 
         from . import __version__
+
         about_menu = rumps.MenuItem(f"About WhisperHUD v{__version__}")
 
         about_menu.add(rumps.MenuItem("About WhisperHUD", callback=self._show_about))
@@ -1830,6 +1801,7 @@ class WhisperHUDApp(rumps.App):
             # Use AppHelper to run on main thread - UI operations need main thread
             try:
                 from PyObjCTools import AppHelper
+
                 AppHelper.callAfter(self._build_menu)
             except Exception:
                 self._build_menu()
@@ -1866,9 +1838,11 @@ class WhisperHUDApp(rumps.App):
                 cb = None
 
             if cb and not getattr(cb, "_whisperhud_wrapped", False):
+
                 def _make_wrapper(callback_func):
                     def _wrapped(sender):
                         self._defer_menu_action(lambda: callback_func(sender))
+
                     _wrapped._whisperhud_wrapped = True  # type: ignore[attr-defined]
                     return _wrapped
 
@@ -1885,6 +1859,7 @@ class WhisperHUDApp(rumps.App):
         """Remove menu items from rumps callback registry to avoid leaks."""
         try:
             from rumps import rumps as rumps_mod
+
             registry = rumps_mod.NSApp._ns_to_py_and_callback
         except Exception:
             return
@@ -1929,6 +1904,7 @@ class WhisperHUDApp(rumps.App):
 
         try:
             from PyObjCTools import AppHelper
+
             AppHelper.callAfter(_apply)
         except Exception:
             _apply()
@@ -1993,6 +1969,7 @@ class WhisperHUDApp(rumps.App):
         def _alert_with_activate(*args, **kwargs):
             try:
                 from AppKit import NSApplication
+
                 NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
             except Exception:
                 pass
@@ -2006,6 +1983,7 @@ class WhisperHUDApp(rumps.App):
         if not os.environ.get("WHISPER_HUD_MENU_TRACE"):
             return
         import traceback
+
         stack = "".join(traceback.format_stack(limit=8))
         logger.debug(f"{label}\n{stack}")
 
@@ -2138,17 +2116,11 @@ class WhisperHUDApp(rumps.App):
             is_installed = provider_info.get("is_installed")
 
             if is_installed is False and availability_message:
-                rumps.alert(
-                    title="Provider Not Available",
-                    message=availability_message
-                )
+                rumps.alert(title="Provider Not Available", message=availability_message)
                 return
 
             if availability_message and not provider_info.get("requires_download", False):
-                rumps.alert(
-                    title="Provider Not Available",
-                    message=availability_message
-                )
+                rumps.alert(title="Provider Not Available", message=availability_message)
                 return
 
         # Check if provider needs download
@@ -2181,7 +2153,7 @@ class WhisperHUDApp(rumps.App):
                     f"Model requires {size_mb}MB but only "
                     f"{available_mb:.0f}MB available.\n\n"
                     f"Free up some disk space and try again."
-                )
+                ),
             )
             return
 
@@ -2196,7 +2168,7 @@ class WhisperHUDApp(rumps.App):
                 f"This may take a few minutes."
             ),
             ok="Download",
-            cancel="Cancel"
+            cancel="Cancel",
         )
 
         if response != 1:
@@ -2211,9 +2183,7 @@ class WhisperHUDApp(rumps.App):
         self._schedule_menu_rebuild()
 
         self._notify(
-            "WhisperHUD",
-            "Downloading Model",
-            "This will run in the background. You'll be notified when complete."
+            "WhisperHUD", "Downloading Model", "This will run in the background. You'll be notified when complete."
         )
 
         def do_download():
@@ -2229,15 +2199,11 @@ class WhisperHUDApp(rumps.App):
                 self._notify(
                     "WhisperHUD",
                     "Download Complete",
-                    f"Model is ready! Switching to {self._get_provider_display_name(provider_id)}."
+                    f"Model is ready! Switching to {self._get_provider_display_name(provider_id)}.",
                 )
                 self._select_provider(provider_id)
             else:
-                self._notify(
-                    "WhisperHUD",
-                    "Download Failed",
-                    "Check console for details."
-                )
+                self._notify("WhisperHUD", "Download Failed", "Check console for details.")
                 self._schedule_menu_rebuild()
 
         threading.Thread(target=do_download, daemon=True).start()
@@ -2249,7 +2215,7 @@ class WhisperHUDApp(rumps.App):
             provider_id = self.config.default_provider
             provider = self.transcriber.get_provider(provider_id)
 
-            if provider and hasattr(provider, 'set_model'):
+            if provider and hasattr(provider, "set_model"):
                 provider.set_model(model_id)
                 self.config.set_provider_model(provider_id, model_id)
 
@@ -2294,6 +2260,7 @@ class WhisperHUDApp(rumps.App):
 
     def _start_live_connect_timer(self, turn_id: int) -> threading.Timer:
         """Downgrade to batch if the live provider never becomes ready."""
+
         def on_timeout():
             turn = self._get_active_turn(turn_id)
             if not turn or turn.phase != RecordingTurnPhase.STARTING:
@@ -2308,6 +2275,7 @@ class WhisperHUDApp(rumps.App):
 
     def _start_live_finalize_timer(self, turn_id: int) -> threading.Timer:
         """Downgrade to batch if the final transcript never arrives after commit."""
+
         def on_timeout():
             turn = self._get_active_turn(turn_id)
             if not turn or turn.result_processing_started:
@@ -2401,9 +2369,7 @@ class WhisperHUDApp(rumps.App):
         def do_transcribe():
             try:
                 if use_streaming:
-                    self.streaming_panel.show_transcribing(
-                        show_translation=self.config.translation_enabled
-                    )
+                    self.streaming_panel.show_transcribing(show_translation=self.config.translation_enabled)
                     result = self.transcriber.transcribe_streaming(
                         audio_bytes,
                         on_chunk=self.streaming_panel.update_transcription,
@@ -2463,10 +2429,7 @@ class WhisperHUDApp(rumps.App):
                             if use_streaming:
                                 self.streaming_panel.show_translating()
 
-                            use_translation_streaming = (
-                                use_streaming
-                                and self.translator.supports_streaming()
-                            )
+                            use_translation_streaming = use_streaming and self.translator.supports_streaming()
 
                             source_lang = self.config.source_language
                             if source_lang == "auto" and result.language:
@@ -2477,13 +2440,11 @@ class WhisperHUDApp(rumps.App):
                                     text=result.text,
                                     on_chunk=self.streaming_panel.update_translation,
                                     source_lang=source_lang,
-                                    target_lang=self.config.target_language
+                                    target_lang=self.config.target_language,
                                 )
                             else:
                                 translation = self.translator.translate(
-                                    text=result.text,
-                                    source_lang=source_lang,
-                                    target_lang=self.config.target_language
+                                    text=result.text, source_lang=source_lang, target_lang=self.config.target_language
                                 )
                                 if use_streaming:
                                     self.streaming_panel.update_translation(translation.text)
@@ -2492,23 +2453,18 @@ class WhisperHUDApp(rumps.App):
                             did_translate = True
 
                             lang_name = self.translator.get_supported_languages().get(
-                                self.config.target_language,
-                                self.config.target_language
+                                self.config.target_language, self.config.target_language
                             )
                             self._set_title(self.ICON_SUCCESS)
                             if self.config.show_hud:
-                                self.hud.show_success(
-                                    self._hud_success_message(final_text, f" -> {lang_name}")
-                                )
+                                self.hud.show_success(self._hud_success_message(final_text, f" -> {lang_name}"))
 
                         except Exception as e:
                             logger.warning(f"Translation failed: {e}")
                             final_text = result.text
                             self._set_title(self.ICON_SUCCESS)
                             if self.config.show_hud:
-                                self.hud.show_success(
-                                    self._hud_success_message(final_text, " (translation failed)")
-                                )
+                                self.hud.show_success(self._hud_success_message(final_text, " (translation failed)"))
                     else:
                         self._set_title(self.ICON_SUCCESS)
                         if self.config.show_hud:
@@ -2523,7 +2479,7 @@ class WhisperHUDApp(rumps.App):
                         text=final_text,
                         provider=result.provider,
                         translated=did_translate,
-                        original_text=result.text if did_translate else ""
+                        original_text=result.text if did_translate else "",
                     )
 
                     if self.config.auto_paste:
@@ -2593,7 +2549,11 @@ class WhisperHUDApp(rumps.App):
         elif isinstance(error, ValueError):
             if "api key" in error_str or "not configured" in error_str:
                 display_error = "API keys locked" if self._is_passphrase_store_locked() else "API key required"
-                detail = "Unlock API key storage in Privacy & Security." if self._is_passphrase_store_locked() else "Click the menu bar icon to add your API key."
+                detail = (
+                    "Unlock API key storage in Privacy & Security."
+                    if self._is_passphrase_store_locked()
+                    else "Click the menu bar icon to add your API key."
+                )
             else:
                 display_error = str(error)[:25]
                 detail = str(error)[:50]
@@ -2608,23 +2568,11 @@ class WhisperHUDApp(rumps.App):
 
         if isinstance(error, ValueError) and ("api key" in error_str or "not configured" in error_str):
             if self._is_passphrase_store_locked():
-                self._notify(
-                    "WhisperHUD",
-                    "Unlock Required",
-                    "Unlock API key storage in Privacy & Security."
-                )
+                self._notify("WhisperHUD", "Unlock Required", "Unlock API key storage in Privacy & Security.")
             else:
-                self._notify(
-                    "WhisperHUD",
-                    "Configuration Required",
-                    "Click the menu bar icon to add your API key."
-                )
+                self._notify("WhisperHUD", "Configuration Required", "Click the menu bar icon to add your API key.")
         else:
-            self._notify(
-                "WhisperHUD",
-                display_error,
-                detail
-            )
+            self._notify("WhisperHUD", display_error, detail)
 
         self._finish_turn_cleanup(turn_id)
 
@@ -2705,7 +2653,7 @@ class WhisperHUDApp(rumps.App):
                 self._notify(
                     "WhisperHUD",
                     "Configuration Required",
-                    "Add or unlock your OpenAI API key before using OpenAI Realtime."
+                    "Add or unlock your OpenAI API key before using OpenAI Realtime.",
                 )
                 return
 
@@ -2714,7 +2662,7 @@ class WhisperHUDApp(rumps.App):
                     self.recorder.set_silence_settings(
                         enabled=True,
                         silence_duration=self.config.silence_duration,
-                        silence_threshold=self.config.silence_threshold
+                        silence_threshold=self.config.silence_threshold,
                     )
                     self.recorder.start(
                         on_silence=self._on_silence_detected,
@@ -2734,18 +2682,12 @@ class WhisperHUDApp(rumps.App):
                     self.hud.show_error("Microphone error")
                 if self.widget:
                     self.widget.set_idle()
-                self._notify(
-                    "WhisperHUD",
-                    "Recording Failed",
-                    "Check microphone permissions and device availability."
-                )
+                self._notify("WhisperHUD", "Recording Failed", "Check microphone permissions and device availability.")
                 return
 
             if turn.live_session:
                 if self.config.streaming_enabled:
-                    self.streaming_panel.show_transcribing(
-                        show_translation=self.config.translation_enabled
-                    )
+                    self.streaming_panel.show_transcribing(show_translation=self.config.translation_enabled)
                 turn.connect_timer = self._start_live_connect_timer(turn.turn_id)
                 turn.live_session.start()
 
@@ -2754,12 +2696,13 @@ class WhisperHUDApp(rumps.App):
 
     def _start_level_monitor(self, turn_id: int):
         """Start monitoring audio levels for the current turn."""
+
         def monitor_levels():
             while self._is_recording and self._get_active_turn(turn_id):
                 level = self.recorder.get_audio_level()
                 if self.config.show_hud:
                     self.hud.update_audio_level(level)
-                if self.streaming_panel and hasattr(self.streaming_panel, 'update_audio_level'):
+                if self.streaming_panel and hasattr(self.streaming_panel, "update_audio_level"):
                     self.streaming_panel.update_audio_level(level)
                 time.sleep(0.05)
 
@@ -2846,12 +2789,7 @@ class WhisperHUDApp(rumps.App):
 
         if title == "Permissions Required":
             # Offer to open settings
-            response = rumps.alert(
-                title=title,
-                message=message,
-                ok="Open Settings",
-                cancel="Cancel"
-            )
+            response = rumps.alert(title=title, message=message, ok="Open Settings", cancel="Cancel")
             if response == 1:
                 AppleSpeechProvider.open_speech_settings()
         else:
@@ -2884,7 +2822,9 @@ class WhisperHUDApp(rumps.App):
         self._refresh_widget_tooltip()
         self._schedule_menu_rebuild()
 
-    def _select_provider_model_or_download(self, provider_id: str, model_id: str, downloaded: bool, provider_info: dict):
+    def _select_provider_model_or_download(
+        self, provider_id: str, model_id: str, downloaded: bool, provider_info: dict
+    ):
         """Select provider/model, or prompt for download if needed."""
         if not downloaded:
             # Set provider first so download targets the right one
@@ -2897,10 +2837,7 @@ class WhisperHUDApp(rumps.App):
 
     def _select_model(self, model_id: str):
         """Change model for current provider."""
-        self.transcriber.set_provider_model(
-            self.config.default_provider,
-            model_id
-        )
+        self.transcriber.set_provider_model(self.config.default_provider, model_id)
         self._schedule_menu_rebuild()
 
     def _prompt_api_key(
@@ -2932,8 +2869,7 @@ class WhisperHUDApp(rumps.App):
             return
         if key_prefix and not key.startswith(key_prefix):
             rumps.alert(
-                title="Invalid Key Format",
-                message=f"{provider_name} API keys should start with '{key_prefix}'"
+                title="Invalid Key Format", message=f"{provider_name} API keys should start with '{key_prefix}'"
             )
             return
 
@@ -2944,20 +2880,14 @@ class WhisperHUDApp(rumps.App):
             if is_valid:
                 if not set_api_key(provider_id, key):
                     self._notify(
-                        "WhisperHUD",
-                        "Could Not Save Key",
-                        "Unlock API key storage first in Privacy & Security."
+                        "WhisperHUD", "Could Not Save Key", "Unlock API key storage first in Privacy & Security."
                     )
                     return
                 self._reset_cloud_clients()
                 self._schedule_menu_rebuild()
                 self._notify("WhisperHUD", "API Key Saved", success_message)
             else:
-                self._notify(
-                    "WhisperHUD",
-                    invalid_title,
-                    error or "Key validation failed"
-                )
+                self._notify("WhisperHUD", invalid_title, error or "Key validation failed")
 
         threading.Thread(target=do_validate, daemon=True).start()
 
@@ -2989,10 +2919,7 @@ class WhisperHUDApp(rumps.App):
         self._prompt_api_key(
             provider_id="anthropic",
             provider_name="Anthropic",
-            dialog_message=(
-                "Enter your Anthropic API key.\n\n"
-                "Get your key at: console.anthropic.com/settings/keys"
-            ),
+            dialog_message=("Enter your Anthropic API key.\n\n" "Get your key at: console.anthropic.com/settings/keys"),
             validation_message="Checking key with Anthropic...",
             success_message="Anthropic key validated and saved securely.",
             invalid_title="Invalid API Key",
@@ -3010,12 +2937,12 @@ class WhisperHUDApp(rumps.App):
         import subprocess
 
         # Escape quotes for AppleScript
-        message_escaped = escape_applescript_string(message).replace('\n', '\\n')
+        message_escaped = escape_applescript_string(message).replace("\n", "\\n")
         default_escaped = escape_applescript_string(default)
         title_escaped = escape_applescript_string(title)
         hidden_clause = " with hidden answer" if hidden else ""
 
-        script = f'''
+        script = f"""
         tell application "System Events"
             activate
             set userInput to display dialog "{message_escaped}" default answer "{default_escaped}" with title "{title_escaped}" buttons {{"Cancel", "Save"}} default button "Save"{hidden_clause}
@@ -3025,15 +2952,10 @@ class WhisperHUDApp(rumps.App):
                 return ""
             end if
         end tell
-        '''
+        """
 
         try:
-            result = subprocess.run(
-                ['osascript', '-e', script],
-                capture_output=True,
-                text=True,
-                timeout=120
-            )
+            result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=120)
             if result.returncode == 0:
                 return result.stdout.strip()
         except Exception as e:
@@ -3122,16 +3044,12 @@ class WhisperHUDApp(rumps.App):
                     "separately if you want."
                 ),
                 ok="Turn Off",
-                cancel="Keep Private"
+                cancel="Keep Private",
             )
 
             if response == 1:
                 self.config.disable_private_mode()
-                self._notify(
-                    "WhisperHUD",
-                    "Private Mode Off",
-                    "You can now save transcription history if desired."
-                )
+                self._notify("WhisperHUD", "Private Mode Off", "You can now save transcription history if desired.")
                 self._schedule_menu_rebuild()
         else:
             # Enabling private mode - explain clearly
@@ -3152,16 +3070,12 @@ class WhisperHUDApp(rumps.App):
                     f"{history_warning}"
                 ),
                 ok="Enable Private Mode",
-                cancel="Cancel"
+                cancel="Cancel",
             )
 
             if response == 1:
                 self.config.enable_private_mode()
-                self._notify(
-                    "WhisperHUD",
-                    "🔒 Private Mode On",
-                    "Your transcriptions won't be saved anywhere."
-                )
+                self._notify("WhisperHUD", "🔒 Private Mode On", "Your transcriptions won't be saved anywhere.")
                 self._schedule_menu_rebuild()
 
     def _toggle_history_encryption(self, sender):
@@ -3179,16 +3093,12 @@ class WhisperHUDApp(rumps.App):
                     "They are readable again after passphrase unlock."
                 ),
                 ok="Turn Off",
-                cancel="Keep Encrypted"
+                cancel="Keep Encrypted",
             )
 
             if response == 1:
                 self.config.disable_history_encryption()
-                self._notify(
-                    "WhisperHUD",
-                    "Encryption Off",
-                    "New transcriptions will be saved unencrypted."
-                )
+                self._notify("WhisperHUD", "Encryption Off", "New transcriptions will be saved unencrypted.")
         else:
             if self._credential_mode() != "passphrase":
                 rumps.alert(
@@ -3209,9 +3119,7 @@ class WhisperHUDApp(rumps.App):
             if success:
                 self._ensure_history_encryption_session(create_if_missing=False, prompt_unlock=False)
                 self._notify(
-                    "WhisperHUD",
-                    "🔐 Encryption On",
-                    "Your transcription history is encrypted for this session."
+                    "WhisperHUD", "🔐 Encryption On", "Your transcription history is encrypted for this session."
                 )
             else:
                 rumps.alert(
@@ -3279,9 +3187,7 @@ class WhisperHUDApp(rumps.App):
             device_name = get_device_name(device_id)
             logger.warning(f"Attempted to set invalid input device: {device_name} (ID: {device_id})")
             self._notify(
-                "WhisperHUD",
-                "Invalid Device",
-                f"'{device_name}' is not an audio input device. Using system default."
+                "WhisperHUD", "Invalid Device", f"'{device_name}' is not an audio input device. Using system default."
             )
             device_id = None  # Fall back to system default
 
@@ -3293,11 +3199,7 @@ class WhisperHUDApp(rumps.App):
 
         # Get device name for notification
         device_name = get_device_name(device_id)
-        self._notify(
-            "WhisperHUD",
-            "Audio Device Changed",
-            f"Now using: {device_name}"
-        )
+        self._notify("WhisperHUD", "Audio Device Changed", f"Now using: {device_name}")
 
     def _toggle_launch_at_login(self, sender):
         """Toggle launch at login."""
@@ -3312,10 +3214,7 @@ class WhisperHUDApp(rumps.App):
             self._schedule_menu_rebuild()
             self._notify("WhisperHUD", "Startup Setting", message)
         else:
-            rumps.alert(
-                title="Error",
-                message=message
-            )
+            rumps.alert(title="Error", message=message)
 
     def _export_settings(self, sender):
         """Export settings to a file."""
@@ -3331,22 +3230,12 @@ class WhisperHUDApp(rumps.App):
             if panel.runModal() == 1:  # OK clicked
                 filepath = str(panel.URL().path())
                 if self.config.export_settings(filepath):
-                    self._notify(
-                        "WhisperHUD",
-                        "Settings Exported",
-                        f"Saved to {os.path.basename(filepath)}"
-                    )
+                    self._notify("WhisperHUD", "Settings Exported", f"Saved to {os.path.basename(filepath)}")
                 else:
-                    rumps.alert(
-                        title="Export Failed",
-                        message="Failed to export settings. Check the log for details."
-                    )
+                    rumps.alert(title="Export Failed", message="Failed to export settings. Check the log for details.")
         except Exception as e:
             logger.error(f"Export settings error: {e}")
-            rumps.alert(
-                title="Export Failed",
-                message=str(e)
-            )
+            rumps.alert(title="Export Failed", message=str(e))
 
     def _import_settings(self, sender):
         """Import settings from a file."""
@@ -3362,6 +3251,7 @@ class WhisperHUDApp(rumps.App):
             if panel.runModal() == 1:  # OK clicked
                 filepath = str(panel.URL().path())
                 from .config import Config
+
                 success, message, imported_config = Config.import_settings(filepath)
 
                 if success and imported_config:
@@ -3375,7 +3265,7 @@ class WhisperHUDApp(rumps.App):
                             "Continue?"
                         ),
                         ok="Import",
-                        cancel="Cancel"
+                        cancel="Cancel",
                     )
 
                     if response == 1:
@@ -3392,22 +3282,12 @@ class WhisperHUDApp(rumps.App):
                         self._apply_appearance_to_components()
                         self._schedule_menu_rebuild()
 
-                        self._notify(
-                            "WhisperHUD",
-                            "Settings Imported",
-                            "Your settings have been updated."
-                        )
+                        self._notify("WhisperHUD", "Settings Imported", "Your settings have been updated.")
                 else:
-                    rumps.alert(
-                        title="Import Failed",
-                        message=message
-                    )
+                    rumps.alert(title="Import Failed", message=message)
         except Exception as e:
             logger.error(f"Import settings error: {e}")
-            rumps.alert(
-                title="Import Failed",
-                message=str(e)
-            )
+            rumps.alert(title="Import Failed", message=str(e))
 
     def _show_about(self, sender):
         """Show about dialog."""
@@ -3425,20 +3305,19 @@ class WhisperHUDApp(rumps.App):
                     "multiple providers (OpenAI, Gemini, Apple, Parakeet)\n"
                     "and real-time translation."
                 ),
-                ok="OK"
+                ok="OK",
             )
         except Exception as e:
             logger.error(f"Error in _show_about: {e}")
             import traceback
+
             logger.error(traceback.format_exc())
 
     def _open_github(self, sender):
         """Open the GitHub repository in browser."""
         import subprocess
-        subprocess.run(
-            ["open", "https://github.com/jvogan/whisper-hud"],
-            capture_output=True
-        )
+
+        subprocess.run(["open", "https://github.com/jvogan/whisper-hud"], capture_output=True)
 
     def _show_system_info(self, sender):
         """Show system information dialog."""
@@ -3478,17 +3357,19 @@ class WhisperHUDApp(rumps.App):
                     f"Total transcriptions: {self.config.total_transcriptions}\n"
                     f"Total cost: ${self.config.total_cost:.4f}"
                 ),
-                ok="OK"
+                ok="OK",
             )
         except Exception as e:
             logger.error(f"Error in _show_system_info: {e}")
             import traceback
+
             logger.error(traceback.format_exc())
 
     def _check_for_updates(self, sender):
         """Check for app updates using Sparkle."""
         try:
             from .sparkle_updater import check_for_updates
+
             check_for_updates()
         except ImportError:
             logger.debug("Sparkle updater module not available")
@@ -3500,6 +3381,7 @@ class WhisperHUDApp(rumps.App):
     def _show_manual_update_dialog(self):
         """Show dialog when Sparkle isn't available."""
         from . import __version__
+
         response = rumps.alert(
             title="Check for Updates",
             message=(
@@ -3508,15 +3390,13 @@ class WhisperHUDApp(rumps.App):
                 "Please check GitHub for the latest release."
             ),
             ok="OK",
-            other="Open GitHub Releases"
+            other="Open GitHub Releases",
         )
 
         if response == 0:  # "Open GitHub Releases" clicked
             import subprocess
-            subprocess.run(
-                ["open", "https://github.com/jvogan/whisper-hud/releases"],
-                capture_output=True
-            )
+
+            subprocess.run(["open", "https://github.com/jvogan/whisper-hud/releases"], capture_output=True)
 
     def _play_completion_sound(self):
         """Play a short system sound on successful completion."""
@@ -3529,11 +3409,7 @@ class WhisperHUDApp(rumps.App):
         try:
             import subprocess
 
-            subprocess.Popen(
-                ["afplay", sound_file],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
+            subprocess.Popen(["afplay", sound_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
             logger.debug(f"Failed to play completion sound: {e}")
 
@@ -3557,6 +3433,7 @@ class WhisperHUDApp(rumps.App):
         if threading.current_thread() is not threading.main_thread():
             try:
                 from PyObjCTools import AppHelper
+
                 AppHelper.callAfter(_send)
                 return
             except Exception:
@@ -3566,12 +3443,14 @@ class WhisperHUDApp(rumps.App):
 
     def _set_title(self, title: str) -> None:
         """Set the menu bar title on the main thread when possible."""
+
         def _apply():
             self.title = title
 
         if threading.current_thread() is not threading.main_thread():
             try:
                 from PyObjCTools import AppHelper
+
                 AppHelper.callAfter(_apply)
                 return
             except Exception:
@@ -3597,9 +3476,7 @@ class WhisperHUDApp(rumps.App):
     def _get_paste_target_display_name(self) -> str:
         """Get a short display name for the current paste target."""
         return self._format_target_for_menu(
-            self.config.paste_target_type,
-            self.config.paste_target_identifier,
-            short=True
+            self.config.paste_target_type, self.config.paste_target_identifier, short=True
         )
 
     def _format_target_for_menu(self, target_type: str, target_id: str, short: bool = False) -> str:
@@ -3623,10 +3500,10 @@ class WhisperHUDApp(rumps.App):
         valid = []
 
         # Use cached data instead of making subprocess calls for each check
-        cached_tmux = set(self._cached_tmux_sessions) if hasattr(self, '_cached_tmux_sessions') else set()
-        cached_apps = set(self._cached_running_apps) if hasattr(self, '_cached_running_apps') else set()
-        iterm_running = getattr(self, '_cached_iterm2_running', False)
-        terminal_running = getattr(self, '_cached_terminal_running', False)
+        cached_tmux = set(self._cached_tmux_sessions) if hasattr(self, "_cached_tmux_sessions") else set()
+        cached_apps = set(self._cached_running_apps) if hasattr(self, "_cached_running_apps") else set()
+        iterm_running = getattr(self, "_cached_iterm2_running", False)
+        terminal_running = getattr(self, "_cached_terminal_running", False)
 
         for target_key in self.config.paste_target_recent:
             if ":" not in target_key:
@@ -3648,9 +3525,11 @@ class WhisperHUDApp(rumps.App):
 
             if is_available:
                 # Don't include if it's the current target (will be shown as selected elsewhere)
-                if not (self.config.paste_target_enabled
-                        and self.config.paste_target_type == target_type
-                        and self.config.paste_target_identifier == target_id):
+                if not (
+                    self.config.paste_target_enabled
+                    and self.config.paste_target_type == target_type
+                    and self.config.paste_target_identifier == target_id
+                ):
                     valid.append(target_key)
         return valid
 
@@ -3694,8 +3573,7 @@ class WhisperHUDApp(rumps.App):
         # Check if this is actually a change
         was_enabled = self.config.paste_target_enabled
         was_same_target = (
-            self.config.paste_target_type == target_type
-            and self.config.paste_target_identifier == identifier
+            self.config.paste_target_type == target_type and self.config.paste_target_identifier == identifier
         )
 
         self.config.paste_target_type = target_type
@@ -3710,11 +3588,7 @@ class WhisperHUDApp(rumps.App):
         # Only notify if this is a new target selection (not just re-selecting same target)
         if notify and not (was_enabled and was_same_target):
             target_name = self._get_paste_target_display_name()
-            self._notify(
-                "WhisperHUD",
-                "Paste Target Locked",
-                f"Transcriptions → {target_name}"
-            )
+            self._notify("WhisperHUD", "Paste Target Locked", f"Transcriptions → {target_name}")
 
         self._schedule_menu_rebuild()
 
@@ -3735,14 +3609,14 @@ class WhisperHUDApp(rumps.App):
         if target_type == "focused":
             return True
         elif target_type == "tmux":
-            cached = getattr(self, '_cached_tmux_sessions', [])
+            cached = getattr(self, "_cached_tmux_sessions", [])
             return identifier in cached
         elif target_type == "iterm2":
-            return getattr(self, '_cached_iterm2_running', False)
+            return getattr(self, "_cached_iterm2_running", False)
         elif target_type == "terminal":
-            return getattr(self, '_cached_terminal_running', False)
+            return getattr(self, "_cached_terminal_running", False)
         elif target_type == "app":
-            cached = getattr(self, '_cached_running_apps', [])
+            cached = getattr(self, "_cached_running_apps", [])
             return identifier in cached
         return False
 
@@ -3764,34 +3638,22 @@ class WhisperHUDApp(rumps.App):
         # Check if target is still available (using cached data for speed)
         if not self._is_target_available_cached(target_type, target_id):
             # Target not available, fallback to focused window
-            self._notify(
-                "WhisperHUD",
-                "Target Unavailable",
-                f"{target_display} not found. Pasted to focused window."
-            )
+            self._notify("WhisperHUD", "Target Unavailable", f"{target_display} not found. Pasted to focused window.")
             return insert_text(text, restore_clipboard=self.config.restore_clipboard)
 
         # Create target and paste
-        target = PasteTarget(
-            type=TargetType(target_type),
-            name=target_id,
-            identifier=target_id
-        )
+        target = PasteTarget(type=TargetType(target_type), name=target_id, identifier=target_id)
 
         success = self.paste_target_manager.paste_to_target(
             text,
             target,
             return_focus=self.config.paste_target_return_focus,
-            restore_clipboard=self.config.restore_clipboard
+            restore_clipboard=self.config.restore_clipboard,
         )
 
         if not success:
             # Paste failed, notify user
-            self._notify(
-                "WhisperHUD",
-                "Paste Failed",
-                f"Could not paste to {target_display}. Try refreshing targets."
-            )
+            self._notify("WhisperHUD", "Paste Failed", f"Could not paste to {target_display}. Try refreshing targets.")
 
         return success
 
@@ -3823,8 +3685,7 @@ class WhisperHUDApp(rumps.App):
             self._is_capturing_hotkey = False
             self._restart_hotkey_listener()
             rumps.alert(
-                title="Hotkey Configuration Unavailable",
-                message="The native hotkey capture panel could not be opened."
+                title="Hotkey Configuration Unavailable", message="The native hotkey capture panel could not be opened."
             )
 
     def _on_hotkey_captured(self, key_set, key_names):
@@ -3849,17 +3710,13 @@ class WhisperHUDApp(rumps.App):
                 on_start=self._start_recording,
                 on_stop=self._stop_recording,
                 hotkey=hotkey_set,
-                mode=self.config.hotkey_mode
+                mode=self.config.hotkey_mode,
             )
             self.hotkey_listener.start()
 
             # Notify user
             display = format_hotkey_display(key_names)
-            self._notify(
-                "WhisperHUD",
-                "Hotkey Changed",
-                f"New hotkey: {display}"
-            )
+            self._notify("WhisperHUD", "Hotkey Changed", f"New hotkey: {display}")
 
             self._refresh_widget_tooltip()
             self._schedule_menu_rebuild()
@@ -3891,7 +3748,7 @@ class WhisperHUDApp(rumps.App):
             on_start=self._start_recording,
             on_stop=self._stop_recording,
             hotkey=hotkey_set,
-            mode=self.config.hotkey_mode
+            mode=self.config.hotkey_mode,
         )
         self.hotkey_listener.start()
 
@@ -3902,11 +3759,7 @@ class WhisperHUDApp(rumps.App):
 
         self.hotkey_listener.update_hotkey(HotkeyListener.DEFAULT_HOTKEY)
 
-        self._notify(
-            "WhisperHUD",
-            "Hotkey Reset",
-            "Hotkey reset to ⌘⇧Space"
-        )
+        self._notify("WhisperHUD", "Hotkey Reset", "Hotkey reset to ⌘⇧Space")
 
         self._refresh_widget_tooltip()
         self._schedule_menu_rebuild()
@@ -3922,11 +3775,7 @@ class WhisperHUDApp(rumps.App):
         self.hotkey_listener.update_mode(mode)
 
         mode_name = "Hold to record" if mode == "push_to_talk" else "Press to toggle"
-        self._notify(
-            "WhisperHUD",
-            "Mode Changed",
-            f"Recording mode: {mode_name}"
-        )
+        self._notify("WhisperHUD", "Mode Changed", f"Recording mode: {mode_name}")
 
         self._refresh_widget_tooltip()
         self._schedule_menu_rebuild()
@@ -3934,17 +3783,14 @@ class WhisperHUDApp(rumps.App):
     def _copy_from_history(self, index: int):
         """Copy a history item to clipboard."""
         import pyperclip
+
         history = self.config.get_history()
         if index < len(history):
             item = history[index]
             text = item.get("text", "")
             if text:
                 pyperclip.copy(text)
-                self._notify(
-                    "WhisperHUD",
-                    "Copied to Clipboard",
-                    text[:50] + "..." if len(text) > 50 else text
-                )
+                self._notify("WhisperHUD", "Copied to Clipboard", text[:50] + "..." if len(text) > 50 else text)
 
     def _clear_history(self, sender):
         """Clear all transcription history."""
@@ -3952,16 +3798,12 @@ class WhisperHUDApp(rumps.App):
             title="Clear History",
             message="Are you sure you want to clear all transcription history?",
             ok="Clear",
-            cancel="Cancel"
+            cancel="Cancel",
         )
         if response == 1:
             self.config.clear_history()
             self._schedule_menu_rebuild()
-            self._notify(
-                "WhisperHUD",
-                "History Cleared",
-                "All transcription history has been cleared."
-            )
+            self._notify("WhisperHUD", "History Cleared", "All transcription history has been cleared.")
 
     def _reset_statistics(self, sender):
         """Reset transcription statistics."""
@@ -3975,27 +3817,20 @@ class WhisperHUDApp(rumps.App):
                 f"Are you sure?"
             ),
             ok="Reset",
-            cancel="Cancel"
+            cancel="Cancel",
         )
         if response == 1:
             self.config.reset_stats()
             self._schedule_menu_rebuild()
-            self._notify(
-                "WhisperHUD",
-                "Statistics Reset",
-                "Transcription statistics have been reset."
-            )
+            self._notify("WhisperHUD", "Statistics Reset", "Transcription statistics have been reset.")
 
     def _clear_image_cache(self, sender):
         """Clear the image cache."""
         from .image_processor import clear_cache
+
         clear_cache()
         self._schedule_menu_rebuild()
-        self._notify(
-            "WhisperHUD",
-            "Cache Cleared",
-            "Image cache has been cleared."
-        )
+        self._notify("WhisperHUD", "Cache Cleared", "Image cache has been cleared.")
 
     def _delete_api_key(self, provider: str):
         """Delete a specific API key."""
@@ -4010,23 +3845,16 @@ class WhisperHUDApp(rumps.App):
                 f"You'll need to re-enter it to use this provider again."
             ),
             ok="Delete",
-            cancel="Cancel"
+            cancel="Cancel",
         )
         if response == 1:
             if not delete_api_key(provider):
-                rumps.alert(
-                    title="Delete Failed",
-                    message="Could not delete API key. Unlock storage first if needed."
-                )
+                rumps.alert(title="Delete Failed", message="Could not delete API key. Unlock storage first if needed.")
                 return
 
             self._reset_cloud_clients()
             self._schedule_menu_rebuild()
-            self._notify(
-                "WhisperHUD",
-                "API Key Deleted",
-                f"{provider_name} API key has been removed."
-            )
+            self._notify("WhisperHUD", "API Key Deleted", f"{provider_name} API key has been removed.")
 
     def _delete_all_api_keys(self, sender):
         """Delete all API keys."""
@@ -4035,10 +3863,7 @@ class WhisperHUDApp(rumps.App):
 
         configured = get_configured_providers()
         if not configured:
-            rumps.alert(
-                title="No API Keys",
-                message="There are no API keys to delete."
-            )
+            rumps.alert(title="No API Keys", message="There are no API keys to delete.")
             return
 
         response = rumps.alert(
@@ -4050,18 +3875,14 @@ class WhisperHUDApp(rumps.App):
                 f"Are you sure?"
             ),
             ok="Delete All",
-            cancel="Cancel"
+            cancel="Cancel",
         )
         if response == 1:
             for provider in configured:
                 delete_api_key(provider)
             self._reset_cloud_clients()
             self._schedule_menu_rebuild()
-            self._notify(
-                "WhisperHUD",
-                "API Keys Deleted",
-                "All API keys have been removed."
-            )
+            self._notify("WhisperHUD", "API Keys Deleted", "All API keys have been removed.")
 
     def _reset_all_settings(self, sender):
         """Reset all settings to defaults."""
@@ -4081,7 +3902,7 @@ class WhisperHUDApp(rumps.App):
                 "Are you sure?"
             ),
             ok="Reset All",
-            cancel="Cancel"
+            cancel="Cancel",
         )
         if response == 1:
             # Reset to defaults
@@ -4102,11 +3923,7 @@ class WhisperHUDApp(rumps.App):
             self._schedule_menu_rebuild()
             self._apply_appearance_to_components()
 
-            self._notify(
-                "WhisperHUD",
-                "Settings Reset",
-                "All settings have been reset to defaults."
-            )
+            self._notify("WhisperHUD", "Settings Reset", "All settings have been reset to defaults.")
 
     def _toggle_translation(self, sender):
         """Toggle translation on/off."""
@@ -4152,11 +3969,12 @@ class WhisperHUDApp(rumps.App):
                     message=(
                         f"Translation provider '{provider_name}' is not available.\n\n"
                         f"Please configure the provider or select a different one."
-                    )
+                    ),
                 )
 
             try:
                 from PyObjCTools import AppHelper
+
                 AppHelper.callAfter(_revert)
             except Exception:
                 _revert()
@@ -4221,7 +4039,7 @@ class WhisperHUDApp(rumps.App):
                 "  https://ollama.ai\n\n"
                 "After installing, run:\n"
                 "  ollama serve"
-            )
+            ),
         )
 
     def _show_ollama_start_help(self, sender):
@@ -4234,7 +4052,7 @@ class WhisperHUDApp(rumps.App):
                 "  ollama serve\n\n"
                 "Or start the Ollama app if you installed\n"
                 "the desktop version."
-            )
+            ),
         )
 
     def _download_translation_model(self, sender):
@@ -4248,15 +4066,13 @@ class WhisperHUDApp(rumps.App):
                     f"Model requires {required_gb:.1f}GB but only "
                     f"{available_gb:.1f}GB available.\n\n"
                     f"Free up some disk space and try again."
-                )
+                ),
             )
             return
 
         # Show confirmation
         model_info = next(
-            (m for m in self.translator.get_models()
-             if m["id"] == self.translator.get_current_model()),
-            None
+            (m for m in self.translator.get_models() if m["id"] == self.translator.get_current_model()), None
         )
         if not model_info:
             return
@@ -4271,7 +4087,7 @@ class WhisperHUDApp(rumps.App):
                 f"your internet connection."
             ),
             ok="Download",
-            cancel="Cancel"
+            cancel="Cancel",
         )
 
         if response != 1:  # User clicked Cancel
@@ -4281,7 +4097,7 @@ class WhisperHUDApp(rumps.App):
         self._notify(
             "WhisperHUD",
             "Downloading Translation Model",
-            "This will run in the background. You'll be notified when complete."
+            "This will run in the background. You'll be notified when complete.",
         )
 
         # Download in background thread
@@ -4292,17 +4108,9 @@ class WhisperHUDApp(rumps.App):
             success = self.translator.download_model(progress_callback)
 
             if success:
-                self._notify(
-                    "WhisperHUD",
-                    "Download Complete",
-                    "Translation model is ready to use!"
-                )
+                self._notify("WhisperHUD", "Download Complete", "Translation model is ready to use!")
             else:
-                self._notify(
-                    "WhisperHUD",
-                    "Download Failed",
-                    "Check console for details."
-                )
+                self._notify("WhisperHUD", "Download Failed", "Check console for details.")
 
             # Refresh menu
             self._schedule_menu_rebuild()
@@ -4336,7 +4144,7 @@ class WhisperHUDApp(rumps.App):
         else:
             rumps.alert(
                 title="Ollama Ready",
-                message=f"Ollama is installed and running.\nModel: {status.get('model', 'unknown')}\nSize: {status.get('size_gb', 0)}GB"
+                message=f"Ollama is installed and running.\nModel: {status.get('model', 'unknown')}\nSize: {status.get('size_gb', 0)}GB",
             )
 
     def _install_ollama(self, sender):
@@ -4349,7 +4157,7 @@ class WhisperHUDApp(rumps.App):
                     "Homebrew is required to install Ollama.\n\n"
                     "Install Homebrew from: https://brew.sh\n\n"
                     "After installing Homebrew, try again."
-                )
+                ),
             )
             return
 
@@ -4361,17 +4169,13 @@ class WhisperHUDApp(rumps.App):
                 "You'll be notified when complete."
             ),
             ok="Install",
-            cancel="Cancel"
+            cancel="Cancel",
         )
 
         if response != 1:
             return
 
-        self._notify(
-            "WhisperHUD",
-            "Installing Ollama",
-            "This will run in the background..."
-        )
+        self._notify("WhisperHUD", "Installing Ollama", "This will run in the background...")
 
         def do_install():
             success = self.translator.install_ollama(
@@ -4379,19 +4183,11 @@ class WhisperHUDApp(rumps.App):
             )
 
             if success:
-                self._notify(
-                    "WhisperHUD",
-                    "Installation Complete",
-                    "Ollama is now installed. Starting server..."
-                )
+                self._notify("WhisperHUD", "Installation Complete", "Ollama is now installed. Starting server...")
                 # Auto-start the server
                 self._auto_start_ollama()
             else:
-                self._notify(
-                    "WhisperHUD",
-                    "Installation Failed",
-                    "Try running: brew install ollama"
-                )
+                self._notify("WhisperHUD", "Installation Failed", "Try running: brew install ollama")
 
             self._schedule_menu_rebuild()
 
@@ -4399,27 +4195,15 @@ class WhisperHUDApp(rumps.App):
 
     def _start_ollama(self, sender):
         """Start the Ollama server."""
-        self._notify(
-            "WhisperHUD",
-            "Starting Ollama",
-            "Starting Ollama server..."
-        )
+        self._notify("WhisperHUD", "Starting Ollama", "Starting Ollama server...")
 
         def do_start():
             success, pid = self.translator.start_ollama_server()
 
             if success:
-                self._notify(
-                    "WhisperHUD",
-                    "Ollama Started",
-                    "Ollama server is now running."
-                )
+                self._notify("WhisperHUD", "Ollama Started", "Ollama server is now running.")
             else:
-                self._notify(
-                    "WhisperHUD",
-                    "Failed to Start",
-                    "Try running: ollama serve"
-                )
+                self._notify("WhisperHUD", "Failed to Start", "Try running: ollama serve")
 
             self._schedule_menu_rebuild()
 
@@ -4429,6 +4213,7 @@ class WhisperHUDApp(rumps.App):
         """Auto-start Ollama if installed but not running."""
         status = self.translator.get_status()
         if status.get("ollama_installed", False) and not status.get("ollama_running", False):
+
             def do_start():
                 success, pid = self.translator.start_ollama_server()
                 if success:
@@ -4439,27 +4224,22 @@ class WhisperHUDApp(rumps.App):
 
     def _show_setup_wizard(self):
         """Show the setup wizard for first-time setup."""
+
         def on_complete(result):
             logger.info(f"Setup wizard completed: {result}")
             # Reload config changes made by the wizard
             from .config import Config
+
             self.config.update_from(Config.load())
             self.transcriber.reload_config()
             self.translator.reload_config()
             self._schedule_menu_rebuild()
-            self._notify(
-                "WhisperHUD",
-                "Setup Complete",
-                "You're ready to start transcribing! Hold ⌘⇧Space to record."
-            )
+            self._notify("WhisperHUD", "Setup Complete", "You're ready to start transcribing! Hold ⌘⇧Space to record.")
 
         def on_cancel():
             logger.info("Setup wizard cancelled")
 
-        self._setup_wizard = show_setup_wizard(
-            on_complete=on_complete,
-            on_cancel=on_cancel
-        )
+        self._setup_wizard = show_setup_wizard(on_complete=on_complete, on_cancel=on_cancel)
 
     def _run_setup_wizard(self, sender):
         """Run the setup wizard from menu."""
@@ -4507,20 +4287,13 @@ class WhisperHUDApp(rumps.App):
 
         # Show notification
         theme_name = APPEARANCE_THEMES.get(theme_id, {}).get("name", theme_id)
-        self._notify(
-            "WhisperHUD",
-            "Theme Applied",
-            f"Widget theme: {theme_name}"
-        )
+        self._notify("WhisperHUD", "Theme Applied", f"Widget theme: {theme_name}")
 
     def _apply_character_pack(self, pack_id: str):
         """Apply a character pack to the widget."""
         pack = self.character_pack_manager.get_pack(pack_id)
         if pack is None:
-            rumps.alert(
-                title="Pack Not Found",
-                message=f"Character pack '{pack_id}' could not be found."
-            )
+            rumps.alert(title="Pack Not Found", message=f"Character pack '{pack_id}' could not be found.")
             return
 
         if self.character_pack_manager.apply_pack(pack_id):
@@ -4529,16 +4302,9 @@ class WhisperHUDApp(rumps.App):
             self._apply_appearance_to_components()
             self._schedule_menu_rebuild()
 
-            self._notify(
-                "WhisperHUD",
-                "Character Pack Applied",
-                f"Now using: {pack.name}"
-            )
+            self._notify("WhisperHUD", "Character Pack Applied", f"Now using: {pack.name}")
         else:
-            rumps.alert(
-                title="Failed to Apply Pack",
-                message=f"Could not apply character pack '{pack.name}'."
-            )
+            rumps.alert(title="Failed to Apply Pack", message=f"Could not apply character pack '{pack.name}'.")
 
     def _clear_character_pack(self, sender):
         """Remove character pack and revert to default icons."""
@@ -4547,74 +4313,58 @@ class WhisperHUDApp(rumps.App):
         self._apply_appearance_to_components()
         self._schedule_menu_rebuild()
 
-        self._notify(
-            "WhisperHUD",
-            "Character Pack Removed",
-            "Using default circle icons."
-        )
+        self._notify("WhisperHUD", "Character Pack Removed", "Using default circle icons.")
 
     def _reset_appearance(self, sender):
         """Reset appearance to default."""
         response = rumps.alert(
-            title="Reset Appearance",
-            message="Reset widget appearance to default theme?",
-            ok="Reset",
-            cancel="Cancel"
+            title="Reset Appearance", message="Reset widget appearance to default theme?", ok="Reset", cancel="Cancel"
         )
         if response == 1:
             self.config.reset_appearance()
             self.image_processor.clear_cache()
             self._apply_appearance_to_components()
             self._schedule_menu_rebuild()
-            self._notify(
-                "WhisperHUD",
-                "Appearance Reset",
-                "Widget appearance reset to default."
-            )
+            self._notify("WhisperHUD", "Appearance Reset", "Widget appearance reset to default.")
 
     def _open_appearance_editor(self, sender):
         """Open the appearance customization editor."""
         try:
             from .appearance_editor import show_appearance_editor
+
             show_appearance_editor(
                 config=self.config,
                 image_processor=self.image_processor,
                 on_save=self._on_appearance_saved,
-                on_cancel=lambda: None
+                on_cancel=lambda: None,
             )
         except ImportError as e:
             logger.error(f"Could not open appearance editor: {e}")
             rumps.alert(
                 title="Editor Not Available",
-                message="The appearance editor is not available. Use the theme presets instead."
+                message="The appearance editor is not available. Use the theme presets instead.",
             )
 
     def _on_appearance_saved(self, appearance_config):
         """Called when appearance is saved from editor."""
         self._apply_appearance_to_components()
         self._schedule_menu_rebuild()
-        self._notify(
-            "WhisperHUD",
-            "Appearance Saved",
-            "Your custom appearance has been applied."
-        )
+        self._notify("WhisperHUD", "Appearance Saved", "Your custom appearance has been applied.")
 
     def _open_pack_creator(self, sender):
         """Open the character pack creator wizard."""
         try:
             from .pack_creator import show_pack_creator
+
             show_pack_creator(
                 image_processor=self.image_processor,
                 pack_manager=self.character_pack_manager,
                 on_save=self._on_pack_created,
-                on_cancel=lambda: None
+                on_cancel=lambda: None,
             )
         except ImportError as e:
             logger.error(f"Could not open pack creator: {e}")
-            rumps.alert(
-                title="Pack Creator Not Available",
-                message="The character pack creator is not available."
-            )
+            rumps.alert(title="Pack Creator Not Available", message="The character pack creator is not available.")
 
     def _on_pack_created(self, pack_id: str):
         """Called when a new pack is created."""
@@ -4632,13 +4382,14 @@ class WhisperHUDApp(rumps.App):
         self._notify(
             "WhisperHUD",
             "Welcome!",
-            "Click the menu bar icon to add an API key, or switch to Apple (local) to start without one."
+            "Click the menu bar icon to add an API key, or switch to Apple (local) to start without one.",
         )
 
     def _cleanup_orphaned_temp_files(self):
         """Clean up any orphaned temp files from crashed sessions."""
         try:
             from .encryption import cleanup_orphaned_temp_files
+
             cleaned = cleanup_orphaned_temp_files(prefix="whisper_hud")
             if cleaned > 0:
                 logger.info(f"Cleaned up {cleaned} orphaned temp file(s) from previous session")
@@ -4661,10 +4412,10 @@ class WhisperHUDApp(rumps.App):
 def print_startup_banner():
     """Print a welcome banner when the app starts."""
     # ANSI color codes
-    CYAN = '\033[0;36m'
-    WHITE = '\033[1;37m'
-    DIM = '\033[0;90m'
-    RESET = '\033[0m'
+    CYAN = "\033[0;36m"
+    WHITE = "\033[1;37m"
+    DIM = "\033[0;90m"
+    RESET = "\033[0m"
 
     banner = f"""
 {CYAN}       ╭─────────────────────────────────────╮
@@ -4697,7 +4448,7 @@ def run():
             title="Accessibility Permission Required",
             message=get_accessibility_error_message(),
             ok="Open Settings",
-            cancel="Continue Anyway"
+            cancel="Continue Anyway",
         )
         if response == 1:  # User clicked "Open Settings"
             open_accessibility_settings()

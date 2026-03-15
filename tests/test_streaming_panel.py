@@ -303,7 +303,9 @@ def test_update_transcription_refreshes_accessibility_label(monkeypatch):
 
 def test_copy_action_uses_latest_transcription(monkeypatch):
     copied = {}
-    monkeypatch.setattr(streaming_panel_module, "pyperclip", SimpleNamespace(copy=lambda text: copied.setdefault("text", text)))
+    monkeypatch.setattr(
+        streaming_panel_module, "pyperclip", SimpleNamespace(copy=lambda text: copied.setdefault("text", text))
+    )
 
     panel = StreamingPanel()
     panel._latest_transcription = "Copied text"

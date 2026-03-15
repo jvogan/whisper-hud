@@ -111,7 +111,7 @@ class TranslationManager:
     @property
     def provider(self) -> TranslationProvider:
         """Get the currently active translation provider."""
-        provider_id = getattr(self.config, 'translation_provider', 'apple')
+        provider_id = getattr(self.config, "translation_provider", "apple")
         provider = self.get_provider(provider_id)
         if provider is None:
             # Fallback to Apple (built-in, no setup required)
@@ -119,9 +119,7 @@ class TranslationManager:
         return provider
 
     def get_available_providers(
-        self,
-        check_availability: bool = True,
-        availability_override: Optional[Dict[str, bool]] = None
+        self, check_availability: bool = True, availability_override: Optional[Dict[str, bool]] = None
     ) -> list[dict]:
         """
         Get list of available providers with their status.
@@ -143,22 +141,21 @@ class TranslationManager:
             # Determine category
             category = "local" if provider_id in self.PROVIDER_CATEGORIES["local"] else "cloud"
 
-            providers.append({
-                "id": provider_id,
-                "name": provider_class.display_name,
-                "available": is_available,
-                "category": category,
-                "models": provider.get_models() if provider else [],
-                "requires_download": provider_id == "ollama",
-            })
+            providers.append(
+                {
+                    "id": provider_id,
+                    "name": provider_class.display_name,
+                    "available": is_available,
+                    "category": category,
+                    "models": provider.get_models() if provider else [],
+                    "requires_download": provider_id == "ollama",
+                }
+            )
 
         return providers
 
     def translate(
-        self,
-        text: str,
-        source_lang: Optional[str] = None,
-        target_lang: Optional[str] = None
+        self, text: str, source_lang: Optional[str] = None, target_lang: Optional[str] = None
     ) -> TranslationResult:
         """
         Translate text using the configured provider.
@@ -198,7 +195,7 @@ class TranslationManager:
         Returns:
             Dict with status information
         """
-        provider_id = getattr(self.config, 'translation_provider', 'apple')
+        provider_id = getattr(self.config, "translation_provider", "apple")
         provider = self.provider
         status = provider.get_model_status()
 
@@ -209,7 +206,7 @@ class TranslationManager:
         status["provider_name"] = provider.display_name
 
         # For Ollama, include additional status info
-        if provider_id == "ollama" and hasattr(provider, 'get_model_status'):
+        if provider_id == "ollama" and hasattr(provider, "get_model_status"):
             ollama_status = provider.get_model_status()
             status["ollama_installed"] = ollama_status.get("ollama_installed", False)
             status["ollama_running"] = ollama_status.get("ollama_running", False)
@@ -234,7 +231,7 @@ class TranslationManager:
 
     def get_current_provider(self) -> str:
         """Get the current provider ID."""
-        return getattr(self.config, 'translation_provider', 'apple')
+        return getattr(self.config, "translation_provider", "apple")
 
     def set_model(self, model_id: str) -> None:
         """Change the translation model for the current provider."""
@@ -285,7 +282,7 @@ class TranslationManager:
 
         if provider_id == "ollama":
             provider = self.get_provider("ollama")
-            if hasattr(provider, 'model_config'):
+            if hasattr(provider, "model_config"):
                 required_gb = provider.model_config["size_gb"]
                 has_space, available_gb = OllamaTranslateProvider.check_disk_space(required_gb)
                 return has_space, available_gb, required_gb
@@ -320,7 +317,7 @@ class TranslationManager:
         text: str,
         on_chunk: Callable[[str], None],
         source_lang: Optional[str] = None,
-        target_lang: Optional[str] = None
+        target_lang: Optional[str] = None,
     ) -> TranslationResult:
         """
         Translate text with streaming output.

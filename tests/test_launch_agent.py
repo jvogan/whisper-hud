@@ -1,5 +1,6 @@
 """Tests for launch-at-login path selection."""
 
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,8 +12,9 @@ class TestLaunchAgent:
         """Launch-agent setup should not resolve WhisperHUD via PATH."""
         from whisper_hud.launch_agent import get_app_executable
 
-        with patch("whisper_hud.launch_agent.sys.executable", "/usr/local/bin/python3"):
-            assert get_app_executable() == str(Path("/usr/local/bin/python3"))
+        with patch("whisper_hud.launch_agent.sys.executable", sys.executable):
+            result = get_app_executable()
+        assert result == str(Path(sys.executable).resolve())
 
     def test_get_launch_agent_plist_uses_module_launch_for_python(self):
         """Interpreter-based installs should run the module explicitly."""

@@ -37,6 +37,7 @@ except ImportError:
 # COLOR PALETTE
 # ============================================================================
 
+
 class Colors:
     """Official WhisperHUD color palette."""
 
@@ -79,6 +80,7 @@ class Colors:
 # UTILITY FUNCTIONS
 # ============================================================================
 
+
 def ensure_dirs():
     """Create output directories if they don't exist."""
     base = Path(__file__).parent
@@ -111,10 +113,9 @@ def lerp_color(c1: Tuple[int, int, int], c2: Tuple[int, int, int], t: float) -> 
     )
 
 
-def create_gradient(width: int, height: int,
-                   c1: Tuple[int, int, int],
-                   c2: Tuple[int, int, int],
-                   direction: str = "diagonal") -> Image.Image:
+def create_gradient(
+    width: int, height: int, c1: Tuple[int, int, int], c2: Tuple[int, int, int], direction: str = "diagonal"
+) -> Image.Image:
     """Create a gradient image."""
     img = Image.new("RGB", (width, height))
     pixels = img.load()
@@ -172,11 +173,14 @@ def floyd_steinberg_dither(img: Image.Image, palette: List[Tuple[int, int, int]]
     return Image.fromarray(pixels)
 
 
-def draw_microphone(draw: ImageDraw.Draw,
-                   center_x: int, center_y: int,
-                   size: int,
-                   color: Tuple[int, int, int],
-                   outline_color: Tuple[int, int, int] = None):
+def draw_microphone(
+    draw: ImageDraw.Draw,
+    center_x: int,
+    center_y: int,
+    size: int,
+    color: Tuple[int, int, int],
+    outline_color: Tuple[int, int, int] = None,
+):
     """Draw a stylized microphone icon."""
     # Scale factors
     head_radius = int(size * 0.35)
@@ -188,52 +192,39 @@ def draw_microphone(draw: ImageDraw.Draw,
     # Microphone head (oval)
     head_top = center_y - int(size * 0.45)
     head_bottom = head_top + head_radius * 2
-    draw.ellipse([
-        center_x - head_radius, head_top,
-        center_x + head_radius, head_bottom
-    ], fill=color, outline=outline_color)
+    draw.ellipse(
+        [center_x - head_radius, head_top, center_x + head_radius, head_bottom], fill=color, outline=outline_color
+    )
 
     # Microphone body
     body_top = head_bottom - int(head_radius * 0.3)
     body_bottom = body_top + body_height
-    draw.rectangle([
-        center_x - body_width, body_top,
-        center_x + body_width, body_bottom
-    ], fill=color, outline=outline_color)
+    draw.rectangle(
+        [center_x - body_width, body_top, center_x + body_width, body_bottom], fill=color, outline=outline_color
+    )
 
     # Stand (vertical line)
     stand_top = body_bottom
     stand_bottom = stand_top + stand_height
     stand_width = max(2, int(size * 0.04))
-    draw.rectangle([
-        center_x - stand_width // 2, stand_top,
-        center_x + stand_width // 2, stand_bottom
-    ], fill=color)
+    draw.rectangle([center_x - stand_width // 2, stand_top, center_x + stand_width // 2, stand_bottom], fill=color)
 
     # Base (horizontal line)
     base_y = stand_bottom
     base_height = max(2, int(size * 0.04))
-    draw.rectangle([
-        center_x - base_width, base_y,
-        center_x + base_width, base_y + base_height
-    ], fill=color)
+    draw.rectangle([center_x - base_width, base_y, center_x + base_width, base_y + base_height], fill=color)
 
 
-def draw_sound_waves(draw: ImageDraw.Draw,
-                    center_x: int, center_y: int,
-                    size: int,
-                    color: Tuple[int, int, int],
-                    num_waves: int = 3):
+def draw_sound_waves(
+    draw: ImageDraw.Draw, center_x: int, center_y: int, size: int, color: Tuple[int, int, int], num_waves: int = 3
+):
     """Draw sound wave arcs emanating from center."""
     for i in range(num_waves):
         radius = int(size * (0.4 + i * 0.15))
         line_width = max(1, int(size * 0.03))
 
         # Draw arc on right side
-        bbox = [
-            center_x - radius, center_y - radius,
-            center_x + radius, center_y + radius
-        ]
+        bbox = [center_x - radius, center_y - radius, center_x + radius, center_y + radius]
         draw.arc(bbox, start=-45, end=45, fill=color, width=line_width)
 
 
@@ -241,10 +232,8 @@ def draw_sound_waves(draw: ImageDraw.Draw,
 # HUD ELEMENTS (New for HUD Visor design)
 # ============================================================================
 
-def draw_hud_corner_brackets(draw: ImageDraw.Draw,
-                             size: int,
-                             color: Tuple[int, int, int],
-                             opacity: float = 0.7):
+
+def draw_hud_corner_brackets(draw: ImageDraw.Draw, size: int, color: Tuple[int, int, int], opacity: float = 0.7):
     """Draw HUD-style corner brackets."""
     margin = int(size * 0.08)
     bracket_len = int(size * 0.1)
@@ -254,27 +243,41 @@ def draw_hud_corner_brackets(draw: ImageDraw.Draw,
     bracket_color = tuple(int(c * opacity) for c in color)
 
     # Top-left bracket
-    draw.line([(margin, margin + bracket_len), (margin, margin), (margin + bracket_len, margin)],
-              fill=bracket_color, width=line_width)
+    draw.line(
+        [(margin, margin + bracket_len), (margin, margin), (margin + bracket_len, margin)],
+        fill=bracket_color,
+        width=line_width,
+    )
 
     # Top-right bracket
-    draw.line([(size - margin - bracket_len, margin), (size - margin, margin), (size - margin, margin + bracket_len)],
-              fill=bracket_color, width=line_width)
+    draw.line(
+        [(size - margin - bracket_len, margin), (size - margin, margin), (size - margin, margin + bracket_len)],
+        fill=bracket_color,
+        width=line_width,
+    )
 
     # Bottom-left bracket
-    draw.line([(margin, size - margin - bracket_len), (margin, size - margin), (margin + bracket_len, size - margin)],
-              fill=bracket_color, width=line_width)
+    draw.line(
+        [(margin, size - margin - bracket_len), (margin, size - margin), (margin + bracket_len, size - margin)],
+        fill=bracket_color,
+        width=line_width,
+    )
 
     # Bottom-right bracket
-    draw.line([(size - margin - bracket_len, size - margin), (size - margin, size - margin), (size - margin, size - margin - bracket_len)],
-              fill=bracket_color, width=line_width)
+    draw.line(
+        [
+            (size - margin - bracket_len, size - margin),
+            (size - margin, size - margin),
+            (size - margin, size - margin - bracket_len),
+        ],
+        fill=bracket_color,
+        width=line_width,
+    )
 
 
-def draw_hud_scan_lines(draw: ImageDraw.Draw,
-                        size: int,
-                        color: Tuple[int, int, int],
-                        opacity: float = 0.15,
-                        num_lines: int = 3):
+def draw_hud_scan_lines(
+    draw: ImageDraw.Draw, size: int, color: Tuple[int, int, int], opacity: float = 0.15, num_lines: int = 3
+):
     """Draw subtle horizontal scan lines."""
     line_width = max(1, int(size * 0.002))
     scan_color = tuple(int(c * opacity) for c in color)
@@ -284,11 +287,9 @@ def draw_hud_scan_lines(draw: ImageDraw.Draw,
         draw.line([(0, y), (size, y)], fill=scan_color, width=line_width)
 
 
-def draw_hud_targeting_reticle(draw: ImageDraw.Draw,
-                               center_x: int, center_y: int,
-                               radius: int,
-                               color: Tuple[int, int, int],
-                               size: int):
+def draw_hud_targeting_reticle(
+    draw: ImageDraw.Draw, center_x: int, center_y: int, radius: int, color: Tuple[int, int, int], size: int
+):
     """Draw targeting reticle circle with crosshair marks."""
     line_width = max(1, int(size * 0.006))
     mark_len = int(size * 0.04)
@@ -307,9 +308,11 @@ def draw_hud_targeting_reticle(draw: ImageDraw.Draw,
     outer_radius = int(radius * 1.18)
     outer_color = tuple(int(c * 0.3) for c in color)
     outer_width = max(1, int(size * 0.003))
-    draw.ellipse([center_x - outer_radius, center_y - outer_radius,
-                  center_x + outer_radius, center_y + outer_radius],
-                 outline=outer_color, width=outer_width)
+    draw.ellipse(
+        [center_x - outer_radius, center_y - outer_radius, center_x + outer_radius, center_y + outer_radius],
+        outline=outer_color,
+        width=outer_width,
+    )
 
     # Crosshair marks (outside the circle)
     mark_color = tuple(int(c * 0.6) for c in color)
@@ -317,57 +320,76 @@ def draw_hud_targeting_reticle(draw: ImageDraw.Draw,
     gap = int(radius * 0.15)
 
     # Top mark
-    draw.line([(center_x, center_y - outer_radius - gap - mark_len),
-               (center_x, center_y - outer_radius - gap)],
-              fill=mark_color, width=mark_width)
+    draw.line(
+        [(center_x, center_y - outer_radius - gap - mark_len), (center_x, center_y - outer_radius - gap)],
+        fill=mark_color,
+        width=mark_width,
+    )
     # Bottom mark
-    draw.line([(center_x, center_y + outer_radius + gap),
-               (center_x, center_y + outer_radius + gap + mark_len)],
-              fill=mark_color, width=mark_width)
+    draw.line(
+        [(center_x, center_y + outer_radius + gap), (center_x, center_y + outer_radius + gap + mark_len)],
+        fill=mark_color,
+        width=mark_width,
+    )
     # Left mark
-    draw.line([(center_x - outer_radius - gap - mark_len, center_y),
-               (center_x - outer_radius - gap, center_y)],
-              fill=mark_color, width=mark_width)
+    draw.line(
+        [(center_x - outer_radius - gap - mark_len, center_y), (center_x - outer_radius - gap, center_y)],
+        fill=mark_color,
+        width=mark_width,
+    )
     # Right mark
-    draw.line([(center_x + outer_radius + gap, center_y),
-               (center_x + outer_radius + gap + mark_len, center_y)],
-              fill=mark_color, width=mark_width)
+    draw.line(
+        [(center_x + outer_radius + gap, center_y), (center_x + outer_radius + gap + mark_len, center_y)],
+        fill=mark_color,
+        width=mark_width,
+    )
 
 
-def draw_hud_status_indicators(draw: ImageDraw.Draw,
-                               size: int,
-                               color: Tuple[int, int, int],
-                               opacity: float = 0.4):
+def draw_hud_status_indicators(draw: ImageDraw.Draw, size: int, color: Tuple[int, int, int], opacity: float = 0.4):
     """Draw small HUD data readout decorations."""
     indicator_color = tuple(int(c * opacity) for c in color)
     bar_height = max(1, int(size * 0.006))
     margin = int(size * 0.1)
 
     # Top-left indicators
-    draw.rectangle([margin, margin + int(size * 0.04),
-                   margin + int(size * 0.06), margin + int(size * 0.04) + bar_height],
-                  fill=indicator_color)
-    draw.rectangle([margin, margin + int(size * 0.055),
-                   margin + int(size * 0.04), margin + int(size * 0.055) + bar_height],
-                  fill=indicator_color)
+    draw.rectangle(
+        [margin, margin + int(size * 0.04), margin + int(size * 0.06), margin + int(size * 0.04) + bar_height],
+        fill=indicator_color,
+    )
+    draw.rectangle(
+        [margin, margin + int(size * 0.055), margin + int(size * 0.04), margin + int(size * 0.055) + bar_height],
+        fill=indicator_color,
+    )
 
     # Bottom-right indicators
-    draw.rectangle([size - margin - int(size * 0.06), size - margin - int(size * 0.04),
-                   size - margin, size - margin - int(size * 0.04) + bar_height],
-                  fill=indicator_color)
-    draw.rectangle([size - margin - int(size * 0.04), size - margin - int(size * 0.025),
-                   size - margin, size - margin - int(size * 0.025) + bar_height],
-                  fill=indicator_color)
+    draw.rectangle(
+        [
+            size - margin - int(size * 0.06),
+            size - margin - int(size * 0.04),
+            size - margin,
+            size - margin - int(size * 0.04) + bar_height,
+        ],
+        fill=indicator_color,
+    )
+    draw.rectangle(
+        [
+            size - margin - int(size * 0.04),
+            size - margin - int(size * 0.025),
+            size - margin,
+            size - margin - int(size * 0.025) + bar_height,
+        ],
+        fill=indicator_color,
+    )
 
 
 # ============================================================================
 # ICON GENERATION
 # ============================================================================
 
-def draw_geometric_microphone(draw: ImageDraw.Draw,
-                              center_x: int, center_y: int,
-                              size: int,
-                              color: Tuple[int, int, int]):
+
+def draw_geometric_microphone(
+    draw: ImageDraw.Draw, center_x: int, center_y: int, size: int, color: Tuple[int, int, int]
+):
     """Draw a more geometric/angular microphone for HUD aesthetic."""
     # Scale factors (more angular proportions)
     head_width = int(size * 0.30)
@@ -383,37 +405,33 @@ def draw_geometric_microphone(draw: ImageDraw.Draw,
     # Microphone head (rounded rectangle - more angular than oval)
     head_top = center_y - int(size * 0.30)
     head_left = center_x - head_width // 2
-    draw.rounded_rectangle([
-        head_left, head_top,
-        head_left + head_width, head_top + head_height
-    ], radius=head_radius, fill=color)
+    draw.rounded_rectangle(
+        [head_left, head_top, head_left + head_width, head_top + head_height], radius=head_radius, fill=color
+    )
 
     # Microphone body (rectangle connecting head to stand)
     body_top = head_top + head_height - int(head_radius * 0.3)
     body_left = center_x - body_width // 2
-    draw.rectangle([
-        body_left, body_top,
-        body_left + body_width, body_top + body_height
-    ], fill=color)
+    draw.rectangle([body_left, body_top, body_left + body_width, body_top + body_height], fill=color)
 
     # Stand (vertical line)
     stand_top = body_top + body_height
     stand_left = center_x - stand_width // 2
-    draw.rectangle([
-        stand_left, stand_top,
-        stand_left + stand_width, stand_top + stand_height
-    ], fill=color)
+    draw.rectangle([stand_left, stand_top, stand_left + stand_width, stand_top + stand_height], fill=color)
 
     # Base (horizontal bar with slight taper)
     base_y = stand_top + stand_height
     base_left = center_x - base_width // 2
     # Draw as polygon for angular look
-    draw.polygon([
-        (base_left, base_y),
-        (base_left + base_width, base_y),
-        (base_left + base_width - int(size * 0.02), base_y + base_height),
-        (base_left + int(size * 0.02), base_y + base_height)
-    ], fill=color)
+    draw.polygon(
+        [
+            (base_left, base_y),
+            (base_left + base_width, base_y),
+            (base_left + base_width - int(size * 0.02), base_y + base_height),
+            (base_left + int(size * 0.02), base_y + base_height),
+        ],
+        fill=color,
+    )
 
 
 def generate_app_icon(size: int, output_path: Path):
@@ -446,8 +464,7 @@ def generate_app_icon(size: int, output_path: Path):
     if size >= 32:
         shadow_offset = max(1, size // 64)
         shadow_color = (40, 20, 60)  # Dark purple-ish shadow
-        draw_geometric_microphone(draw, center + shadow_offset, mic_center_y + shadow_offset,
-                                  mic_size, shadow_color)
+        draw_geometric_microphone(draw, center + shadow_offset, mic_center_y + shadow_offset, mic_size, shadow_color)
 
     # Main microphone (geometric style)
     draw_geometric_microphone(draw, center, mic_center_y, mic_size, Colors.WHITE_RGB)
@@ -456,14 +473,12 @@ def generate_app_icon(size: int, output_path: Path):
     if size >= 64:
         reticle_radius = int(size * 0.22)
         reticle_center_y = mic_center_y - int(size * 0.08)  # Around mic head
-        draw_hud_targeting_reticle(draw, center, reticle_center_y, reticle_radius,
-                                   Colors.WHITE_RGB, size)
+        draw_hud_targeting_reticle(draw, center, reticle_center_y, reticle_radius, Colors.WHITE_RGB, size)
 
     # === Sound waves ===
     wave_offset = int(size * 0.15)
     wave_center_y = mic_center_y - int(size * 0.08)
-    draw_sound_waves(draw, center + wave_offset, wave_center_y,
-                    mic_size, Colors.WHITE_RGB, num_waves=3)
+    draw_sound_waves(draw, center + wave_offset, wave_center_y, mic_size, Colors.WHITE_RGB, num_waves=3)
 
     # === HUD Status Indicators ===
     if size >= 128:
@@ -510,11 +525,7 @@ def compile_icns(base_path: Path):
     icns_path = base_path / "icons" / "AppIcon.icns"
 
     try:
-        subprocess.run([
-            "iconutil", "-c", "icns",
-            str(iconset_path),
-            "-o", str(icns_path)
-        ], check=True)
+        subprocess.run(["iconutil", "-c", "icns", str(iconset_path), "-o", str(icns_path)], check=True)
         print(f"  Generated: AppIcon.icns")
     except subprocess.CalledProcessError as e:
         print(f"  Error: iconutil failed - {e}")
@@ -525,6 +536,7 @@ def compile_icns(base_path: Path):
 # ============================================================================
 # DITHERED GRAPHICS
 # ============================================================================
+
 
 def generate_dithered_mic(size: int, output_path: Path):
     """Generate a dithered microphone icon."""
@@ -551,8 +563,7 @@ def generate_dithered_mic(size: int, output_path: Path):
     # Add sound waves
     draw = ImageDraw.Draw(img)
     wave_color = lerp_color(Colors.CYAN_RGB, Colors.PURPLE_RGB, 0.5)
-    draw_sound_waves(draw, center + int(size * 0.15), center - int(size * 0.05),
-                    mic_size, wave_color, num_waves=2)
+    draw_sound_waves(draw, center + int(size * 0.15), center - int(size * 0.05), mic_size, wave_color, num_waves=2)
 
     # Apply dithering
     img = floyd_steinberg_dither(img, Colors.DITHER_PALETTE)
@@ -603,8 +614,7 @@ def generate_logo_banner(width: int, height: int, output_path: Path):
         t = y / height
         alpha = int(30 * (1 - t))  # Subtle top highlight
         if alpha > 0:
-            draw.line([(0, y), (width, y)],
-                     fill=lerp_color(Colors.DARK_BG_RGB, Colors.CYAN_RGB, alpha / 255))
+            draw.line([(0, y), (width, y)], fill=lerp_color(Colors.DARK_BG_RGB, Colors.CYAN_RGB, alpha / 255))
 
     # Draw microphone on left side
     mic_size = int(height * 0.6)
@@ -621,8 +631,9 @@ def generate_logo_banner(width: int, height: int, output_path: Path):
 
     # Draw sound waves
     draw = ImageDraw.Draw(img)
-    draw_sound_waves(draw, mic_x + int(mic_size * 0.3), mic_y - int(mic_size * 0.1),
-                    mic_size, Colors.CYAN_RGB, num_waves=3)
+    draw_sound_waves(
+        draw, mic_x + int(mic_size * 0.3), mic_y - int(mic_size * 0.1), mic_size, Colors.CYAN_RGB, num_waves=3
+    )
 
     # Add text placeholder area (will be overlaid with actual text in final use)
     text_x = int(width * 0.25)
@@ -651,10 +662,9 @@ def generate_logo_banner(width: int, height: int, output_path: Path):
     # Draw small blocks for tagline
     small_block = int(width * 0.008)
     for i in range(len(tagline_text)):
-        if tagline_text[i] != ' ':
+        if tagline_text[i] != " ":
             x = text_x + i * int(small_block * 1.5)
-            draw.rectangle([x, tagline_y, x + small_block, tagline_y + small_block],
-                          fill=Colors.DIM_GRAY_RGB)
+            draw.rectangle([x, tagline_y, x + small_block, tagline_y + small_block], fill=Colors.DIM_GRAY_RGB)
 
     # Apply dithering
     img = floyd_steinberg_dither(img, Colors.DITHER_PALETTE)
@@ -686,6 +696,7 @@ def generate_all_dithered(base_path: Path):
 # ============================================================================
 # SOCIAL MEDIA GRAPHICS
 # ============================================================================
+
 
 def generate_readme_banner(width: int, height: int, output_path: Path):
     """Generate a README header banner."""
@@ -720,8 +731,14 @@ def generate_readme_banner(width: int, height: int, output_path: Path):
     draw = ImageDraw.Draw(img)
 
     # Sound waves
-    draw_sound_waves(draw, mic_x + int(mic_size * 0.25), mic_y - int(mic_size * 0.05),
-                    int(mic_size * 0.8), Colors.WHITE_RGB, num_waves=3)
+    draw_sound_waves(
+        draw,
+        mic_x + int(mic_size * 0.25),
+        mic_y - int(mic_size * 0.05),
+        int(mic_size * 0.8),
+        Colors.WHITE_RGB,
+        num_waves=3,
+    )
 
     # Draw waveform across middle
     waveform_y = int(height * 0.65)
@@ -761,8 +778,7 @@ def generate_readme_banner(width: int, height: int, output_path: Path):
     small_block = int(height * 0.02)
     for i in range(20):
         x = title_x + i * int(small_block * 2)
-        draw.rectangle([x, tagline_y, x + small_block, tagline_y + small_block],
-                      fill=Colors.DIM_GRAY_RGB)
+        draw.rectangle([x, tagline_y, x + small_block, tagline_y + small_block], fill=Colors.DIM_GRAY_RGB)
 
     # Apply dithering
     img = floyd_steinberg_dither(img, Colors.DITHER_PALETTE)
@@ -804,9 +820,10 @@ def generate_all_social(base_path: Path):
 # SVG ICON (Vector source)
 # ============================================================================
 
+
 def generate_svg_icon(output_path: Path):
     """Generate an SVG version of the icon with HUD visor design."""
-    svg_content = '''<?xml version="1.0" encoding="UTF-8"?>
+    svg_content = """<?xml version="1.0" encoding="UTF-8"?>
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <!-- Main gradient -->
@@ -901,9 +918,9 @@ def generate_svg_icon(output_path: Path):
     <rect x="884" y="898" width="40" height="6"/>
   </g>
 </svg>
-'''
+"""
 
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         f.write(svg_content)
 
     print(f"  Generated: {output_path.name}")
@@ -912,6 +929,7 @@ def generate_svg_icon(output_path: Path):
 # ============================================================================
 # MAIN
 # ============================================================================
+
 
 def main():
     parser = argparse.ArgumentParser(description="Generate WhisperHUD visual assets")

@@ -15,7 +15,7 @@ class TestSecureDelete:
         from whisper_hud.encryption import secure_delete
 
         # Create a temp file with content
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
             f.write("sensitive data")
             temp_path = f.name
 
@@ -161,6 +161,7 @@ class TestCryptographyCheck:
         # Should return True if cryptography is installed
         try:
             import cryptography  # noqa: F401
+
             assert is_cryptography_installed() is True
         except ImportError:
             assert is_cryptography_installed() is False
@@ -177,7 +178,7 @@ class TestOrphanedTempCleanup:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create an "old" file (we'll mock the time check)
             temp_file = os.path.join(tmpdir, "whisper_hud_test.wav")
-            with open(temp_file, 'w') as f:
+            with open(temp_file, "w") as f:
                 f.write("test audio data")
 
             # Make file appear old by setting mtime to 2 hours ago
@@ -198,7 +199,7 @@ class TestOrphanedTempCleanup:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create a recent file
             temp_file = os.path.join(tmpdir, "whisper_hud_recent.wav")
-            with open(temp_file, 'w') as f:
+            with open(temp_file, "w") as f:
                 f.write("test audio data")
 
             # Run cleanup (file is recent, should be skipped)
@@ -213,8 +214,9 @@ class TestPrivacyConfig:
 
     def test_private_mode_defaults(self):
         """Test that private mode is off by default."""
-        with patch('whisper_hud.config.CONFIG_FILE', Path('/tmp/test_config.json')):
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
             from whisper_hud.config import Config
+
             config = Config()
 
             assert config.private_mode is False
@@ -225,8 +227,8 @@ class TestPrivacyConfig:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_file = Path(tmpdir) / "config.json"
 
-            with patch('whisper_hud.config.CONFIG_FILE', config_file):
-                with patch('whisper_hud.config.CONFIG_DIR', Path(tmpdir)):
+            with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                with patch("whisper_hud.config.CONFIG_DIR", Path(tmpdir)):
                     from whisper_hud.config import Config
 
                     config = Config()
@@ -241,8 +243,9 @@ class TestPrivacyConfig:
 
     def test_private_mode_prevents_history_storage(self):
         """Test that private mode prevents storing transcriptions."""
-        with patch('whisper_hud.config.CONFIG_FILE', Path('/tmp/test_config.json')):
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
             from whisper_hud.config import Config
+
             config = Config()
             config.private_mode = True
             config.history = []
@@ -258,8 +261,8 @@ class TestPrivacyConfig:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_file = Path(tmpdir) / "config.json"
 
-            with patch('whisper_hud.config.CONFIG_FILE', config_file):
-                with patch('whisper_hud.config.CONFIG_DIR', Path(tmpdir)):
+            with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                with patch("whisper_hud.config.CONFIG_DIR", Path(tmpdir)):
                     from whisper_hud.config import Config
 
                     config = Config()
@@ -276,19 +279,21 @@ class TestEncryptedHistory:
     @pytest.fixture
     def mock_encryption(self):
         """Mock encryption functions."""
-        with patch('whisper_hud.config.encrypt_text') as mock_enc:
-            with patch('whisper_hud.config.decrypt_text') as mock_dec:
+        with patch("whisper_hud.config.encrypt_text") as mock_enc:
+            with patch("whisper_hud.config.decrypt_text") as mock_dec:
                 mock_enc.side_effect = lambda x: f"ENCRYPTED:{x}" if x else None
-                mock_dec.side_effect = lambda x: x.replace("ENCRYPTED:", "") if x and x.startswith("ENCRYPTED:") else None
-                yield {'encrypt': mock_enc, 'decrypt': mock_dec}
+                mock_dec.side_effect = lambda x: (
+                    x.replace("ENCRYPTED:", "") if x and x.startswith("ENCRYPTED:") else None
+                )
+                yield {"encrypt": mock_enc, "decrypt": mock_dec}
 
     def test_history_encrypted_flag(self):
         """Test that encrypted flag is set on history entries."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_file = Path(tmpdir) / "config.json"
 
-            with patch('whisper_hud.config.CONFIG_FILE', config_file):
-                with patch('whisper_hud.config.CONFIG_DIR', Path(tmpdir)):
+            with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                with patch("whisper_hud.config.CONFIG_DIR", Path(tmpdir)):
                     from whisper_hud.config import Config
 
                     config = Config()
@@ -297,7 +302,7 @@ class TestEncryptedHistory:
                     config.history = []
 
                     # Mock the encryption
-                    with patch('whisper_hud.encryption.encrypt_text') as mock_enc:
+                    with patch("whisper_hud.encryption.encrypt_text") as mock_enc:
                         mock_enc.side_effect = lambda x: f"ENC:{x}" if x else None
 
                         config.add_to_history("test message", provider="test")
@@ -310,8 +315,8 @@ class TestEncryptedHistory:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_file = Path(tmpdir) / "config.json"
 
-            with patch('whisper_hud.config.CONFIG_FILE', config_file):
-                with patch('whisper_hud.config.CONFIG_DIR', Path(tmpdir)):
+            with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                with patch("whisper_hud.config.CONFIG_DIR", Path(tmpdir)):
                     from whisper_hud.config import Config
 
                     config = Config()

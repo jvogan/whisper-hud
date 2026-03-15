@@ -96,10 +96,7 @@ def enable_launch_at_login() -> tuple[bool, str]:
             plistlib.dump(plist_content, f)
 
         # Load the launch agent
-        subprocess.run(
-            ["launchctl", "load", str(LAUNCH_AGENT_PLIST)],
-            capture_output=True
-        )
+        subprocess.run(["launchctl", "load", str(LAUNCH_AGENT_PLIST)], capture_output=True)
 
         logger.info(f"Enabled launch at login: {LAUNCH_AGENT_PLIST}")
         return True, "WhisperHUD will now start at login"
@@ -121,10 +118,7 @@ def disable_launch_at_login() -> tuple[bool, str]:
             return True, "Launch at login was not enabled"
 
         # Unload the launch agent
-        subprocess.run(
-            ["launchctl", "unload", str(LAUNCH_AGENT_PLIST)],
-            capture_output=True
-        )
+        subprocess.run(["launchctl", "unload", str(LAUNCH_AGENT_PLIST)], capture_output=True)
 
         # Remove plist file
         LAUNCH_AGENT_PLIST.unlink()

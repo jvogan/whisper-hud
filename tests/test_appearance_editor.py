@@ -72,10 +72,7 @@ def test_add_navigation_buttons_includes_reset_button(mock_config, monkeypatch):
     editor._delegate = object()
     editor._add_navigation_buttons(content, 480, show_back=False, show_next=False, show_save=False)
 
-    assert any(
-        view.title == "Reset to Defaults" and view.action == "resetToDefaults:"
-        for view in content.subviews
-    )
+    assert any(view.title == "Reset to Defaults" and view.action == "resetToDefaults:" for view in content.subviews)
 
 
 def test_handle_reset_to_defaults_restores_factory_defaults(mock_config, monkeypatch):
@@ -118,9 +115,7 @@ def test_update_icon_previews_updates_all_five_states(mock_config):
     editor._working_config["custom_icon"]["path"] = "/tmp/icon.png"
     editor._working_config["custom_icon"]["shape_mode"] = "alpha"
 
-    previews = {
-        f"icon_{state}": FakePreview() for state in appearance_editor.WIDGET_STATES
-    }
+    previews = {f"icon_{state}": FakePreview() for state in appearance_editor.WIDGET_STATES}
     editor._preview_views = previews
     editor._image_processor.get_preview.side_effect = (
         lambda path, size, tint, opacity, shape: f"{path}|{tint}|{opacity}|{shape}"

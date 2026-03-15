@@ -25,11 +25,7 @@ class DummyProvider(TranslationProvider):
     def translate(self, text: str, source_lang: str, target_lang: str) -> TranslationResult:
         self.args = (source_lang, target_lang)
         return TranslationResult(
-            text="ok",
-            source_lang=source_lang,
-            target_lang=target_lang,
-            provider=self.name,
-            model=self.model
+            text="ok", source_lang=source_lang, target_lang=target_lang, provider=self.name, model=self.model
         )
 
     def is_available(self) -> bool:
@@ -55,10 +51,7 @@ def test_translate_manager_passes_auto_source(mock_config, monkeypatch):
     assert provider.args[1] == "es"
 
 
-@pytest.mark.parametrize(
-    "provider_cls",
-    [OpenAITranslateProvider, GeminiTranslateProvider, OllamaTranslateProvider]
-)
+@pytest.mark.parametrize("provider_cls", [OpenAITranslateProvider, GeminiTranslateProvider, OllamaTranslateProvider])
 def test_provider_prompt_auto_detect(provider_cls):
     """Providers should explicitly request source language detection for 'auto'."""
     provider = provider_cls()
@@ -79,10 +72,7 @@ def test_provider_prompt_auto_detect(provider_cls):
         assert "Spanish" in prompt
 
 
-@pytest.mark.parametrize(
-    "provider_cls",
-    [OpenAITranslateProvider, GeminiTranslateProvider, OllamaTranslateProvider]
-)
+@pytest.mark.parametrize("provider_cls", [OpenAITranslateProvider, GeminiTranslateProvider, OllamaTranslateProvider])
 def test_provider_prompt_explicit_source(provider_cls):
     """Providers should include explicit source language when provided."""
     provider = provider_cls()

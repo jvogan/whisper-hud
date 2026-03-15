@@ -77,7 +77,7 @@ class AppleSpeechProvider(TranscriptionProvider):
             return False
 
         try:
-            mac_version = tuple(map(int, platform.mac_ver()[0].split('.')))
+            mac_version = tuple(map(int, platform.mac_ver()[0].split(".")))
             if mac_version < (12, 0):
                 self._available = False
                 return False
@@ -88,9 +88,8 @@ class AppleSpeechProvider(TranscriptionProvider):
         # Check if Speech framework is available
         try:
             from Speech import SFSpeechRecognizer
-            recognizer = SFSpeechRecognizer.alloc().initWithLocale_(
-                self._get_locale(self.model)
-            )
+
+            recognizer = SFSpeechRecognizer.alloc().initWithLocale_(self._get_locale(self.model))
             self._available = recognizer is not None and recognizer.isAvailable()
             return self._available
         except ImportError:
@@ -103,15 +102,15 @@ class AppleSpeechProvider(TranscriptionProvider):
     def _get_locale(self, locale_id: str):
         """Get NSLocale for the given locale identifier."""
         from Foundation import NSLocale
+
         return NSLocale.localeWithLocaleIdentifier_(locale_id)
 
     def _get_recognizer(self):
         """Get or create the speech recognizer."""
         if self._recognizer is None:
             from Speech import SFSpeechRecognizer
-            self._recognizer = SFSpeechRecognizer.alloc().initWithLocale_(
-                self._get_locale(self.model)
-            )
+
+            self._recognizer = SFSpeechRecognizer.alloc().initWithLocale_(self._get_locale(self.model))
         return self._recognizer
 
     def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
@@ -127,13 +126,13 @@ class AppleSpeechProvider(TranscriptionProvider):
         import os
         import tempfile
         import time
+
         start_time = time.time()
         temp_file = None
 
         if not self._check_availability():
             raise RuntimeError(
-                "Apple Speech Recognition is not available. "
-                "Requires macOS 12+ and pyobjc-framework-Speech."
+                "Apple Speech Recognition is not available. " "Requires macOS 12+ and pyobjc-framework-Speech."
             )
 
         try:
@@ -141,11 +140,7 @@ class AppleSpeechProvider(TranscriptionProvider):
 
             # Write audio to a unique temp file (Speech framework needs a file URL)
             # Use restrictive permissions (owner-only) and consistent prefix for cleanup
-            with tempfile.NamedTemporaryFile(
-                prefix="whisper_hud_",
-                suffix=".wav",
-                delete=False
-            ) as temp_fp:
+            with tempfile.NamedTemporaryFile(prefix="whisper_hud_", suffix=".wav", delete=False) as temp_fp:
                 os.chmod(temp_fp.name, 0o600)
                 temp_fp.write(audio_bytes)
                 temp_file = temp_fp.name
@@ -155,11 +150,12 @@ class AppleSpeechProvider(TranscriptionProvider):
 
             # Create recognition request from URL
             from Speech import SFSpeechURLRecognitionRequest
+
             request = SFSpeechURLRecognitionRequest.alloc().initWithURL_(file_url)
             request.setShouldReportPartialResults_(False)
 
             # Use on-device recognition if available
-            if hasattr(request, 'setRequiresOnDeviceRecognition_'):
+            if hasattr(request, "setRequiresOnDeviceRecognition_"):
                 request.setRequiresOnDeviceRecognition_(True)
 
             recognizer = self._get_recognizer()
@@ -168,6 +164,7 @@ class AppleSpeechProvider(TranscriptionProvider):
 
             # Perform synchronous recognition using semaphore
             import threading
+
             result_text = ""
             recognition_error = None
             semaphore = threading.Semaphore(0)
@@ -183,10 +180,7 @@ class AppleSpeechProvider(TranscriptionProvider):
                 semaphore.release()
 
             # Start recognition
-            task = recognizer.recognitionTaskWithRequest_resultHandler_(
-                request,
-                completion_handler
-            )
+            task = recognizer.recognitionTaskWithRequest_resultHandler_(request, completion_handler)
 
             # Wait for completion (timeout after 60 seconds)
             if not semaphore.acquire(timeout=60):
@@ -204,13 +198,12 @@ class AppleSpeechProvider(TranscriptionProvider):
                 cost_estimate=0.0,  # Free - on device
                 provider=self.name,
                 model=self.model,
-                language=self.model.split('-')[0] if '-' in self.model else None
+                language=self.model.split("-")[0] if "-" in self.model else None,
             )
 
         except ImportError as e:
             raise RuntimeError(
-                f"Required framework not available: {e}. "
-                "Install with: pip install pyobjc-framework-Speech"
+                f"Required framework not available: {e}. " "Install with: pip install pyobjc-framework-Speech"
             )
         except Exception as e:
             raise RuntimeError(f"Apple Speech transcription failed: {e}")
@@ -219,6 +212,7 @@ class AppleSpeechProvider(TranscriptionProvider):
             if temp_file and os.path.exists(temp_file):
                 try:
                     from ..encryption import secure_delete
+
                     secure_delete(temp_file)
                 except Exception:
                     try:
@@ -242,12 +236,7 @@ class AppleSpeechProvider(TranscriptionProvider):
             List of supported languages as "models"
         """
         return [
-            {
-                "id": locale_id,
-                "name": name,
-                "description": "On-device recognition",
-                "cost_per_minute": 0.0
-            }
+            {"id": locale_id, "name": name, "description": "On-device recognition", "cost_per_minute": 0.0}
             for locale_id, name in self.SUPPORTED_LANGUAGES.items()
         ]
 
@@ -269,7 +258,7 @@ class AppleSpeechProvider(TranscriptionProvider):
     def get_macos_version() -> tuple:
         """Get the current macOS version as a tuple."""
         try:
-            return tuple(map(int, platform.mac_ver()[0].split('.')))
+            return tuple(map(int, platform.mac_ver()[0].split(".")))
         except Exception:
             return (0, 0, 0)
 
@@ -291,6 +280,7 @@ class AppleSpeechProvider(TranscriptionProvider):
 
         try:
             import Speech
+
             _ = Speech.SFSpeechRecognizer
             return "Apple Speech is available"
         except ImportError:
@@ -313,7 +303,7 @@ class AppleSpeechProvider(TranscriptionProvider):
                 "macOS Update Required",
                 f"Apple Speech requires macOS 12 (Monterey) or later.\n\n"
                 f"Your version: macOS {platform.mac_ver()[0]}\n\n"
-                "Please update macOS to use Apple Speech Recognition."
+                "Please update macOS to use Apple Speech Recognition.",
             )
 
         try:
@@ -324,20 +314,20 @@ class AppleSpeechProvider(TranscriptionProvider):
                 "The Speech framework binding is not installed.\n\n"
                 "Install it by running:\n"
                 "pip install pyobjc-framework-Speech\n\n"
-                "Then restart WhisperHUD."
+                "Then restart WhisperHUD.",
             )
 
         # Check if recognizer works
         try:
             from Foundation import NSLocale
+
             locale = NSLocale.localeWithLocaleIdentifier_("en-US")
             recognizer = SFSpeechRecognizer.alloc().initWithLocale_(locale)
 
             if recognizer is None:
                 return (
                     "Speech Recognition Unavailable",
-                    "The Speech Recognizer could not be initialized.\n\n"
-                    "Try restarting your Mac."
+                    "The Speech Recognizer could not be initialized.\n\n" "Try restarting your Mac.",
                 )
 
             if not recognizer.isAvailable():
@@ -348,13 +338,13 @@ class AppleSpeechProvider(TranscriptionProvider):
                     "2. Go to Privacy & Security → Speech Recognition\n"
                     "3. Enable WhisperHUD\n\n"
                     "You may also need to enable Dictation:\n"
-                    "System Settings → Keyboard → Dictation"
+                    "System Settings → Keyboard → Dictation",
                 )
         except Exception as e:
             return (
                 "Setup Error",
                 f"Could not initialize Speech Recognition:\n{str(e)[:100]}\n\n"
-                "Try restarting WhisperHUD or your Mac."
+                "Try restarting WhisperHUD or your Mac.",
             )
 
         return ("Ready", "Apple Speech is ready to use.")
@@ -363,13 +353,13 @@ class AppleSpeechProvider(TranscriptionProvider):
     def open_speech_settings():
         """Open System Settings to Speech Recognition permissions."""
         import subprocess
+
         # macOS 13+ uses System Settings, earlier uses System Preferences
         version = AppleSpeechProvider.get_macos_version()
         if version >= (13, 0):
-            subprocess.run([
-                "open", "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition"
-            ], capture_output=True)
+            subprocess.run(
+                ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition"],
+                capture_output=True,
+            )
         else:
-            subprocess.run([
-                "open", "/System/Library/PreferencePanes/Security.prefPane"
-            ], capture_output=True)
+            subprocess.run(["open", "/System/Library/PreferencePanes/Security.prefPane"], capture_output=True)

@@ -68,6 +68,7 @@ class AppleTranslateProvider(TranslationProvider):
         if getattr(sys, "frozen", False):
             try:
                 from Foundation import NSBundle
+
                 bundle = NSBundle.mainBundle()
                 resources_path = bundle.resourcePath()
                 if resources_path:
@@ -101,17 +102,12 @@ class AppleTranslateProvider(TranslationProvider):
     def translate(self, text: str, source_lang: str, target_lang: str) -> TranslationResult:
         if not text.strip():
             return TranslationResult(
-                text="",
-                source_lang=source_lang,
-                target_lang=target_lang,
-                provider=self.name,
-                model=self.model
+                text="", source_lang=source_lang, target_lang=target_lang, provider=self.name, model=self.model
             )
 
         if not self.is_available():
             raise RuntimeError(
-                "Apple Translation helper not available. "
-                "Build it with scripts/build-apple-translate.sh"
+                "Apple Translation helper not available. " "Build it with scripts/build-apple-translate.sh"
             )
 
         payload = {
@@ -123,11 +119,7 @@ class AppleTranslateProvider(TranslationProvider):
         helper = self._helper_path()
         try:
             result = subprocess.run(
-                [str(helper)],
-                input=json.dumps(payload),
-                text=True,
-                capture_output=True,
-                timeout=30
+                [str(helper)], input=json.dumps(payload), text=True, capture_output=True, timeout=30
             )
         except subprocess.TimeoutExpired:
             raise TimeoutError("Apple translation timed out")
@@ -146,11 +138,7 @@ class AppleTranslateProvider(TranslationProvider):
         translated = response.get("text", "").strip()
 
         return TranslationResult(
-            text=translated,
-            source_lang=source_lang,
-            target_lang=target_lang,
-            provider=self.name,
-            model=self.model
+            text=translated, source_lang=source_lang, target_lang=target_lang, provider=self.name, model=self.model
         )
 
     def get_model_status(self) -> dict:
@@ -159,7 +147,7 @@ class AppleTranslateProvider(TranslationProvider):
             "downloaded": True,
             "size_gb": 0,
             "ram_required": "N/A (system)",
-            "requires_download": False
+            "requires_download": False,
         }
 
     def download_model(self, progress_callback: Optional[callable] = None) -> bool:

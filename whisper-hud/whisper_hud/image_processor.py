@@ -24,11 +24,19 @@ logger = get_logger("image_processor")
 
 try:
     from AppKit import (
-        NSImage, NSBezierPath, NSColor, NSCompositingOperationSourceOver,
-        NSGraphicsContext, NSMakeRect, NSZeroRect,
-        NSImageInterpolationHigh, NSBitmapImageRep, NSPNGFileType
+        NSImage,
+        NSBezierPath,
+        NSColor,
+        NSCompositingOperationSourceOver,
+        NSGraphicsContext,
+        NSMakeRect,
+        NSZeroRect,
+        NSImageInterpolationHigh,
+        NSBitmapImageRep,
+        NSPNGFileType,
     )
     from Foundation import NSData, NSURL
+
     HAS_APPKIT = True
 except ImportError:
     HAS_APPKIT = False
@@ -37,17 +45,17 @@ except ImportError:
 HAS_VISION = False
 _VISION_AVAILABLE = False
 try:
-    from Vision import (
-        VNGenerateForegroundInstanceMaskRequest,
-        VNImageRequestHandler
-    )
+    from Vision import VNGenerateForegroundInstanceMaskRequest, VNImageRequestHandler
     from Quartz import (
-        CIImage, CIContext, CIFilter,
+        CIImage,
+        CIContext,
+        CIFilter,
     )
+
     HAS_VISION = True
     # Check macOS version
     macos_version = platform.mac_ver()[0]
-    major_version = int(macos_version.split('.')[0]) if macos_version else 0
+    major_version = int(macos_version.split(".")[0]) if macos_version else 0
     _VISION_AVAILABLE = major_version >= 14
     if not _VISION_AVAILABLE:
         logger.debug(f"Vision framework requires macOS 14+, found {macos_version}")
@@ -57,6 +65,7 @@ except ImportError as e:
 # Optional AI background removal
 try:
     from rembg import remove as rembg_remove
+
     HAS_REMBG = True
 except ImportError:
     HAS_REMBG = False
@@ -64,24 +73,25 @@ except ImportError:
 # PIL for image manipulation (required by rembg, also useful standalone)
 try:
     from PIL import Image as PILImage
+
     HAS_PIL = True
 except ImportError:
     HAS_PIL = False
 
 
 # Supported image formats
-SUPPORTED_FORMATS = {'.png', '.jpg', '.jpeg', '.gif', '.heic', '.webp', '.tiff', '.bmp'}
+SUPPORTED_FORMATS = {".png", ".jpg", ".jpeg", ".gif", ".heic", ".webp", ".tiff", ".bmp"}
 
 # Maximum file size (10 MB)
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
 # Cache for processed images (with size limit to prevent memory leaks)
 MAX_CACHE_SIZE = 100
-_image_cache: Dict[str, 'NSImage'] = {}
+_image_cache: Dict[str, "NSImage"] = {}
 _cache_order: list = []  # Track insertion order for LRU eviction
 
 
-def _cache_set(key: str, image: 'NSImage') -> None:
+def _cache_set(key: str, image: "NSImage") -> None:
     """Set a cache entry with LRU eviction when limit is reached."""
     # If key already exists, move it to end (most recently used)
     if key in _image_cache:
@@ -100,7 +110,7 @@ def _cache_set(key: str, image: 'NSImage') -> None:
     _cache_order.append(key)
 
 
-def _cache_get(key: str) -> Optional['NSImage']:
+def _cache_get(key: str) -> Optional["NSImage"]:
     """Get a cache entry, updating access order for LRU."""
     if key in _image_cache:
         # Move to end (most recently used)
@@ -159,7 +169,7 @@ def validate_image(path: str) -> Tuple[bool, str]:
         return False, f"Error loading image: {str(e)}"
 
 
-def load_image(path: str) -> Optional['NSImage']:
+def load_image(path: str) -> Optional["NSImage"]:
     """
     Load an image from disk.
 
@@ -184,7 +194,7 @@ def load_image(path: str) -> Optional['NSImage']:
         return None
 
 
-def crop_to_circle(image: 'NSImage', size: int) -> Optional['NSImage']:
+def crop_to_circle(image: "NSImage", size: int) -> Optional["NSImage"]:
     """
     Crop an image to a circle and resize.
 
@@ -221,12 +231,7 @@ def crop_to_circle(image: 'NSImage', size: int) -> Optional['NSImage']:
 
             # Draw the image scaled to fit
             dest_rect = NSMakeRect(0, 0, size, size)
-            image.drawInRect_fromRect_operation_fraction_(
-                dest_rect,
-                src_rect,
-                NSCompositingOperationSourceOver,
-                1.0
-            )
+            image.drawInRect_fromRect_operation_fraction_(dest_rect, src_rect, NSCompositingOperationSourceOver, 1.0)
         finally:
             result.unlockFocus()
         return result
@@ -235,7 +240,7 @@ def crop_to_circle(image: 'NSImage', size: int) -> Optional['NSImage']:
         return None
 
 
-def has_alpha_channel(image: 'NSImage') -> bool:
+def has_alpha_channel(image: "NSImage") -> bool:
     """
     Check if an image has meaningful transparency (not all opaque).
 
@@ -255,9 +260,9 @@ def has_alpha_channel(image: 'NSImage') -> bool:
             return False
 
         for rep in reps:
-            if hasattr(rep, 'hasAlpha') and rep.hasAlpha():
+            if hasattr(rep, "hasAlpha") and rep.hasAlpha():
                 # Check if there are actually any transparent pixels
-                if hasattr(rep, 'bitmapData'):
+                if hasattr(rep, "bitmapData"):
                     # Get bitmap data and sample for transparency
                     bitmap = rep
                     if bitmap.samplesPerPixel() >= 4:  # Has alpha channel
@@ -267,9 +272,11 @@ def has_alpha_channel(image: 'NSImage') -> bool:
 
                         # Sample corners and center
                         samples = [
-                            (0, 0), (width - 1, 0),
-                            (0, height - 1), (width - 1, height - 1),
-                            (width // 2, height // 2)
+                            (0, 0),
+                            (width - 1, 0),
+                            (0, height - 1),
+                            (width - 1, height - 1),
+                            (width // 2, height // 2),
                         ]
 
                         for x, y in samples:
@@ -288,7 +295,7 @@ def has_alpha_channel(image: 'NSImage') -> bool:
         return False
 
 
-def crop_preserving_alpha(image: 'NSImage', size: int) -> Optional['NSImage']:
+def crop_preserving_alpha(image: "NSImage", size: int) -> Optional["NSImage"]:
     """
     Resize image while preserving alpha channel (no circle crop).
 
@@ -331,12 +338,7 @@ def crop_preserving_alpha(image: 'NSImage', size: int) -> Optional['NSImage']:
             dest_rect = NSMakeRect(x_offset, y_offset, new_width, new_height)
 
             # Draw the image preserving transparency
-            image.drawInRect_fromRect_operation_fraction_(
-                dest_rect,
-                NSZeroRect,
-                NSCompositingOperationSourceOver,
-                1.0
-            )
+            image.drawInRect_fromRect_operation_fraction_(dest_rect, NSZeroRect, NSCompositingOperationSourceOver, 1.0)
         finally:
             result.unlockFocus()
         return result
@@ -345,7 +347,7 @@ def crop_preserving_alpha(image: 'NSImage', size: int) -> Optional['NSImage']:
         return None
 
 
-def vision_remove_background(image_path: str, size: int) -> Optional['NSImage']:
+def vision_remove_background(image_path: str, size: int) -> Optional["NSImage"]:
     """
     Remove background using macOS 14+ Vision framework.
 
@@ -444,7 +446,7 @@ def vision_remove_background(image_path: str, size: int) -> Optional['NSImage']:
         return None
 
 
-def extract_subject(image_path: str, size: int) -> Optional['NSImage']:
+def extract_subject(image_path: str, size: int) -> Optional["NSImage"]:
     """
     Extract subject from image using AI background removal (rembg).
 
@@ -463,8 +465,8 @@ def extract_subject(image_path: str, size: int) -> Optional['NSImage']:
         pil_image = PILImage.open(image_path)
 
         # Convert to RGBA if needed
-        if pil_image.mode != 'RGBA':
-            pil_image = pil_image.convert('RGBA')
+        if pil_image.mode != "RGBA":
+            pil_image = pil_image.convert("RGBA")
 
         # Remove background using rembg
         output = rembg_remove(pil_image)
@@ -473,7 +475,7 @@ def extract_subject(image_path: str, size: int) -> Optional['NSImage']:
         output.thumbnail((size, size), PILImage.Resampling.LANCZOS)
 
         # Create a new image with the subject centered
-        final = PILImage.new('RGBA', (size, size), (0, 0, 0, 0))
+        final = PILImage.new("RGBA", (size, size), (0, 0, 0, 0))
         x_offset = (size - output.width) // 2
         y_offset = (size - output.height) // 2
         final.paste(output, (x_offset, y_offset))
@@ -485,7 +487,7 @@ def extract_subject(image_path: str, size: int) -> Optional['NSImage']:
         return None
 
 
-def pil_to_nsimage(pil_image: 'PILImage.Image') -> Optional['NSImage']:
+def pil_to_nsimage(pil_image: "PILImage.Image") -> Optional["NSImage"]:
     """
     Convert a PIL Image to NSImage.
 
@@ -500,12 +502,12 @@ def pil_to_nsimage(pil_image: 'PILImage.Image') -> Optional['NSImage']:
 
     try:
         # Ensure RGBA mode
-        if pil_image.mode != 'RGBA':
-            pil_image = pil_image.convert('RGBA')
+        if pil_image.mode != "RGBA":
+            pil_image = pil_image.convert("RGBA")
 
         # Save to bytes as PNG
         buffer = io.BytesIO()
-        pil_image.save(buffer, format='PNG')
+        pil_image.save(buffer, format="PNG")
         png_data = buffer.getvalue()
 
         # Create NSImage from PNG data
@@ -518,12 +520,7 @@ def pil_to_nsimage(pil_image: 'PILImage.Image') -> Optional['NSImage']:
         return None
 
 
-def process_shape(
-    image: 'NSImage',
-    image_path: str,
-    size: int,
-    shape_mode: str = "auto"
-) -> Optional['NSImage']:
+def process_shape(image: "NSImage", image_path: str, size: int, shape_mode: str = "auto") -> Optional["NSImage"]:
     """
     Process image according to shape mode with fallback chain.
 
@@ -593,7 +590,7 @@ def process_shape(
         return crop_to_circle(image, size)
 
 
-def apply_tint(image: 'NSImage', hex_color: str, opacity: float = 0.3) -> Optional['NSImage']:
+def apply_tint(image: "NSImage", hex_color: str, opacity: float = 0.3) -> Optional["NSImage"]:
     """
     Apply a color tint overlay to an image.
 
@@ -621,19 +618,11 @@ def apply_tint(image: 'NSImage', hex_color: str, opacity: float = 0.3) -> Option
         result.lockFocus()
 
         # Draw original image
-        image.drawAtPoint_fromRect_operation_fraction_(
-            (0, 0),
-            NSZeroRect,
-            NSCompositingOperationSourceOver,
-            1.0
-        )
+        image.drawAtPoint_fromRect_operation_fraction_((0, 0), NSZeroRect, NSCompositingOperationSourceOver, 1.0)
 
         # Draw tint overlay
         tint_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
-            color.redComponent(),
-            color.greenComponent(),
-            color.blueComponent(),
-            opacity
+            color.redComponent(), color.greenComponent(), color.blueComponent(), opacity
         )
         tint_color.set()
 
@@ -647,7 +636,7 @@ def apply_tint(image: 'NSImage', hex_color: str, opacity: float = 0.3) -> Option
         return image
 
 
-def hex_to_nscolor(hex_color: str) -> Optional['NSColor']:
+def hex_to_nscolor(hex_color: str) -> Optional["NSColor"]:
     """
     Convert a hex color string to NSColor.
 
@@ -662,7 +651,7 @@ def hex_to_nscolor(hex_color: str) -> Optional['NSColor']:
 
     try:
         # Remove # prefix if present
-        hex_color = hex_color.lstrip('#')
+        hex_color = hex_color.lstrip("#")
 
         if len(hex_color) == 6:
             r = int(hex_color[0:2], 16) / 255.0
@@ -682,24 +671,14 @@ def hex_to_nscolor(hex_color: str) -> Optional['NSColor']:
 
 
 def _get_cache_key(
-    path: str,
-    size: int,
-    state: str,
-    tint_color: str = "",
-    tint_opacity: float = 0.0,
-    shape_mode: str = "circle"
+    path: str, size: int, state: str, tint_color: str = "", tint_opacity: float = 0.0, shape_mode: str = "circle"
 ) -> str:
     """Generate a cache key for a processed image."""
     key_str = f"{path}_{size}_{state}_{tint_color}_{tint_opacity}_{shape_mode}"
     return hashlib.md5(key_str.encode()).hexdigest()
 
 
-def get_icon_for_state(
-    config: dict,
-    state: str,
-    size: int,
-    force_reload: bool = False
-) -> Optional['NSImage']:
+def get_icon_for_state(config: dict, state: str, size: int, force_reload: bool = False) -> Optional["NSImage"]:
     """
     Get a processed icon for a specific widget state.
 
@@ -744,11 +723,7 @@ def get_icon_for_state(
     tint_color = state_colors.get("icon", "#FFFFFF") if apply_tint_flag else ""
 
     # Check cache
-    cache_key = _get_cache_key(
-        path, size, state, tint_color,
-        tint_opacity if apply_tint_flag else 0,
-        shape_mode
-    )
+    cache_key = _get_cache_key(path, size, state, tint_color, tint_opacity if apply_tint_flag else 0, shape_mode)
     if not force_reload:
         cached = _cache_get(cache_key)
         if cached is not None:
@@ -807,12 +782,12 @@ def import_image(source_path: str, dest_dir: str, filename: str = None) -> Tuple
         # Generate filename if not provided
         if not filename:
             # Use hash of file content for unique naming
-            with open(source, 'rb') as f:
+            with open(source, "rb") as f:
                 file_hash = hashlib.md5(f.read()).hexdigest()[:8]
             filename = f"icon_{file_hash}{source.suffix.lower()}"
 
         # Security: Validate filename doesn't contain path traversal
-        if '..' in filename or '/' in filename or '\\' in filename:
+        if ".." in filename or "/" in filename or "\\" in filename:
             return False, "", "Invalid filename"
 
         # Validate the final path stays within dest_dir
@@ -824,6 +799,7 @@ def import_image(source_path: str, dest_dir: str, filename: str = None) -> Tuple
 
         # Copy file
         import shutil
+
         shutil.copy2(source, dest_file)
 
         return True, str(dest_file), ""
@@ -839,12 +815,8 @@ def clear_cache():
 
 
 def get_preview_image(
-    path: str,
-    size: int,
-    tint_color: str = "",
-    tint_opacity: float = 0.3,
-    shape_mode: str = "circle"
-) -> Optional['NSImage']:
+    path: str, size: int, tint_color: str = "", tint_opacity: float = 0.3, shape_mode: str = "circle"
+) -> Optional["NSImage"]:
     """
     Get a preview of a processed image without caching.
 
@@ -893,12 +865,12 @@ def get_shape_mode_description(mode: str) -> str:
         "circle": "Circle crop (default)",
         "alpha": "Use transparency from PNG",
         "vision": "macOS Vision framework (requires macOS 14+)",
-        "subject": "AI subject extraction (requires rembg)"
+        "subject": "AI subject extraction (requires rembg)",
     }
     return descriptions.get(mode, mode)
 
 
-def remove_background(image_path: str, size: int) -> Optional['NSImage']:
+def remove_background(image_path: str, size: int) -> Optional["NSImage"]:
     """
     Remove background from an image using the best available method.
 
@@ -940,7 +912,7 @@ def remove_background(image_path: str, size: int) -> Optional['NSImage']:
     return None
 
 
-def save_nsimage_as_png(image: 'NSImage', dest_path: str) -> bool:
+def save_nsimage_as_png(image: "NSImage", dest_path: str) -> bool:
     """
     Save an NSImage to a PNG file.
 
@@ -959,9 +931,7 @@ def save_nsimage_as_png(image: 'NSImage', dest_path: str) -> bool:
         size = image.size()
         image.lockFocus()
         try:
-            bitmap = NSBitmapImageRep.alloc().initWithFocusedViewRect_(
-                NSMakeRect(0, 0, size.width, size.height)
-            )
+            bitmap = NSBitmapImageRep.alloc().initWithFocusedViewRect_(NSMakeRect(0, 0, size.width, size.height))
         finally:
             image.unlockFocus()
 
@@ -1017,7 +987,7 @@ class ImageProcessor:
         """
         self._config = config
 
-    def get_icon_for_state(self, state: str, size: int) -> Optional['NSImage']:
+    def get_icon_for_state(self, state: str, size: int) -> Optional["NSImage"]:
         """Get the processed icon for a widget state."""
         appearance = self._config.widget_appearance
         return get_icon_for_state(appearance, state, size)
@@ -1032,13 +1002,8 @@ class ImageProcessor:
         return import_image(source_path, dest_dir, filename)
 
     def get_preview(
-        self,
-        path: str,
-        size: int,
-        tint_color: str = "",
-        tint_opacity: float = 0.3,
-        shape_mode: str = None
-    ) -> Optional['NSImage']:
+        self, path: str, size: int, tint_color: str = "", tint_opacity: float = 0.3, shape_mode: str = None
+    ) -> Optional["NSImage"]:
         """
         Get a preview of a processed image.
 
@@ -1073,11 +1038,11 @@ class ImageProcessor:
         """Get description of available background removal method."""
         return get_background_removal_method()
 
-    def remove_background(self, image_path: str, size: int) -> Optional['NSImage']:
+    def remove_background(self, image_path: str, size: int) -> Optional["NSImage"]:
         """Remove background from image using best available method."""
         return remove_background(image_path, size)
 
-    def save_image(self, image: 'NSImage', dest_path: str) -> bool:
+    def save_image(self, image: "NSImage", dest_path: str) -> bool:
         """Save an NSImage to a PNG file."""
         return save_nsimage_as_png(image, dest_path)
 

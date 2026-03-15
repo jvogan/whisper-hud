@@ -12,8 +12,9 @@ class TestConfig:
     def test_config_defaults(self):
         """Test that default config values are set correctly."""
         # Import here to avoid module-level import issues
-        with patch('whisper_hud.config.CONFIG_FILE', Path('/tmp/test_config.json')):
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
             from whisper_hud.config import Config
+
             config = Config()
 
             assert config.default_provider == "apple"
@@ -31,8 +32,8 @@ class TestConfig:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_file = Path(tmpdir) / "config.json"
 
-            with patch('whisper_hud.config.CONFIG_FILE', config_file):
-                with patch('whisper_hud.config.CONFIG_DIR', Path(tmpdir)):
+            with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                with patch("whisper_hud.config.CONFIG_DIR", Path(tmpdir)):
                     from whisper_hud.config import Config
 
                     # Create and modify config
@@ -59,6 +60,7 @@ class TestConfig:
             with patch("whisper_hud.config.CONFIG_DIR", config_dir):
                 with patch("whisper_hud.config.CONFIG_FILE", config_file):
                     from whisper_hud.config import Config
+
                     loaded = Config.load()
 
             assert loaded.default_provider == "gemini"
@@ -73,6 +75,7 @@ class TestConfig:
             with patch("whisper_hud.config.CONFIG_DIR", config_dir):
                 with patch("whisper_hud.config.CONFIG_FILE", config_file):
                     from whisper_hud.config import Config
+
                     loaded = Config.load()
 
             assert loaded.default_provider == "apple"
@@ -88,6 +91,7 @@ class TestConfig:
             with patch("whisper_hud.config.CONFIG_DIR", config_dir):
                 with patch("whisper_hud.config.CONFIG_FILE", config_file):
                     from whisper_hud.config import Config
+
                     loaded = Config.load()
 
             backups = sorted(config_dir.glob("config.json.bak.*"))
@@ -127,8 +131,9 @@ class TestConfig:
 
     def test_history_management(self):
         """Test transcription history functions."""
-        with patch('whisper_hud.config.CONFIG_FILE', Path('/tmp/test_config.json')):
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
             from whisper_hud.config import Config
+
             config = Config()
             config.history = []
             config.history_enabled = True
@@ -145,8 +150,9 @@ class TestConfig:
 
     def test_provider_model_mapping(self):
         """Test provider to model mapping."""
-        with patch('whisper_hud.config.CONFIG_FILE', Path('/tmp/test_config.json')):
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
             from whisper_hud.config import Config
+
             config = Config()
 
             assert config.get_provider_model("openai") == "gpt-4o-transcribe"
@@ -157,7 +163,7 @@ class TestConfig:
 
     def test_set_provider_model_supports_openai_realtime(self):
         """Realtime provider model selection should persist like other providers."""
-        with patch('whisper_hud.config.CONFIG_FILE', Path('/tmp/test_config.json')):
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
             from whisper_hud.config import Config
 
             config = Config()
@@ -178,6 +184,7 @@ class TestConfig:
             with patch("whisper_hud.config.CONFIG_DIR", config_dir):
                 with patch("whisper_hud.config.CONFIG_FILE", config_file):
                     from whisper_hud.config import Config
+
                     loaded = Config.load()
 
             assert loaded.credential_storage_mode == "keychain"
@@ -195,6 +202,7 @@ class TestConfig:
             with patch("whisper_hud.config.CONFIG_DIR", config_dir):
                 with patch("whisper_hud.config.CONFIG_FILE", config_file):
                     from whisper_hud.config import Config
+
                     loaded = Config.load()
 
             assert loaded.credential_storage_mode == "passphrase"
@@ -275,7 +283,7 @@ class TestConfig:
 
     def test_merge_imported_config_clears_history_for_private_mode(self):
         """Importing private mode should clear existing saved history."""
-        with patch('whisper_hud.config.CONFIG_FILE', Path('/tmp/test_config.json')):
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
             from whisper_hud.config import Config
 
             current = Config()
@@ -294,7 +302,7 @@ class TestConfig:
 
     def test_merge_imported_config_preserves_history_when_not_private(self):
         """Importing regular settings should preserve existing history and stats."""
-        with patch('whisper_hud.config.CONFIG_FILE', Path('/tmp/test_config.json')):
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
             from whisper_hud.config import Config
 
             current = Config()

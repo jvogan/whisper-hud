@@ -141,9 +141,7 @@ def test_widget_reset_position_moves_to_primary_monitor_default(monkeypatch):
         origin=SimpleNamespace(x=50, y=25),
         size=SimpleNamespace(width=1400, height=900),
     )
-    floating_widget.NSScreen.mainScreen.return_value = SimpleNamespace(
-        visibleFrame=lambda: screen_frame
-    )
+    floating_widget.NSScreen.mainScreen.return_value = SimpleNamespace(visibleFrame=lambda: screen_frame)
 
     on_position_changed = MagicMock()
     widget = floating_widget.FloatingWidget(

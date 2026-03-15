@@ -80,16 +80,16 @@ class Config:
     hotkey_mode: str = "push_to_talk"  # "push_to_talk" (hold) or "toggle" (press to start/stop)
 
     # Behavior
-    auto_paste: bool = True       # Automatically paste after transcription
-    show_hud: bool = True         # Show floating HUD
-    show_widget: bool = False     # Show floating widget button
-    widget_size: str = "medium"   # Widget size: small, medium, large, xlarge
+    auto_paste: bool = True  # Automatically paste after transcription
+    show_hud: bool = True  # Show floating HUD
+    show_widget: bool = False  # Show floating widget button
+    widget_size: str = "medium"  # Widget size: small, medium, large, xlarge
     widget_position: Optional[dict] = None  # {"x": float, "y": float} for persisted position
-    auto_stop: bool = True        # Auto-stop recording after silence
+    auto_stop: bool = True  # Auto-stop recording after silence
     silence_duration: float = 1.5  # Seconds of silence before auto-stop
     silence_threshold: float = 0.002  # Audio level threshold for silence (below ambient noise)
     max_recording_duration: int = 600  # Max recording duration in seconds (10 min default)
-    play_sound: bool = False      # Play sound on completion
+    play_sound: bool = False  # Play sound on completion
     restore_clipboard: bool = True  # Restore clipboard after paste
     show_notifications: bool = True  # Show system notifications
     audio_input_device: Optional[int] = None  # Audio input device ID (None = system default)
@@ -127,7 +127,7 @@ class Config:
     # Paste target lock
     paste_target_enabled: bool = False  # Lock transcription to specific target
     paste_target_type: str = "focused"  # focused, app, tmux, iterm2, terminal
-    paste_target_identifier: str = ""   # App name, tmux session, etc.
+    paste_target_identifier: str = ""  # App name, tmux session, etc.
     paste_target_return_focus: bool = True  # Return to original app after paste
     paste_target_recent: List[str] = field(default_factory=list)  # Recent targets ["type:id", ...]
 
@@ -138,34 +138,36 @@ class Config:
 
     # Transcription history
     history_enabled: bool = False  # Store transcription history
-    history_max_items: int = 20   # Maximum number of history items to keep
+    history_max_items: int = 20  # Maximum number of history items to keep
     history: List[dict] = field(default_factory=list)  # [{text, timestamp, provider, translated}]
 
     # Privacy settings
-    private_mode: bool = False      # No transcription storage at all (overrides history_enabled)
+    private_mode: bool = False  # No transcription storage at all (overrides history_enabled)
     history_encrypted: bool = False  # Encrypt history at rest using Fernet (AES-256)
 
     # Widget appearance customization
-    widget_appearance: dict = field(default_factory=lambda: {
-        "theme": "default",
-        "colors": {
-            "idle": {"background": "#232329", "icon": "#66A5FF", "background_hover": "#383840"},
-            "recording": {"background": "#D92626", "icon": "#FFFFFF"},
-            "processing": {"background": "#BF8C19", "icon": "#FFFFFF"},
-            "success": {"background": "#3FB950", "icon": "#FFFFFF"},
-            "error": {"background": "#F85149", "icon": "#FFFFFF"}
-        },
-        "custom_icon": {
-            "enabled": False,
-            "path": "",
-            "per_state": False,
-            "icons": {"idle": "", "recording": "", "processing": "", "success": "", "error": ""},
-            "apply_state_tint": True,
-            "tint_opacity": 0.3,
-            "shape_mode": "auto",  # "auto", "circle", "alpha", "subject"
-            "character_pack": None  # ID of active character pack, if any
+    widget_appearance: dict = field(
+        default_factory=lambda: {
+            "theme": "default",
+            "colors": {
+                "idle": {"background": "#232329", "icon": "#66A5FF", "background_hover": "#383840"},
+                "recording": {"background": "#D92626", "icon": "#FFFFFF"},
+                "processing": {"background": "#BF8C19", "icon": "#FFFFFF"},
+                "success": {"background": "#3FB950", "icon": "#FFFFFF"},
+                "error": {"background": "#F85149", "icon": "#FFFFFF"},
+            },
+            "custom_icon": {
+                "enabled": False,
+                "path": "",
+                "per_state": False,
+                "icons": {"idle": "", "recording": "", "processing": "", "success": "", "error": ""},
+                "apply_state_tint": True,
+                "tint_opacity": 0.3,
+                "shape_mode": "auto",  # "auto", "circle", "alpha", "subject"
+                "character_pack": None,  # ID of active character pack, if any
+            },
         }
-    })
+    )
 
     @classmethod
     def load(cls) -> "Config":
@@ -178,9 +180,9 @@ class Config:
 
                 # Migration: Old silence_threshold default (0.05) was too high for typical mics
                 # Real MacBook mic RMS during speech is 0.005-0.03, so old default never detected speech
-                if 'silence_threshold' in data and data['silence_threshold'] >= 0.03:
-                    old_val = data['silence_threshold']
-                    data['silence_threshold'] = 0.005
+                if "silence_threshold" in data and data["silence_threshold"] >= 0.03:
+                    old_val = data["silence_threshold"]
+                    data["silence_threshold"] = 0.005
                     logger.info(
                         f"Migrating silence_threshold from {old_val} to 0.005 "
                         "(old default was too high for typical microphones)"
@@ -188,8 +190,8 @@ class Config:
 
                 # Migration: preserve existing installs on keychain mode.
                 # Fresh installs use passphrase mode by default.
-                if 'credential_storage_mode' not in data:
-                    data['credential_storage_mode'] = 'keychain'
+                if "credential_storage_mode" not in data:
+                    data["credential_storage_mode"] = "keychain"
 
                 # Handle missing fields gracefully
                 return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
@@ -202,8 +204,7 @@ class Config:
                     )
                 else:
                     logger.warning(
-                        f"Config file contained invalid JSON and was reset to defaults, "
-                        f"but backup failed: {e}"
+                        f"Config file contained invalid JSON and was reset to defaults, " f"but backup failed: {e}"
                     )
             except Exception as e:
                 logger.warning(f"Failed to load config: {e}")
@@ -266,13 +267,7 @@ class Config:
         self.total_cost = 0.0
         self.save()
 
-    def add_to_history(
-        self,
-        text: str,
-        provider: str = "",
-        translated: bool = False,
-        original_text: str = ""
-    ) -> None:
+    def add_to_history(self, text: str, provider: str = "", translated: bool = False, original_text: str = "") -> None:
         """
         Add a transcription to history.
 
@@ -298,6 +293,7 @@ class Config:
 
         if self.history_encrypted:
             from .encryption import encrypt_text
+
             encrypted = encrypt_text(text)
             if not encrypted:
                 logger.warning("History encryption enabled but failed; skipping history entry")
@@ -326,7 +322,7 @@ class Config:
 
         # Trim to max size
         if len(self.history) > self.history_max_items:
-            self.history = self.history[:self.history_max_items]
+            self.history = self.history[: self.history_max_items]
 
         self.save()
 
@@ -343,6 +339,7 @@ class Config:
         for item in items:
             if item.get("encrypted", False):
                 from .encryption import decrypt_text
+
                 decrypted_item = item.copy()
                 decrypted_text = decrypt_text(item.get("text", ""))
                 if decrypted_text:
@@ -492,7 +489,7 @@ class Config:
         # Add to front
         self.recent_source_languages.insert(0, lang_code)
         # Trim to max
-        self.recent_source_languages = self.recent_source_languages[:self.max_recent_languages]
+        self.recent_source_languages = self.recent_source_languages[: self.max_recent_languages]
         self.save()
 
     def add_recent_target_language(self, lang_code: str) -> None:
@@ -503,7 +500,7 @@ class Config:
         # Add to front
         self.recent_target_languages.insert(0, lang_code)
         # Trim to max
-        self.recent_target_languages = self.recent_target_languages[:self.max_recent_languages]
+        self.recent_target_languages = self.recent_target_languages[: self.max_recent_languages]
         self.save()
 
     def get_appearance_colors(self, state: str) -> dict:
@@ -513,7 +510,7 @@ class Config:
             "recording": {"background": "#D92626", "icon": "#FFFFFF"},
             "processing": {"background": "#BF8C19", "icon": "#FFFFFF"},
             "success": {"background": "#3FB950", "icon": "#FFFFFF"},
-            "error": {"background": "#F85149", "icon": "#FFFFFF"}
+            "error": {"background": "#F85149", "icon": "#FFFFFF"},
         }
         colors = self.widget_appearance.get("colors", default_colors)
         return colors.get(state, default_colors.get(state, {}))
@@ -533,8 +530,7 @@ class Config:
         self.save()
 
     def set_custom_icon(
-        self, path: str, apply_tint: bool = True,
-        tint_opacity: float = 0.3, shape_mode: str = "auto"
+        self, path: str, apply_tint: bool = True, tint_opacity: float = 0.3, shape_mode: str = "auto"
     ) -> None:
         """Set a custom icon for the widget."""
         self.widget_appearance["custom_icon"] = {
@@ -545,7 +541,7 @@ class Config:
             "apply_state_tint": apply_tint,
             "tint_opacity": tint_opacity,
             "shape_mode": shape_mode if shape_mode in ("auto", "circle", "alpha", "subject") else "auto",
-            "character_pack": None
+            "character_pack": None,
         }
         self.save()
 
@@ -559,7 +555,7 @@ class Config:
             "apply_state_tint": True,
             "tint_opacity": 0.3,
             "shape_mode": "auto",
-            "character_pack": None
+            "character_pack": None,
         }
         self.save()
 
@@ -572,7 +568,7 @@ class Config:
                 "recording": {"background": "#D92626", "icon": "#FFFFFF"},
                 "processing": {"background": "#BF8C19", "icon": "#FFFFFF"},
                 "success": {"background": "#3FB950", "icon": "#FFFFFF"},
-                "error": {"background": "#F85149", "icon": "#FFFFFF"}
+                "error": {"background": "#F85149", "icon": "#FFFFFF"},
             },
             "custom_icon": {
                 "enabled": False,
@@ -582,8 +578,8 @@ class Config:
                 "apply_state_tint": True,
                 "tint_opacity": 0.3,
                 "shape_mode": "auto",
-                "character_pack": None
-            }
+                "character_pack": None,
+            },
         }
         self.save()
 
@@ -614,11 +610,7 @@ class Config:
             True if export succeeded
         """
         try:
-            export_data = {
-                "whisper_hud_export": True,
-                "version": "1.0",
-                "settings": asdict(self)
-            }
+            export_data = {"whisper_hud_export": True, "version": "1.0", "settings": asdict(self)}
             # Remove sensitive/transient data
             export_data["settings"].pop("history", None)
             export_data["settings"].pop("total_transcriptions", None)

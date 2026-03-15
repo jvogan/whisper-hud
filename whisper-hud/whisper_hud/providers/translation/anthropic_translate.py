@@ -168,9 +168,7 @@ class AnthropicTranslateProvider(TranslationProvider):
             try:
                 from anthropic import Anthropic
             except ImportError:
-                raise RuntimeError(
-                    "anthropic package not installed. Install with: pip install anthropic"
-                )
+                raise RuntimeError("anthropic package not installed. Install with: pip install anthropic")
 
             from ...keychain import get_api_key
 
@@ -196,11 +194,7 @@ class AnthropicTranslateProvider(TranslationProvider):
         """
         if not text.strip():
             return TranslationResult(
-                text="",
-                source_lang=source_lang,
-                target_lang=target_lang,
-                provider=self.name,
-                model=self.model
+                text="", source_lang=source_lang, target_lang=target_lang, provider=self.name, model=self.model
             )
 
         selected_model = self.model
@@ -219,11 +213,7 @@ class AnthropicTranslateProvider(TranslationProvider):
                 raise RuntimeError(f"Anthropic translation failed: {e}")
 
         return TranslationResult(
-            text=result_text,
-            source_lang=source_lang,
-            target_lang=target_lang,
-            provider=self.name,
-            model=selected_model
+            text=result_text, source_lang=source_lang, target_lang=target_lang, provider=self.name, model=selected_model
         )
 
     def _build_messages(self, text: str, source_lang: str, target_lang: str) -> tuple[str, str]:
@@ -266,6 +256,7 @@ Rules:
         """Check if anthropic package is installed."""
         try:
             import anthropic  # noqa: F401
+
             return True
         except ImportError:
             return False
@@ -275,6 +266,7 @@ Rules:
         if not self.is_package_available():
             return False
         from ...keychain import get_api_key
+
         return bool(get_api_key("anthropic"))
 
     def get_model_status(self) -> dict:
@@ -284,7 +276,7 @@ Rules:
             "downloaded": True,  # Cloud-based, always available
             "size_gb": 0,
             "ram_required": "N/A (cloud)",
-            "requires_download": False
+            "requires_download": False,
         }
 
     def download_model(self, progress_callback: Optional[Callable[[str], None]] = None) -> bool:
@@ -298,11 +290,7 @@ Rules:
         return True
 
     def translate_streaming(
-        self,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        on_chunk: Callable[[str], None]
+        self, text: str, source_lang: str, target_lang: str, on_chunk: Callable[[str], None]
     ) -> TranslationResult:
         """
         Translate text with streaming output.
@@ -318,11 +306,7 @@ Rules:
         """
         if not text.strip():
             return TranslationResult(
-                text="",
-                source_lang=source_lang,
-                target_lang=target_lang,
-                provider=self.name,
-                model=self.model
+                text="", source_lang=source_lang, target_lang=target_lang, provider=self.name, model=self.model
             )
 
         selected_model = self.model
@@ -351,11 +335,7 @@ Rules:
                 raise RuntimeError(f"Anthropic streaming translation failed: {e}")
 
         return TranslationResult(
-            text=final_text,
-            source_lang=source_lang,
-            target_lang=target_lang,
-            provider=self.name,
-            model=selected_model
+            text=final_text, source_lang=source_lang, target_lang=target_lang, provider=self.name, model=selected_model
         )
 
     def set_model(self, model_id: str) -> None:

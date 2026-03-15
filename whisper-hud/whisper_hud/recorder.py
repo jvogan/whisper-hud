@@ -58,8 +58,8 @@ class AudioRecorder:
         # Silence detection settings (tuned for typical MacBook microphones)
         # Real mic RMS during speech is typically 0.005-0.03, ambient noise 0.002-0.004
         self._silence_threshold = 0.002  # RMS threshold for "silence" (below ambient noise)
-        self._speech_threshold = 0.004   # RMS threshold to confirm speech started
-        self._silence_duration = 1.5     # Seconds of silence before auto-stop
+        self._speech_threshold = 0.004  # RMS threshold to confirm speech started
+        self._silence_duration = 1.5  # Seconds of silence before auto-stop
         self._min_recording_duration = 0.3  # Minimum recording before silence detection
 
         # Silence detection state
@@ -71,14 +71,11 @@ class AudioRecorder:
 
         # Audio level monitoring
         self._current_level: float = 0.0  # Current RMS level (0.0 - 1.0)
-        self._peak_level: float = 0.0     # Peak level during recording
+        self._peak_level: float = 0.0  # Peak level during recording
         self._level_lock = threading.Lock()
 
     def set_silence_settings(
-        self,
-        enabled: bool = True,
-        silence_duration: float = 1.5,
-        silence_threshold: float = 0.01
+        self, enabled: bool = True, silence_duration: float = 1.5, silence_threshold: float = 0.01
     ):
         """
         Configure silence detection.
@@ -88,7 +85,7 @@ class AudioRecorder:
             silence_duration: Seconds of silence before triggering callback
             silence_threshold: Audio level below this is considered silence
         """
-        self._silence_duration = silence_duration if enabled else float('inf')
+        self._silence_duration = silence_duration if enabled else float("inf")
         self._silence_threshold = silence_threshold
         # Set speech threshold slightly above silence threshold for reliable detection
         self._speech_threshold = silence_threshold * 1.5
@@ -150,7 +147,7 @@ class AudioRecorder:
                         logger.debug("Live audio chunk callback failed", exc_info=True)
 
                 # Calculate RMS level for monitoring
-                rms = float(np.sqrt(np.mean(indata ** 2)))
+                rms = float(np.sqrt(np.mean(indata**2)))
                 # Normalize to 0-1 range - use higher multiplier for better visibility
                 # Typical quiet speech is 0.01-0.05 RMS, normal speech 0.05-0.15
                 normalized_level = min(1.0, rms * 25)
@@ -176,6 +173,7 @@ class AudioRecorder:
                         logger.info(f"Retry {attempt}: Using system default device after error")
                         # Small delay to let audio system settle after device change
                         import time as time_module
+
                         time_module.sleep(0.2)
 
                     self._stream = sd.InputStream(
@@ -184,7 +182,7 @@ class AudioRecorder:
                         dtype=np.float32,
                         callback=callback,
                         blocksize=1024,
-                        device=device_to_use
+                        device=device_to_use,
                     )
                     self._stream.start()
                     self.recording = True
@@ -220,18 +218,18 @@ class AudioRecorder:
     def _check_silence(self, audio_chunk: np.ndarray):
         """Check audio chunk for silence and trigger callback if needed."""
         # Calculate RMS (root mean square) as volume level
-        rms = np.sqrt(np.mean(audio_chunk ** 2))
+        rms = np.sqrt(np.mean(audio_chunk**2))
         debug_enabled = logger.isEnabledFor(logging.DEBUG)
 
         current_time = time.time()
         recording_duration = current_time - self._recording_start
 
         # Track peak speech RMS for relative silence detection
-        if not hasattr(self, '_speech_peak_rms'):
+        if not hasattr(self, "_speech_peak_rms"):
             self._speech_peak_rms = 0.0
 
         # Debug logging every ~0.5 seconds
-        if int(recording_duration * 2) != getattr(self, '_last_debug_time', -1):
+        if int(recording_duration * 2) != getattr(self, "_last_debug_time", -1):
             self._last_debug_time = int(recording_duration * 2)
             if debug_enabled:
                 relative_thresh = self._speech_peak_rms * 0.3 if self._speech_detected else 0
@@ -244,7 +242,7 @@ class AudioRecorder:
             if recording_duration > 2.0 and not self._speech_detected:
                 with self._level_lock:
                     peak = self._peak_level
-                if peak < 0.02 and not getattr(self, '_low_audio_warned', False):
+                if peak < 0.02 and not getattr(self, "_low_audio_warned", False):
                     self._low_audio_warned = True
                     logger.warning(
                         f"Audio levels very low (peak: {peak:.4f}). "
@@ -312,7 +310,7 @@ class AudioRecorder:
                     self._stream = None
 
             if not self.audio_data:
-                return b''
+                return b""
 
             # Concatenate all recorded chunks
             audio = np.concatenate(self.audio_data, axis=0)
@@ -381,13 +379,15 @@ def get_input_devices() -> list[dict]:
     devices = sd.query_devices()
     input_devices = []
     for i, device in enumerate(devices):
-        if device['max_input_channels'] > 0:
-            input_devices.append({
-                'id': i,
-                'name': device['name'],
-                'channels': device['max_input_channels'],
-                'sample_rate': device['default_samplerate']
-            })
+        if device["max_input_channels"] > 0:
+            input_devices.append(
+                {
+                    "id": i,
+                    "name": device["name"],
+                    "channels": device["max_input_channels"],
+                    "sample_rate": device["default_samplerate"],
+                }
+            )
     return input_devices
 
 
@@ -409,7 +409,7 @@ def is_valid_input_device(device_id: Optional[int]) -> bool:
         if device_id < 0 or device_id >= len(devices):
             return False
         device = devices[device_id]
-        return device['max_input_channels'] > 0
+        return device["max_input_channels"] > 0
     except Exception:
         return False
 
@@ -430,7 +430,7 @@ def get_device_name(device_id: Optional[int]) -> str:
     try:
         devices = sd.query_devices()
         if 0 <= device_id < len(devices):
-            return devices[device_id]['name']
+            return devices[device_id]["name"]
     except Exception:
         pass
     return f"Unknown Device ({device_id})"

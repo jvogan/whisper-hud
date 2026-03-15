@@ -31,26 +31,27 @@ class OllamaTranslateProvider(TranslationProvider):
             "ollama_name": "translategemma",
             "size_gb": 3.3,
             "ram_required": "8GB",
-            "description": "Fast, works on most Macs"
+            "description": "Fast, works on most Macs",
         },
         "translategemma-12b": {
             "ollama_name": "translategemma:12b",
             "size_gb": 8.1,
             "ram_required": "16GB",
-            "description": "Better quality, needs more RAM"
+            "description": "Better quality, needs more RAM",
         },
         "translategemma-27b": {
             "ollama_name": "translategemma:27b",
             "size_gb": 17.0,
             "ram_required": "32GB",
-            "description": "Best quality, high-end Macs only"
-        }
+            "description": "Best quality, high-end Macs only",
+        },
     }
 
     # Whitelisted model names for subprocess calls (security)
     # Pattern: alphanumeric, hyphens, underscores, dots, colons (for tags)
     import re
-    _VALID_MODEL_PATTERN = re.compile(r'^[a-zA-Z0-9._:-]+$')
+
+    _VALID_MODEL_PATTERN = re.compile(r"^[a-zA-Z0-9._:-]+$")
 
     @classmethod
     def _validate_model_name(cls, model_name: str) -> bool:
@@ -143,11 +144,7 @@ class OllamaTranslateProvider(TranslationProvider):
         """
         if not text.strip():
             return TranslationResult(
-                text="",
-                source_lang=source_lang,
-                target_lang=target_lang,
-                provider=self.name,
-                model=self.model
+                text="", source_lang=source_lang, target_lang=target_lang, provider=self.name, model=self.model
             )
 
         # Build the prompt for TranslateGemma
@@ -162,9 +159,9 @@ class OllamaTranslateProvider(TranslationProvider):
                     "stream": False,
                     "options": {
                         "temperature": 0.1,  # Low temperature for more consistent translations
-                    }
+                    },
                 },
-                timeout=60
+                timeout=60,
             )
             response.raise_for_status()
 
@@ -174,17 +171,11 @@ class OllamaTranslateProvider(TranslationProvider):
             result_text = self._clean_response(result_text)
 
             return TranslationResult(
-                text=result_text,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                provider=self.name,
-                model=self.model
+                text=result_text, source_lang=source_lang, target_lang=target_lang, provider=self.name, model=self.model
             )
 
         except requests.exceptions.ConnectionError:
-            raise ConnectionError(
-                "Ollama is not running. Start it with: ollama serve"
-            )
+            raise ConnectionError("Ollama is not running. Start it with: ollama serve")
         except requests.exceptions.Timeout:
             raise TimeoutError("Translation timed out")
         except Exception as e:
@@ -276,7 +267,7 @@ class OllamaTranslateProvider(TranslationProvider):
             "downloaded": model_downloaded,
             "size_gb": self.model_config["size_gb"],
             "ram_required": self.model_config["ram_required"],
-            "description": self.model_config["description"]
+            "description": self.model_config["description"],
         }
 
     def _is_ollama_running(self) -> bool:
@@ -311,14 +302,10 @@ class OllamaTranslateProvider(TranslationProvider):
 
         try:
             process = subprocess.Popen(
-                ["ollama", "pull", ollama_name],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1
+                ["ollama", "pull", ollama_name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
             )
 
-            for line in iter(process.stdout.readline, ''):
+            for line in iter(process.stdout.readline, ""):
                 if line and progress_callback:
                     progress_callback(line.strip())
 
@@ -338,12 +325,7 @@ class OllamaTranslateProvider(TranslationProvider):
     def is_ollama_installed() -> bool:
         """Check if Ollama CLI is installed."""
         try:
-            result = subprocess.run(
-                ["ollama", "--version"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
+            result = subprocess.run(["ollama", "--version"], capture_output=True, text=True, timeout=5)
             return result.returncode == 0
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return False
@@ -371,7 +353,7 @@ class OllamaTranslateProvider(TranslationProvider):
                 "description": config["description"],
                 "size_gb": config["size_gb"],
                 "ram_required": config["ram_required"],
-                "ollama_name": config["ollama_name"]
+                "ollama_name": config["ollama_name"],
             }
             for model_id, config in self.MODELS.items()
         ]
@@ -385,13 +367,7 @@ class OllamaTranslateProvider(TranslationProvider):
         """Ollama supports streaming translation."""
         return True
 
-    def translate_streaming(
-        self,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        on_chunk: Callable[[str], None]
-    ):
+    def translate_streaming(self, text: str, source_lang: str, target_lang: str, on_chunk: Callable[[str], None]):
         """
         Translate text with streaming output.
 
@@ -408,11 +384,7 @@ class OllamaTranslateProvider(TranslationProvider):
 
         if not text.strip():
             return TranslationResult(
-                text="",
-                source_lang=source_lang,
-                target_lang=target_lang,
-                provider=self.name,
-                model=self.model
+                text="", source_lang=source_lang, target_lang=target_lang, provider=self.name, model=self.model
             )
 
         prompt = self._build_prompt(text, source_lang, target_lang)
@@ -427,10 +399,10 @@ class OllamaTranslateProvider(TranslationProvider):
                     "stream": True,
                     "options": {
                         "temperature": 0.1,
-                    }
+                    },
                 },
                 stream=True,
-                timeout=60
+                timeout=60,
             )
             response.raise_for_status()
 
@@ -438,13 +410,14 @@ class OllamaTranslateProvider(TranslationProvider):
                 if line:
                     try:
                         import json
-                        data = json.loads(line.decode('utf-8'))
-                        if 'response' in data:
-                            cumulative_text += data['response']
+
+                        data = json.loads(line.decode("utf-8"))
+                        if "response" in data:
+                            cumulative_text += data["response"]
                             # Clean and send update
                             clean_text = self._clean_response(cumulative_text)
                             on_chunk(clean_text)
-                        if data.get('done', False):
+                        if data.get("done", False):
                             break
                     except json.JSONDecodeError:
                         continue
@@ -452,17 +425,11 @@ class OllamaTranslateProvider(TranslationProvider):
             final_text = self._clean_response(cumulative_text)
 
             return TranslationResult(
-                text=final_text,
-                source_lang=source_lang,
-                target_lang=target_lang,
-                provider=self.name,
-                model=self.model
+                text=final_text, source_lang=source_lang, target_lang=target_lang, provider=self.name, model=self.model
             )
 
         except requests.exceptions.ConnectionError:
-            raise ConnectionError(
-                "Ollama is not running. Start it with: ollama serve"
-            )
+            raise ConnectionError("Ollama is not running. Start it with: ollama serve")
         except requests.exceptions.Timeout:
             raise TimeoutError("Translation timed out")
         except Exception as e:
@@ -472,12 +439,7 @@ class OllamaTranslateProvider(TranslationProvider):
     def is_homebrew_installed() -> bool:
         """Check if Homebrew is installed."""
         try:
-            result = subprocess.run(
-                ["brew", "--version"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
+            result = subprocess.run(["brew", "--version"], capture_output=True, text=True, timeout=5)
             return result.returncode == 0
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return False
@@ -503,14 +465,10 @@ class OllamaTranslateProvider(TranslationProvider):
                 progress_callback("Installing Ollama via Homebrew...")
 
             process = subprocess.Popen(
-                ["brew", "install", "ollama"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1
+                ["brew", "install", "ollama"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
             )
 
-            for line in iter(process.stdout.readline, ''):
+            for line in iter(process.stdout.readline, ""):
                 if line and progress_callback:
                     progress_callback(line.strip())
 
@@ -553,11 +511,12 @@ class OllamaTranslateProvider(TranslationProvider):
                 ["ollama", "serve"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                start_new_session=True  # Detach from parent process
+                start_new_session=True,  # Detach from parent process
             )
 
             # Wait a moment for server to start
             import time
+
             for _ in range(10):  # Wait up to 5 seconds
                 time.sleep(0.5)
                 try:
@@ -584,11 +543,7 @@ class OllamaTranslateProvider(TranslationProvider):
         """
         try:
             # Use pkill to stop ollama
-            subprocess.run(
-                ["pkill", "-f", "ollama serve"],
-                capture_output=True,
-                timeout=5
-            )
+            subprocess.run(["pkill", "-f", "ollama serve"], capture_output=True, timeout=5)
             return True
         except Exception:
             return False

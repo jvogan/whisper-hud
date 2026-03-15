@@ -17,7 +17,7 @@ from pathlib import Path
 
 def create_canvas(size: int = 256) -> tuple:
     """Create a transparent canvas."""
-    img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     return img, draw
 
@@ -36,8 +36,7 @@ def draw_panda_face(draw, cx: int, cy: int, size: int, eye_state: str = "open"):
     # --- Main face (white circle) ---
     face_r = int(90 * s)
     draw.ellipse(
-        [cx - face_r, cy - face_r, cx + face_r, cy + face_r],
-        fill=white, outline=black, width=max(1, int(3 * s))
+        [cx - face_r, cy - face_r, cx + face_r, cy + face_r], fill=white, outline=black, width=max(1, int(3 * s))
     )
 
     # --- Ears (black circles behind face, but we draw them on top edges) ---
@@ -47,29 +46,35 @@ def draw_panda_face(draw, cx: int, cy: int, size: int, eye_state: str = "open"):
 
     # Left ear
     draw.ellipse(
-        [cx - ear_offset_x - ear_r, cy - ear_offset_y - ear_r,
-         cx - ear_offset_x + ear_r, cy - ear_offset_y + ear_r],
-        fill=black
+        [cx - ear_offset_x - ear_r, cy - ear_offset_y - ear_r, cx - ear_offset_x + ear_r, cy - ear_offset_y + ear_r],
+        fill=black,
     )
     # Inner ear
     inner_ear_r = int(15 * s)
     draw.ellipse(
-        [cx - ear_offset_x - inner_ear_r, cy - ear_offset_y - inner_ear_r,
-         cx - ear_offset_x + inner_ear_r, cy - ear_offset_y + inner_ear_r],
-        fill=dark_gray
+        [
+            cx - ear_offset_x - inner_ear_r,
+            cy - ear_offset_y - inner_ear_r,
+            cx - ear_offset_x + inner_ear_r,
+            cy - ear_offset_y + inner_ear_r,
+        ],
+        fill=dark_gray,
     )
 
     # Right ear
     draw.ellipse(
-        [cx + ear_offset_x - ear_r, cy - ear_offset_y - ear_r,
-         cx + ear_offset_x + ear_r, cy - ear_offset_y + ear_r],
-        fill=black
+        [cx + ear_offset_x - ear_r, cy - ear_offset_y - ear_r, cx + ear_offset_x + ear_r, cy - ear_offset_y + ear_r],
+        fill=black,
     )
     # Inner ear
     draw.ellipse(
-        [cx + ear_offset_x - inner_ear_r, cy - ear_offset_y - inner_ear_r,
-         cx + ear_offset_x + inner_ear_r, cy - ear_offset_y + inner_ear_r],
-        fill=dark_gray
+        [
+            cx + ear_offset_x - inner_ear_r,
+            cy - ear_offset_y - inner_ear_r,
+            cx + ear_offset_x + inner_ear_r,
+            cy - ear_offset_y + inner_ear_r,
+        ],
+        fill=dark_gray,
     )
 
     # --- Eye patches (black ovals) ---
@@ -80,16 +85,24 @@ def draw_panda_face(draw, cx: int, cy: int, size: int, eye_state: str = "open"):
 
     # Left eye patch (tilted slightly)
     draw.ellipse(
-        [cx - patch_offset_x - patch_w, cy - patch_offset_y - patch_h,
-         cx - patch_offset_x + patch_w, cy - patch_offset_y + patch_h],
-        fill=black
+        [
+            cx - patch_offset_x - patch_w,
+            cy - patch_offset_y - patch_h,
+            cx - patch_offset_x + patch_w,
+            cy - patch_offset_y + patch_h,
+        ],
+        fill=black,
     )
 
     # Right eye patch
     draw.ellipse(
-        [cx + patch_offset_x - patch_w, cy - patch_offset_y - patch_h,
-         cx + patch_offset_x + patch_w, cy - patch_offset_y + patch_h],
-        fill=black
+        [
+            cx + patch_offset_x - patch_w,
+            cy - patch_offset_y - patch_h,
+            cx + patch_offset_x + patch_w,
+            cy - patch_offset_y + patch_h,
+        ],
+        fill=black,
     )
 
     # --- Eyes ---
@@ -100,41 +113,65 @@ def draw_panda_face(draw, cx: int, cy: int, size: int, eye_state: str = "open"):
         # White of eyes
         eye_r = int(12 * s)
         draw.ellipse(
-            [cx - eye_offset_x - eye_r, cy - eye_offset_y - eye_r,
-             cx - eye_offset_x + eye_r, cy - eye_offset_y + eye_r],
-            fill=white
+            [
+                cx - eye_offset_x - eye_r,
+                cy - eye_offset_y - eye_r,
+                cx - eye_offset_x + eye_r,
+                cy - eye_offset_y + eye_r,
+            ],
+            fill=white,
         )
         draw.ellipse(
-            [cx + eye_offset_x - eye_r, cy - eye_offset_y - eye_r,
-             cx + eye_offset_x + eye_r, cy - eye_offset_y + eye_r],
-            fill=white
+            [
+                cx + eye_offset_x - eye_r,
+                cy - eye_offset_y - eye_r,
+                cx + eye_offset_x + eye_r,
+                cy - eye_offset_y + eye_r,
+            ],
+            fill=white,
         )
 
         # Pupils
         pupil_r = int(6 * s)
         draw.ellipse(
-            [cx - eye_offset_x - pupil_r, cy - eye_offset_y - pupil_r,
-             cx - eye_offset_x + pupil_r, cy - eye_offset_y + pupil_r],
-            fill=black
+            [
+                cx - eye_offset_x - pupil_r,
+                cy - eye_offset_y - pupil_r,
+                cx - eye_offset_x + pupil_r,
+                cy - eye_offset_y + pupil_r,
+            ],
+            fill=black,
         )
         draw.ellipse(
-            [cx + eye_offset_x - pupil_r, cy - eye_offset_y - pupil_r,
-             cx + eye_offset_x + pupil_r, cy - eye_offset_y + pupil_r],
-            fill=black
+            [
+                cx + eye_offset_x - pupil_r,
+                cy - eye_offset_y - pupil_r,
+                cx + eye_offset_x + pupil_r,
+                cy - eye_offset_y + pupil_r,
+            ],
+            fill=black,
         )
 
         # Eye highlights
         highlight_r = int(3 * s)
         highlight_off = int(3 * s)
         draw.ellipse(
-            [cx - eye_offset_x - highlight_off - highlight_r, cy - eye_offset_y - highlight_off - highlight_r,
-             cx - eye_offset_x - highlight_off + highlight_r, cy - eye_offset_y - highlight_off + highlight_r],
-            fill=white
+            [
+                cx - eye_offset_x - highlight_off - highlight_r,
+                cy - eye_offset_y - highlight_off - highlight_r,
+                cx - eye_offset_x - highlight_off + highlight_r,
+                cy - eye_offset_y - highlight_off + highlight_r,
+            ],
+            fill=white,
         )
         draw.ellipse(
-            [cx + eye_offset_x - highlight_off - highlight_r, cy - eye_offset_y - highlight_off - highlight_r,
-             cx + eye_offset_x - highlight_off + highlight_r, cy - eye_offset_y - highlight_off + highlight_r],
-            fill=white
+            [
+                cx + eye_offset_x - highlight_off - highlight_r,
+                cy - eye_offset_y - highlight_off - highlight_r,
+                cx + eye_offset_x - highlight_off + highlight_r,
+                cy - eye_offset_y - highlight_off + highlight_r,
+            ],
+            fill=white,
         )
 
     elif eye_state == "closed" or eye_state == "sleeping":
@@ -144,16 +181,30 @@ def draw_panda_face(draw, cx: int, cy: int, size: int, eye_state: str = "open"):
 
         # Left eye - arc
         draw.arc(
-            [cx - eye_offset_x - arc_size, cy - eye_offset_y - arc_size,
-             cx - eye_offset_x + arc_size, cy - eye_offset_y + arc_size],
-            start=0, end=180, fill=white, width=line_w
+            [
+                cx - eye_offset_x - arc_size,
+                cy - eye_offset_y - arc_size,
+                cx - eye_offset_x + arc_size,
+                cy - eye_offset_y + arc_size,
+            ],
+            start=0,
+            end=180,
+            fill=white,
+            width=line_w,
         )
 
         # Right eye - arc
         draw.arc(
-            [cx + eye_offset_x - arc_size, cy - eye_offset_y - arc_size,
-             cx + eye_offset_x + arc_size, cy - eye_offset_y + arc_size],
-            start=0, end=180, fill=white, width=line_w
+            [
+                cx + eye_offset_x - arc_size,
+                cy - eye_offset_y - arc_size,
+                cx + eye_offset_x + arc_size,
+                cy - eye_offset_y + arc_size,
+            ],
+            start=0,
+            end=180,
+            fill=white,
+            width=line_w,
         )
 
     elif eye_state == "spiral":
@@ -167,9 +218,11 @@ def draw_panda_face(draw, cx: int, cy: int, size: int, eye_state: str = "open"):
             r = eye_r - i * int(4 * s)
             if r > 0:
                 draw.arc(
-                    [cx - eye_offset_x - r, cy - eye_offset_y - r,
-                     cx - eye_offset_x + r, cy - eye_offset_y + r],
-                    start=i * 180, end=i * 180 + 180, fill=spiral_color, width=line_w
+                    [cx - eye_offset_x - r, cy - eye_offset_y - r, cx - eye_offset_x + r, cy - eye_offset_y + r],
+                    start=i * 180,
+                    end=i * 180 + 180,
+                    fill=spiral_color,
+                    width=line_w,
                 )
 
         # Right spiral
@@ -177,19 +230,17 @@ def draw_panda_face(draw, cx: int, cy: int, size: int, eye_state: str = "open"):
             r = eye_r - i * int(4 * s)
             if r > 0:
                 draw.arc(
-                    [cx + eye_offset_x - r, cy - eye_offset_y - r,
-                     cx + eye_offset_x + r, cy - eye_offset_y + r],
-                    start=180 + i * 180, end=180 + i * 180 + 180, fill=spiral_color, width=line_w
+                    [cx + eye_offset_x - r, cy - eye_offset_y - r, cx + eye_offset_x + r, cy - eye_offset_y + r],
+                    start=180 + i * 180,
+                    end=180 + i * 180 + 180,
+                    fill=spiral_color,
+                    width=line_w,
                 )
 
     # --- Nose ---
     nose_y = cy + int(25 * s)
     nose_r = int(12 * s)
-    draw.ellipse(
-        [cx - nose_r, nose_y - nose_r // 2,
-         cx + nose_r, nose_y + nose_r // 2],
-        fill=black
-    )
+    draw.ellipse([cx - nose_r, nose_y - nose_r // 2, cx + nose_r, nose_y + nose_r // 2], fill=black)
 
     # --- Mouth ---
     mouth_y = nose_y + int(15 * s)
@@ -198,9 +249,11 @@ def draw_panda_face(draw, cx: int, cy: int, size: int, eye_state: str = "open"):
 
     # Simple curved smile
     draw.arc(
-        [cx - mouth_w, mouth_y - int(10 * s),
-         cx + mouth_w, mouth_y + int(10 * s)],
-        start=0, end=180, fill=black, width=mouth_line
+        [cx - mouth_w, mouth_y - int(10 * s), cx + mouth_w, mouth_y + int(10 * s)],
+        start=0,
+        end=180,
+        fill=black,
+        width=mouth_line,
     )
 
     # --- Blush (pink cheeks) ---
@@ -210,14 +263,22 @@ def draw_panda_face(draw, cx: int, cy: int, size: int, eye_state: str = "open"):
     blush_color = (255, 200, 200, 150)
 
     draw.ellipse(
-        [cx - blush_offset_x - blush_r, cy + blush_offset_y - blush_r,
-         cx - blush_offset_x + blush_r, cy + blush_offset_y + blush_r],
-        fill=blush_color
+        [
+            cx - blush_offset_x - blush_r,
+            cy + blush_offset_y - blush_r,
+            cx - blush_offset_x + blush_r,
+            cy + blush_offset_y + blush_r,
+        ],
+        fill=blush_color,
     )
     draw.ellipse(
-        [cx + blush_offset_x - blush_r, cy + blush_offset_y - blush_r,
-         cx + blush_offset_x + blush_r, cy + blush_offset_y + blush_r],
-        fill=blush_color
+        [
+            cx + blush_offset_x - blush_r,
+            cy + blush_offset_y - blush_r,
+            cx + blush_offset_x + blush_r,
+            cy + blush_offset_y + blush_r,
+        ],
+        fill=blush_color,
     )
 
 
@@ -252,23 +313,13 @@ def draw_question_mark(draw, x: int, y: int, size: int):
 
     # Question mark curve
     qm_size = int(25 * s)
-    draw.arc(
-        [x - qm_size, y - qm_size * 2,
-         x + qm_size, y],
-        start=180, end=360, fill=yellow, width=line_w
-    )
-    draw.line(
-        [(x + qm_size, y - qm_size), (x, y + int(10 * s))],
-        fill=yellow, width=line_w
-    )
+    draw.arc([x - qm_size, y - qm_size * 2, x + qm_size, y], start=180, end=360, fill=yellow, width=line_w)
+    draw.line([(x + qm_size, y - qm_size), (x, y + int(10 * s))], fill=yellow, width=line_w)
 
     # Dot
     dot_r = int(5 * s)
     dot_y = y + int(25 * s)
-    draw.ellipse(
-        [x - dot_r, dot_y - dot_r, x + dot_r, dot_y + dot_r],
-        fill=yellow
-    )
+    draw.ellipse([x - dot_r, dot_y - dot_r, x + dot_r, dot_y + dot_r], fill=yellow)
 
 
 def draw_stars(draw, cx: int, cy: int, size: int):
@@ -339,16 +390,14 @@ def draw_pencil(draw, x: int, y: int, size: int, angle: float = -30):
     width = int(12 * s)
 
     # Create a rotated pencil by using a separate image
-    pencil_img = Image.new('RGBA', (int(length * 1.5), int(width * 3)), (0, 0, 0, 0))
+    pencil_img = Image.new("RGBA", (int(length * 1.5), int(width * 3)), (0, 0, 0, 0))
     pdraw = ImageDraw.Draw(pencil_img)
 
     px, py = pencil_img.width // 2, pencil_img.height // 2
 
     # Pencil body (yellow)
     pdraw.rectangle(
-        [px - length // 2 + width, py - width // 2,
-         px + length // 2, py + width // 2],
-        fill=yellow, outline=None
+        [px - length // 2 + width, py - width // 2, px + length // 2, py + width // 2], fill=yellow, outline=None
     )
 
     # Pencil tip (wood + graphite)
@@ -360,18 +409,17 @@ def draw_pencil(draw, x: int, y: int, size: int, angle: float = -30):
     pdraw.polygon(tip_points, fill=wood)
 
     # Graphite tip
-    pdraw.polygon([
-        (px - length // 2, py),
-        (px - length // 2 + width // 3, py - width // 4),
-        (px - length // 2 + width // 3, py + width // 4),
-    ], fill=tip)
+    pdraw.polygon(
+        [
+            (px - length // 2, py),
+            (px - length // 2 + width // 3, py - width // 4),
+            (px - length // 2 + width // 3, py + width // 4),
+        ],
+        fill=tip,
+    )
 
     # Eraser end (gray)
-    pdraw.rectangle(
-        [px + length // 2 - width // 2, py - width // 2,
-         px + length // 2, py + width // 2],
-        fill=gray
-    )
+    pdraw.rectangle([px + length // 2 - width // 2, py - width // 2, px + length // 2, py + width // 2], fill=gray)
 
     # Rotate pencil
     pencil_img = pencil_img.rotate(angle, expand=True, resample=Image.BICUBIC)
@@ -447,11 +495,11 @@ def main():
     size = 256
 
     icons = {
-        'idle': create_idle_icon,
-        'recording': create_recording_icon,
-        'processing': create_processing_icon,
-        'error': create_error_icon,
-        'success': create_success_icon,
+        "idle": create_idle_icon,
+        "recording": create_recording_icon,
+        "processing": create_processing_icon,
+        "error": create_error_icon,
+        "success": create_success_icon,
     }
 
     for name, create_func in icons.items():
@@ -459,7 +507,7 @@ def main():
 
         # Save full size
         output_path = output_dir / f"{name}.png"
-        img.save(output_path, 'PNG')
+        img.save(output_path, "PNG")
         print(f"Created {output_path}")
 
     print(f"\nGenerated {len(icons)} panda icons in {output_dir}")

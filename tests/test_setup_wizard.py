@@ -193,7 +193,8 @@ def test_create_provider_button_uses_wrapped_title_and_keeps_minimum_height(monk
                 "font_size": font_size,
                 "minimum_height": minimum_height,
             }
-        ) or button,
+        )
+        or button,
     )
 
     button = wizard._create_provider_button(

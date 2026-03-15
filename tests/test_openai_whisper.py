@@ -13,9 +13,7 @@ class _FakeClient:
         self._response = response
         self._error = error
         self.calls = []
-        self.audio = SimpleNamespace(
-            transcriptions=SimpleNamespace(create=self._create_transcription)
-        )
+        self.audio = SimpleNamespace(transcriptions=SimpleNamespace(create=self._create_transcription))
 
     def _create_transcription(self, **kwargs):
         self.calls.append(kwargs)

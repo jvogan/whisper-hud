@@ -13,6 +13,7 @@ from typing import Optional, Callable
 @dataclass
 class TranslationResult:
     """Result from a translation request."""
+
     text: str
     source_lang: str
     target_lang: str
@@ -74,11 +75,7 @@ class TranslationProvider(ABC):
         return False
 
     def translate_streaming(
-        self,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        on_chunk: Callable[[str], None]
+        self, text: str, source_lang: str, target_lang: str, on_chunk: Callable[[str], None]
     ) -> TranslationResult:
         """
         Translate text with streaming output.

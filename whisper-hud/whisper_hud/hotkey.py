@@ -57,112 +57,134 @@ except ImportError:
 # Comprehensive key name mappings for display and serialization
 KEY_DISPLAY_NAMES = {
     # Modifiers
-    'cmd': '⌘',
-    'shift': '⇧',
-    'ctrl': '⌃',
-    'alt': '⌥',
-    'space': 'Space',
+    "cmd": "⌘",
+    "shift": "⇧",
+    "ctrl": "⌃",
+    "alt": "⌥",
+    "space": "Space",
     # Function keys
-    'f1': 'F1', 'f2': 'F2', 'f3': 'F3', 'f4': 'F4',
-    'f5': 'F5', 'f6': 'F6', 'f7': 'F7', 'f8': 'F8',
-    'f9': 'F9', 'f10': 'F10', 'f11': 'F11', 'f12': 'F12',
-    'f13': 'F13', 'f14': 'F14', 'f15': 'F15', 'f16': 'F16',
-    'f17': 'F17', 'f18': 'F18', 'f19': 'F19', 'f20': 'F20',
+    "f1": "F1",
+    "f2": "F2",
+    "f3": "F3",
+    "f4": "F4",
+    "f5": "F5",
+    "f6": "F6",
+    "f7": "F7",
+    "f8": "F8",
+    "f9": "F9",
+    "f10": "F10",
+    "f11": "F11",
+    "f12": "F12",
+    "f13": "F13",
+    "f14": "F14",
+    "f15": "F15",
+    "f16": "F16",
+    "f17": "F17",
+    "f18": "F18",
+    "f19": "F19",
+    "f20": "F20",
     # Navigation
-    'up': '↑', 'down': '↓', 'left': '←', 'right': '→',
-    'page_up': 'PgUp', 'page_down': 'PgDn',
-    'home': 'Home', 'end': 'End',
+    "up": "↑",
+    "down": "↓",
+    "left": "←",
+    "right": "→",
+    "page_up": "PgUp",
+    "page_down": "PgDn",
+    "home": "Home",
+    "end": "End",
     # Special keys
-    'enter': '↵', 'return': '↵',
-    'tab': 'Tab',
-    'backspace': '⌫',
-    'delete': 'Del',
-    'escape': 'Esc', 'esc': 'Esc',
-    'caps_lock': 'CapsLock',
-    'num_lock': 'NumLock',
-    'scroll_lock': 'ScrollLock',
-    'print_screen': 'PrtSc',
-    'pause': 'Pause',
-    'insert': 'Ins',
+    "enter": "↵",
+    "return": "↵",
+    "tab": "Tab",
+    "backspace": "⌫",
+    "delete": "Del",
+    "escape": "Esc",
+    "esc": "Esc",
+    "caps_lock": "CapsLock",
+    "num_lock": "NumLock",
+    "scroll_lock": "ScrollLock",
+    "print_screen": "PrtSc",
+    "pause": "Pause",
+    "insert": "Ins",
     # Media keys
-    'media_play_pause': '⏯',
-    'media_volume_mute': '🔇',
-    'media_volume_down': '🔉',
-    'media_volume_up': '🔊',
-    'media_previous': '⏮',
-    'media_next': '⏭',
+    "media_play_pause": "⏯",
+    "media_volume_mute": "🔇",
+    "media_volume_down": "🔉",
+    "media_volume_up": "🔊",
+    "media_previous": "⏮",
+    "media_next": "⏭",
 }
 
-MODIFIER_ORDER = ['cmd', 'ctrl', 'alt', 'shift']
+MODIFIER_ORDER = ["cmd", "ctrl", "alt", "shift"]
 MODIFIER_KEYS = set(MODIFIER_ORDER)
 SYSTEM_SHORTCUT_WARNINGS = {
-    frozenset({'cmd', 'space'}): "Conflicts with Spotlight.",
-    frozenset({'cmd', 'tab'}): "Conflicts with macOS app switching.",
-    frozenset({'cmd', 'q'}): "Commonly quits the frontmost app.",
-    frozenset({'cmd', 'w'}): "Commonly closes the frontmost window.",
-    frozenset({'cmd', 'h'}): "Commonly hides the frontmost app.",
-    frozenset({'cmd', 'm'}): "Commonly minimizes the frontmost window.",
-    frozenset({'cmd', ','}): "Commonly opens app settings.",
+    frozenset({"cmd", "space"}): "Conflicts with Spotlight.",
+    frozenset({"cmd", "tab"}): "Conflicts with macOS app switching.",
+    frozenset({"cmd", "q"}): "Commonly quits the frontmost app.",
+    frozenset({"cmd", "w"}): "Commonly closes the frontmost window.",
+    frozenset({"cmd", "h"}): "Commonly hides the frontmost app.",
+    frozenset({"cmd", "m"}): "Commonly minimizes the frontmost window.",
+    frozenset({"cmd", ","}): "Commonly opens app settings.",
 }
 KEYCODE_NAME_MAP = {
-    36: 'return',
-    48: 'tab',
-    49: 'space',
-    51: 'backspace',
-    53: 'escape',
-    71: 'clear',
-    76: 'enter',
-    115: 'home',
-    116: 'page_up',
-    117: 'delete',
-    119: 'end',
-    121: 'page_down',
-    123: 'left',
-    124: 'right',
-    125: 'down',
-    126: 'up',
-    122: 'f1',
-    120: 'f2',
-    99: 'f3',
-    118: 'f4',
-    96: 'f5',
-    97: 'f6',
-    98: 'f7',
-    100: 'f8',
-    101: 'f9',
-    109: 'f10',
-    103: 'f11',
-    111: 'f12',
-    105: 'f13',
-    107: 'f14',
-    113: 'f15',
-    106: 'f16',
-    64: 'f17',
-    79: 'f18',
-    80: 'f19',
-    90: 'f20',
+    36: "return",
+    48: "tab",
+    49: "space",
+    51: "backspace",
+    53: "escape",
+    71: "clear",
+    76: "enter",
+    115: "home",
+    116: "page_up",
+    117: "delete",
+    119: "end",
+    121: "page_down",
+    123: "left",
+    124: "right",
+    125: "down",
+    126: "up",
+    122: "f1",
+    120: "f2",
+    99: "f3",
+    118: "f4",
+    96: "f5",
+    97: "f6",
+    98: "f7",
+    100: "f8",
+    101: "f9",
+    109: "f10",
+    103: "f11",
+    111: "f12",
+    105: "f13",
+    107: "f14",
+    113: "f15",
+    106: "f16",
+    64: "f17",
+    79: "f18",
+    80: "f19",
+    90: "f20",
 }
 
 
 def key_to_string(key) -> str:
     """Convert a pynput key to a string name for storage."""
-    if hasattr(key, 'name'):
+    if hasattr(key, "name"):
         name = key.name
         # Normalize left/right variants
-        if name in ('cmd_l', 'cmd_r'):
-            return 'cmd'
-        if name in ('shift_l', 'shift_r'):
-            return 'shift'
-        if name in ('ctrl_l', 'ctrl_r'):
-            return 'ctrl'
-        if name in ('alt_l', 'alt_r', 'alt_gr'):
-            return 'alt'
+        if name in ("cmd_l", "cmd_r"):
+            return "cmd"
+        if name in ("shift_l", "shift_r"):
+            return "shift"
+        if name in ("ctrl_l", "ctrl_r"):
+            return "ctrl"
+        if name in ("alt_l", "alt_r", "alt_gr"):
+            return "alt"
         return name.lower()
-    elif hasattr(key, 'char') and key.char:
+    elif hasattr(key, "char") and key.char:
         return key.char.lower()
-    elif hasattr(key, 'vk'):
+    elif hasattr(key, "vk"):
         # Virtual key code - useful for USB devices like foot pedals
-        return f'vk{key.vk}'
+        return f"vk{key.vk}"
     return str(key)
 
 
@@ -172,13 +194,27 @@ def _build_key_mapping():
 
     # Core keys available on all platforms
     core_keys = [
-        ('cmd', 'cmd'), ('shift', 'shift'), ('ctrl', 'ctrl'), ('alt', 'alt'),
-        ('space', 'space'), ('enter', 'enter'), ('return', 'enter'),
-        ('tab', 'tab'), ('backspace', 'backspace'), ('delete', 'delete'),
-        ('escape', 'esc'), ('esc', 'esc'),
-        ('up', 'up'), ('down', 'down'), ('left', 'left'), ('right', 'right'),
-        ('page_up', 'page_up'), ('page_down', 'page_down'),
-        ('home', 'home'), ('end', 'end'), ('caps_lock', 'caps_lock'),
+        ("cmd", "cmd"),
+        ("shift", "shift"),
+        ("ctrl", "ctrl"),
+        ("alt", "alt"),
+        ("space", "space"),
+        ("enter", "enter"),
+        ("return", "enter"),
+        ("tab", "tab"),
+        ("backspace", "backspace"),
+        ("delete", "delete"),
+        ("escape", "esc"),
+        ("esc", "esc"),
+        ("up", "up"),
+        ("down", "down"),
+        ("left", "left"),
+        ("right", "right"),
+        ("page_up", "page_up"),
+        ("page_down", "page_down"),
+        ("home", "home"),
+        ("end", "end"),
+        ("caps_lock", "caps_lock"),
     ]
 
     for name, key_attr in core_keys:
@@ -189,7 +225,11 @@ def _build_key_mapping():
 
     # Platform-specific keys (may not exist on macOS)
     optional_keys = [
-        'num_lock', 'scroll_lock', 'print_screen', 'pause', 'insert',
+        "num_lock",
+        "scroll_lock",
+        "print_screen",
+        "pause",
+        "insert",
     ]
     for key_name in optional_keys:
         try:
@@ -200,14 +240,18 @@ def _build_key_mapping():
     # F-keys
     for i in range(1, 21):
         try:
-            mapping[f'f{i}'] = getattr(keyboard.Key, f'f{i}')
+            mapping[f"f{i}"] = getattr(keyboard.Key, f"f{i}")
         except AttributeError:
             pass
 
     # Media keys
     media_keys = [
-        'media_play_pause', 'media_volume_mute', 'media_volume_down',
-        'media_volume_up', 'media_previous', 'media_next',
+        "media_play_pause",
+        "media_volume_mute",
+        "media_volume_down",
+        "media_volume_up",
+        "media_previous",
+        "media_next",
     ]
     for key_name in media_keys:
         try:
@@ -227,7 +271,7 @@ def string_to_key(name: str):
     name_lower = name.lower()
 
     # Handle virtual key codes (e.g., vk123)
-    if name_lower.startswith('vk') and name_lower[2:].isdigit():
+    if name_lower.startswith("vk") and name_lower[2:].isdigit():
         vk_code = int(name_lower[2:])
         return keyboard.KeyCode.from_vk(vk_code)
 
@@ -252,18 +296,18 @@ def normalize_hotkey_names(key_names: Iterable[str]) -> List[str]:
         if not raw_name:
             continue
         name = raw_name.lower()
-        if name in ('cmd_l', 'cmd_r'):
-            name = 'cmd'
-        elif name in ('shift_l', 'shift_r'):
-            name = 'shift'
-        elif name in ('ctrl_l', 'ctrl_r'):
-            name = 'ctrl'
-        elif name in ('alt_l', 'alt_r', 'alt_gr'):
-            name = 'alt'
-        elif name == 'esc':
-            name = 'escape'
-        elif name == 'enter':
-            name = 'return'
+        if name in ("cmd_l", "cmd_r"):
+            name = "cmd"
+        elif name in ("shift_l", "shift_r"):
+            name = "shift"
+        elif name in ("ctrl_l", "ctrl_r"):
+            name = "ctrl"
+        elif name in ("alt_l", "alt_r", "alt_gr"):
+            name = "alt"
+        elif name == "esc":
+            name = "escape"
+        elif name == "enter":
+            name = "return"
 
         if name not in seen:
             normalized.append(name)
@@ -290,7 +334,7 @@ def format_hotkey_display(key_names: List[str]) -> str:
         display = KEY_DISPLAY_NAMES.get(name.lower(), name.upper())
         parts.append(display)
 
-    return ''.join(parts)
+    return "".join(parts)
 
 
 def modifier_flags_to_names(flags: int) -> List[str]:
@@ -300,13 +344,13 @@ def modifier_flags_to_names(flags: int) -> List[str]:
 
     modifiers = []
     if flags & NSEventModifierFlagCommand:
-        modifiers.append('cmd')
+        modifiers.append("cmd")
     if flags & NSEventModifierFlagControl:
-        modifiers.append('ctrl')
+        modifiers.append("ctrl")
     if flags & NSEventModifierFlagOption:
-        modifiers.append('alt')
+        modifiers.append("alt")
     if flags & NSEventModifierFlagShift:
-        modifiers.append('shift')
+        modifiers.append("shift")
     return normalize_hotkey_names(modifiers)
 
 
@@ -321,8 +365,8 @@ def event_to_key_name(event) -> Optional[str]:
         return None
 
     char = characters[0].lower()
-    if char == ' ':
-        return 'space'
+    if char == " ":
+        return "space"
     if char.isprintable():
         return char
     return None
@@ -335,6 +379,7 @@ def is_modifier_only_hotkey(key_names: Iterable[str]) -> bool:
 
 
 if HAS_APPKIT:
+
     class _HotkeyCaptureActionHandler(NSObject):
         """Bridge Cocoa button actions back into the pure-python panel controller."""
 
@@ -465,7 +510,7 @@ class HotkeyCapturePanel:
 
         modifiers = modifier_flags_to_names(int(event.modifierFlags()))
         key_name = event_to_key_name(event)
-        if key_name == 'escape':
+        if key_name == "escape":
             self.cancel()
             return None
 
@@ -586,7 +631,7 @@ class HotkeyListener:
         on_start: Callable[[], None],
         on_stop: Callable[[], None],
         hotkey: Optional[Set] = None,
-        mode: str = "push_to_talk"
+        mode: str = "push_to_talk",
     ):
         """
         Initialize hotkey listener.
@@ -611,14 +656,14 @@ class HotkeyListener:
     def _normalize_key(self, key):
         """Normalize key for comparison."""
         # Handle left/right modifier variants
-        if hasattr(key, 'name'):
-            if key.name in ('cmd', 'cmd_l', 'cmd_r'):
+        if hasattr(key, "name"):
+            if key.name in ("cmd", "cmd_l", "cmd_r"):
                 return keyboard.Key.cmd
-            if key.name in ('shift', 'shift_l', 'shift_r'):
+            if key.name in ("shift", "shift_l", "shift_r"):
                 return keyboard.Key.shift
-            if key.name in ('ctrl', 'ctrl_l', 'ctrl_r'):
+            if key.name in ("ctrl", "ctrl_l", "ctrl_r"):
                 return keyboard.Key.ctrl
-            if key.name in ('alt', 'alt_l', 'alt_r', 'alt_gr'):
+            if key.name in ("alt", "alt_l", "alt_r", "alt_gr"):
                 return keyboard.Key.alt
         return key
 
@@ -671,10 +716,7 @@ class HotkeyListener:
         if self._listener is not None:
             return
 
-        self._listener = keyboard.Listener(
-            on_press=self._on_press,
-            on_release=self._on_release
-        )
+        self._listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
         self._listener.start()
 
     def stop(self):
@@ -727,9 +769,7 @@ class HotkeyCapture:
     """
 
     def __init__(
-        self,
-        on_captured: Callable[[Set, List[str]], None],
-        on_key_change: Optional[Callable[[List[str]], None]] = None
+        self, on_captured: Callable[[Set, List[str]], None], on_key_change: Optional[Callable[[List[str]], None]] = None
     ):
         """
         Initialize hotkey capture.
@@ -756,22 +796,22 @@ class HotkeyCapture:
                 return
 
             # Normalize and add key
-            if hasattr(key, 'name'):
+            if hasattr(key, "name"):
                 name = key.name
-                if name in ('cmd_l', 'cmd_r'):
-                    name = 'cmd'
-                elif name in ('shift_l', 'shift_r'):
-                    name = 'shift'
-                elif name in ('ctrl_l', 'ctrl_r'):
-                    name = 'ctrl'
-                elif name in ('alt_l', 'alt_r', 'alt_gr'):
-                    name = 'alt'
+                if name in ("cmd_l", "cmd_r"):
+                    name = "cmd"
+                elif name in ("shift_l", "shift_r"):
+                    name = "shift"
+                elif name in ("ctrl_l", "ctrl_r"):
+                    name = "ctrl"
+                elif name in ("alt_l", "alt_r", "alt_gr"):
+                    name = "alt"
                 normalized_key = string_to_key(name)
-            elif hasattr(key, 'char') and key.char:
+            elif hasattr(key, "char") and key.char:
                 name = key.char.lower()
                 normalized_key = key
-            elif hasattr(key, 'vk'):
-                name = f'vk{key.vk}'
+            elif hasattr(key, "vk"):
+                name = f"vk{key.vk}"
                 normalized_key = key
             else:
                 return
@@ -796,22 +836,22 @@ class HotkeyCapture:
                 return
 
             # When all keys are released, capture is complete
-            if hasattr(key, 'name'):
+            if hasattr(key, "name"):
                 name = key.name
-                if name in ('cmd_l', 'cmd_r'):
-                    name = 'cmd'
-                elif name in ('shift_l', 'shift_r'):
-                    name = 'shift'
-                elif name in ('ctrl_l', 'ctrl_r'):
-                    name = 'ctrl'
-                elif name in ('alt_l', 'alt_r', 'alt_gr'):
-                    name = 'alt'
+                if name in ("cmd_l", "cmd_r"):
+                    name = "cmd"
+                elif name in ("shift_l", "shift_r"):
+                    name = "shift"
+                elif name in ("ctrl_l", "ctrl_r"):
+                    name = "ctrl"
+                elif name in ("alt_l", "alt_r", "alt_gr"):
+                    name = "alt"
                 normalized_key = string_to_key(name)
-            elif hasattr(key, 'char') and key.char:
+            elif hasattr(key, "char") and key.char:
                 name = key.char.lower()
                 normalized_key = key
-            elif hasattr(key, 'vk'):
-                name = f'vk{key.vk}'
+            elif hasattr(key, "vk"):
+                name = f"vk{key.vk}"
                 normalized_key = key
             else:
                 return
@@ -835,9 +875,7 @@ class HotkeyCapture:
                         final_keys.add(k)
 
                 threading.Thread(
-                    target=self.on_captured,
-                    args=(final_keys, self._max_key_names.copy()),
-                    daemon=True
+                    target=self.on_captured, args=(final_keys, self._max_key_names.copy()), daemon=True
                 ).start()
 
     def start(self):
@@ -851,10 +889,7 @@ class HotkeyCapture:
         self._max_key_names.clear()
         self._capture_complete = False
 
-        self._listener = keyboard.Listener(
-            on_press=self._on_press,
-            on_release=self._on_release
-        )
+        self._listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
         self._listener.start()
 
     def stop(self):

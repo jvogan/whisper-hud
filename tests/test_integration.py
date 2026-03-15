@@ -13,7 +13,6 @@ from whisper_hud.config import Config
 from whisper_hud.providers.base import TranscriptionProvider, TranscriptionResult
 from whisper_hud.transcribe import TranscriptionManager
 
-
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "integration_short.wav"
 EXPECTED_TEXT = "integration transcript from bundled fixture"
 

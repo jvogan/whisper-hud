@@ -114,6 +114,7 @@ def _keychain_delete_api_key(provider: str) -> bool:
 
 def _credentials_file() -> Path:
     from .config import CONFIG_DIR
+
     return CONFIG_DIR / PASSFILE_NAME
 
 
@@ -267,6 +268,7 @@ def _persist_passphrase_cache() -> bool:
 def is_passphrase_supported() -> bool:
     try:
         import cryptography  # noqa: F401
+
         return True
     except Exception:
         return False
@@ -374,6 +376,7 @@ def get_storage_mode(config: Optional["Config"] = None) -> str:
     if config is None:
         try:
             from .config import Config
+
             config = Config.load()
         except Exception:
             return DEFAULT_STORAGE_MODE
@@ -599,10 +602,9 @@ def _validate_openai_key(api_key: str) -> tuple[bool, str]:
     """Validate OpenAI API key by listing models."""
     try:
         import requests
+
         response = requests.get(
-            "https://api.openai.com/v1/models",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=10
+            "https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {api_key}"}, timeout=10
         )
         if response.status_code == 200:
             return True, ""
@@ -630,10 +632,9 @@ def _validate_gemini_key(api_key: str) -> tuple[bool, str]:
     """Validate Gemini API key by listing models."""
     try:
         import requests
+
         response = requests.get(
-            "https://generativelanguage.googleapis.com/v1/models",
-            headers={"x-goog-api-key": api_key},
-            timeout=10
+            "https://generativelanguage.googleapis.com/v1/models", headers={"x-goog-api-key": api_key}, timeout=10
         )
         if response.status_code == 200:
             return True, ""
@@ -665,13 +666,11 @@ def _validate_anthropic_key(api_key: str) -> tuple[bool, str]:
     """Validate Anthropic API key by making a test request."""
     try:
         import requests
+
         response = requests.get(
             "https://api.anthropic.com/v1/models",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01"
-            },
-            timeout=10
+            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+            timeout=10,
         )
         if response.status_code == 200:
             return True, ""

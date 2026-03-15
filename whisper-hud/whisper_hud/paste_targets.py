@@ -23,6 +23,7 @@ logger = get_logger("paste_targets")
 
 class TargetType(Enum):
     """Types of paste targets."""
+
     FOCUSED = "focused"  # Current behavior - paste to focused window
     APP = "app"  # Generic app (activate + paste)
     TMUX = "tmux"  # tmux session (no focus change)
@@ -33,6 +34,7 @@ class TargetType(Enum):
 @dataclass
 class PasteTarget:
     """Represents a paste target."""
+
     type: TargetType
     name: str  # Display name
     identifier: str  # Bundle ID, session name, etc.
@@ -61,7 +63,7 @@ class PasteTargetManager:
 
     def get_running_apps(self) -> List[str]:
         """Get list of running apps via AppleScript."""
-        applescript = '''
+        applescript = """
         tell application "System Events"
             set appNames to name of every application process whose background only is false
             set output to ""
@@ -70,17 +72,13 @@ class PasteTargetManager:
             end repeat
             return output
         end tell
-        '''
+        """
         try:
-            result = subprocess.run(
-                ['osascript', '-e', applescript],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
+            result = subprocess.run(["osascript", "-e", applescript], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 apps = [
-                    app.strip() for app in result.stdout.strip().split('\n')
+                    app.strip()
+                    for app in result.stdout.strip().split("\n")
                     if app.strip() and app.strip() not in self.EXCLUDED_APPS
                 ]
                 return sorted(apps)
@@ -92,16 +90,10 @@ class PasteTargetManager:
         """Get active tmux sessions."""
         try:
             result = subprocess.run(
-                ['tmux', 'list-sessions', '-F', '#{session_name}'],
-                capture_output=True,
-                text=True,
-                timeout=5
+                ["tmux", "list-sessions", "-F", "#{session_name}"], capture_output=True, text=True, timeout=5
             )
             if result.returncode == 0:
-                sessions = [
-                    s.strip() for s in result.stdout.strip().split('\n')
-                    if s.strip()
-                ]
+                sessions = [s.strip() for s in result.stdout.strip().split("\n") if s.strip()]
                 return sessions
         except FileNotFoundError:
             # tmux not installed
@@ -112,37 +104,27 @@ class PasteTargetManager:
 
     def is_iterm2_running(self) -> bool:
         """Check if iTerm2 is running."""
-        applescript = '''
+        applescript = """
         tell application "System Events"
             return exists (processes where name is "iTerm2")
         end tell
-        '''
+        """
         try:
-            result = subprocess.run(
-                ['osascript', '-e', applescript],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            return result.returncode == 0 and 'true' in result.stdout.lower()
+            result = subprocess.run(["osascript", "-e", applescript], capture_output=True, text=True, timeout=5)
+            return result.returncode == 0 and "true" in result.stdout.lower()
         except Exception:
             return False
 
     def is_terminal_running(self) -> bool:
         """Check if Terminal.app is running."""
-        applescript = '''
+        applescript = """
         tell application "System Events"
             return exists (processes where name is "Terminal")
         end tell
-        '''
+        """
         try:
-            result = subprocess.run(
-                ['osascript', '-e', applescript],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            return result.returncode == 0 and 'true' in result.stdout.lower()
+            result = subprocess.run(["osascript", "-e", applescript], capture_output=True, text=True, timeout=5)
+            return result.returncode == 0 and "true" in result.stdout.lower()
         except Exception:
             return False
 
@@ -151,63 +133,38 @@ class PasteTargetManager:
         targets = []
 
         # Always include focused window option
-        targets.append(PasteTarget(
-            type=TargetType.FOCUSED,
-            name="Focused Window",
-            identifier=""
-        ))
+        targets.append(PasteTarget(type=TargetType.FOCUSED, name="Focused Window", identifier=""))
 
         # tmux sessions (highest priority for terminals - no focus change)
         for session in self.get_tmux_sessions():
-            targets.append(PasteTarget(
-                type=TargetType.TMUX,
-                name=f"tmux: {session}",
-                identifier=session
-            ))
+            targets.append(PasteTarget(type=TargetType.TMUX, name=f"tmux: {session}", identifier=session))
 
         # iTerm2 (no focus change via AppleScript)
         if self.is_iterm2_running():
-            targets.append(PasteTarget(
-                type=TargetType.ITERM2,
-                name="iTerm2",
-                identifier="iTerm2"
-            ))
+            targets.append(PasteTarget(type=TargetType.ITERM2, name="iTerm2", identifier="iTerm2"))
 
         # Terminal.app
         if self.is_terminal_running():
-            targets.append(PasteTarget(
-                type=TargetType.TERMINAL,
-                name="Terminal",
-                identifier="Terminal"
-            ))
+            targets.append(PasteTarget(type=TargetType.TERMINAL, name="Terminal", identifier="Terminal"))
 
         # Running apps
         for app in self.get_running_apps():
             # Skip terminal apps that we already have special handling for
             if app in ("iTerm2", "Terminal"):
                 continue
-            targets.append(PasteTarget(
-                type=TargetType.APP,
-                name=app,
-                identifier=app
-            ))
+            targets.append(PasteTarget(type=TargetType.APP, name=app, identifier=app))
 
         return targets
 
     def get_frontmost_app(self) -> Optional[str]:
         """Get the name of the currently frontmost application."""
-        applescript = '''
+        applescript = """
         tell application "System Events"
             return name of first application process whose frontmost is true
         end tell
-        '''
+        """
         try:
-            result = subprocess.run(
-                ['osascript', '-e', applescript],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
+            result = subprocess.run(["osascript", "-e", applescript], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 return result.stdout.strip()
         except Exception as e:
@@ -217,29 +174,26 @@ class PasteTargetManager:
     def activate_app(self, app_name: str) -> bool:
         """Activate (bring to front) an application."""
         safe_app = escape_applescript_string(app_name)
-        applescript = f'''
+        applescript = f"""
         tell application "{safe_app}"
             activate
         end tell
-        '''
+        """
         try:
-            result = subprocess.run(
-                ['osascript', '-e', applescript],
-                capture_output=True,
-                timeout=5
-            )
+            result = subprocess.run(["osascript", "-e", applescript], capture_output=True, timeout=5)
             return result.returncode == 0
         except Exception as e:
             logger.error(f"Error activating app '{app_name}': {e}")
             return False
 
-    def paste_to_target(self, text: str, target: PasteTarget,
-                        return_focus: bool = True,
-                        restore_clipboard: bool = True) -> bool:
+    def paste_to_target(
+        self, text: str, target: PasteTarget, return_focus: bool = True, restore_clipboard: bool = True
+    ) -> bool:
         """Route paste to appropriate method based on target type."""
         if target.type == TargetType.FOCUSED:
             # Use default paste behavior
             from .paste import insert_text
+
             return insert_text(text, restore_clipboard=restore_clipboard)
 
         elif target.type == TargetType.TMUX:
@@ -253,16 +207,12 @@ class PasteTargetManager:
 
         elif target.type == TargetType.APP:
             return self.paste_to_app(
-                text, target.identifier,
-                return_focus=return_focus,
-                restore_clipboard=restore_clipboard
+                text, target.identifier, return_focus=return_focus, restore_clipboard=restore_clipboard
             )
 
         return False
 
-    def paste_to_app(self, text: str, app_name: str,
-                     return_focus: bool = True,
-                     restore_clipboard: bool = True) -> bool:
+    def paste_to_app(self, text: str, app_name: str, return_focus: bool = True, restore_clipboard: bool = True) -> bool:
         """
         Activate app, paste, optionally return to original app.
 
@@ -304,16 +254,12 @@ class PasteTargetManager:
             time.sleep(0.15)
 
             # Paste via Cmd+V
-            applescript = '''
+            applescript = """
             tell application "System Events"
                 keystroke "v" using command down
             end tell
-            '''
-            result = subprocess.run(
-                ['osascript', '-e', applescript],
-                capture_output=True,
-                timeout=5
-            )
+            """
+            result = subprocess.run(["osascript", "-e", applescript], capture_output=True, timeout=5)
 
             if result.returncode != 0:
                 logger.error(f"Paste failed: {result.stderr.decode()}")
@@ -354,11 +300,7 @@ class PasteTargetManager:
         try:
             # Use send-keys with -l flag for literal text
             # This prevents interpretation of special characters
-            result = subprocess.run(
-                ['tmux', 'send-keys', '-t', session, '-l', text],
-                capture_output=True,
-                timeout=5
-            )
+            result = subprocess.run(["tmux", "send-keys", "-t", session, "-l", text], capture_output=True, timeout=5)
 
             if result.returncode != 0:
                 logger.error(f"tmux send-keys failed: {result.stderr.decode()}")
@@ -389,20 +331,16 @@ class PasteTargetManager:
         escaped_text = escape_applescript_string(text)
 
         # Use 'write text' without newline to insert text at cursor
-        applescript = f'''
+        applescript = f"""
         tell application "iTerm"
             tell current session of current window
                 write text "{escaped_text}" without newline
             end tell
         end tell
-        '''
+        """
 
         try:
-            result = subprocess.run(
-                ['osascript', '-e', applescript],
-                capture_output=True,
-                timeout=5
-            )
+            result = subprocess.run(["osascript", "-e", applescript], capture_output=True, timeout=5)
 
             if result.returncode != 0:
                 logger.error(f"iTerm2 write failed: {result.stderr.decode()}")
@@ -444,7 +382,7 @@ class PasteTargetManager:
 
             # Use AppleScript to paste into Terminal (Cmd+V)
             # This pastes text without executing it
-            applescript = '''
+            applescript = """
             tell application "Terminal"
                 activate
             end tell
@@ -452,13 +390,9 @@ class PasteTargetManager:
             tell application "System Events"
                 keystroke "v" using command down
             end tell
-            '''
+            """
 
-            result = subprocess.run(
-                ['osascript', '-e', applescript],
-                capture_output=True,
-                timeout=5
-            )
+            result = subprocess.run(["osascript", "-e", applescript], capture_output=True, timeout=5)
 
             if result.returncode != 0:
                 logger.error(f"Terminal paste failed: {result.stderr.decode()}")

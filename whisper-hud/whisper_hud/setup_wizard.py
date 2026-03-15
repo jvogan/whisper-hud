@@ -23,14 +23,26 @@ logger = get_logger("setup_wizard")
 
 try:
     from AppKit import (
-        NSWindow, NSView, NSColor, NSFont,
-        NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
-        NSBackingStoreBuffered, NSScreen, NSTextField,
-        NSMakeRect, NSButton, NSApplication,
-        NSSecureTextField, NSProgressIndicator,
-        NSProgressIndicatorSpinningStyle, NSPopUpButton,
-        NSLeftTextAlignment, NSAppearance, NSAppearanceNameAqua,
-        NSAppearanceNameDarkAqua
+        NSWindow,
+        NSView,
+        NSColor,
+        NSFont,
+        NSWindowStyleMaskTitled,
+        NSWindowStyleMaskClosable,
+        NSBackingStoreBuffered,
+        NSScreen,
+        NSTextField,
+        NSMakeRect,
+        NSButton,
+        NSApplication,
+        NSSecureTextField,
+        NSProgressIndicator,
+        NSProgressIndicatorSpinningStyle,
+        NSPopUpButton,
+        NSLeftTextAlignment,
+        NSAppearance,
+        NSAppearanceNameAqua,
+        NSAppearanceNameDarkAqua,
     )
     from Foundation import (
         NSAttributedString,
@@ -40,12 +52,14 @@ try:
         NSParagraphStyleAttributeName,
     )
     from PyObjCTools import AppHelper
+
     HAS_APPKIT = True
 except ImportError:
     HAS_APPKIT = False
 
 try:
     from AVFoundation import AVCaptureDevice, AVMediaTypeAudio
+
     HAS_AVFOUNDATION = True
 except ImportError:
     AVCaptureDevice = None
@@ -54,6 +68,7 @@ except ImportError:
 
 try:
     from Quartz import AXIsProcessTrusted
+
     HAS_ACCESSIBILITY_API = True
 except ImportError:
     AXIsProcessTrusted = None
@@ -88,9 +103,7 @@ class SetupWizard:
     ACCESSIBILITY_SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 
     def __init__(
-        self,
-        on_complete: Optional[Callable[[dict], None]] = None,
-        on_cancel: Optional[Callable[[], None]] = None
+        self, on_complete: Optional[Callable[[dict], None]] = None, on_cancel: Optional[Callable[[], None]] = None
     ):
         """
         Initialize the setup wizard.
@@ -171,7 +184,9 @@ class SetupWizard:
             self._translation_provider = getattr(existing, "translation_provider", "apple")
             self._translation_target_language = getattr(existing, "target_language", "en")
             self._translation_source_language = getattr(existing, "source_language", "auto")
-            self._translation_models["ollama"] = getattr(existing, "translation_model", self._translation_models["ollama"])
+            self._translation_models["ollama"] = getattr(
+                existing, "translation_model", self._translation_models["ollama"]
+            )
             self._translation_models["gemini"] = getattr(
                 existing,
                 "gemini_translate_model",
@@ -220,7 +235,7 @@ class SetupWizard:
             NSMakeRect(x, y, self.WIDTH, self.HEIGHT),
             NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
             NSBackingStoreBuffered,
-            False
+            False,
         )
 
         self._window.setTitle_("WhisperHUD Setup")
@@ -279,7 +294,7 @@ class SetupWizard:
             "Welcome to WhisperHUD",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 36),
             font_size=24,
-            bold=True
+            bold=True,
         )
         self._content_view.addSubview_(title)
 
@@ -294,7 +309,7 @@ class SetupWizard:
             "Tip: Local (Apple) is the fastest way to start and needs no API key.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 120),
             font_size=14,
-            align=NSLeftTextAlignment
+            align=NSLeftTextAlignment,
         )
         self._content_view.addSubview_(desc)
 
@@ -305,7 +320,7 @@ class SetupWizard:
             "Local: Private, works offline. Apple mode needs no download.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 60),
             font_size=12,
-            color=self._accent_text_color()
+            color=self._accent_text_color(),
         )
         self._content_view.addSubview_(info)
 
@@ -313,7 +328,7 @@ class SetupWizard:
         self._add_navigation_buttons(
             back_title=None,
             next_title="Get Started",
-            next_action=lambda: self._show_step(WizardStep.TRANSCRIPTION_MODE)
+            next_action=lambda: self._show_step(WizardStep.TRANSCRIPTION_MODE),
         )
 
     def _show_transcription_mode(self):
@@ -326,7 +341,7 @@ class SetupWizard:
             "Choose Transcription Mode",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 32),
             font_size=22,
-            bold=True
+            bold=True,
         )
         self._content_view.addSubview_(title)
 
@@ -335,7 +350,7 @@ class SetupWizard:
         desc = self._create_label(
             "How would you like to transcribe your speech? (You can change this anytime.)",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 24),
-            font_size=14
+            font_size=14,
         )
         self._content_view.addSubview_(desc)
 
@@ -351,7 +366,7 @@ class SetupWizard:
             "Uses API (OpenAI or Gemini)\nRequires internet connection\nPay per use or free tier",
             NSMakeRect(self.PADDING, y, btn_width, btn_height),
             selected=self._transcription_mode == "cloud",
-            action=lambda: self._select_mode("cloud")
+            action=lambda: self._select_mode("cloud"),
         )
         self._content_view.addSubview_(cloud_btn)
         self._mode_buttons["cloud"] = cloud_btn
@@ -363,7 +378,7 @@ class SetupWizard:
             "Runs on your Mac\nNo API key needed for Apple\nOptional model download later",
             NSMakeRect(self.PADDING + btn_width + 20, y, btn_width, btn_height),
             selected=self._transcription_mode == "local",
-            action=lambda: self._select_mode("local")
+            action=lambda: self._select_mode("local"),
         )
         self._content_view.addSubview_(local_btn)
         self._mode_buttons["local"] = local_btn
@@ -374,7 +389,7 @@ class SetupWizard:
             "You can change this later in the app settings.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 24),
             font_size=12,
-            color=self._secondary_text_color()
+            color=self._secondary_text_color(),
         )
         self._content_view.addSubview_(info)
 
@@ -383,7 +398,7 @@ class SetupWizard:
             back_title="Back",
             back_action=lambda: self._show_step(WizardStep.WELCOME),
             next_title="Next",
-            next_action=self._continue_from_mode_selection
+            next_action=self._continue_from_mode_selection,
         )
 
     def _show_cloud_setup(self):
@@ -396,16 +411,14 @@ class SetupWizard:
             "Cloud Transcription Setup",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 32),
             font_size=22,
-            bold=True
+            bold=True,
         )
         self._content_view.addSubview_(title)
 
         # Provider selection
         y -= 30
         provider_label = self._create_label(
-            "Choose your cloud provider:",
-            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 24),
-            font_size=14
+            "Choose your cloud provider:", NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 24), font_size=14
         )
         self._content_view.addSubview_(provider_label)
 
@@ -423,7 +436,7 @@ class SetupWizard:
                 subtitle,
                 NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 40),
                 selected=self._selected_provider == provider_id,
-                action=lambda pid=provider_id: self._select_provider(pid)
+                action=lambda pid=provider_id: self._select_provider(pid),
             )
             self._content_view.addSubview_(button)
             self._provider_buttons[provider_id] = button
@@ -432,9 +445,7 @@ class SetupWizard:
         # API key input
         y -= 8
         key_label = self._create_label(
-            "Enter your API key:",
-            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 24),
-            font_size=14
+            "Enter your API key:", NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 24), font_size=14
         )
         self._content_view.addSubview_(key_label)
 
@@ -449,9 +460,7 @@ class SetupWizard:
         self._content_view.addSubview_(self._api_key_field)
 
         y -= 34
-        self._api_key_spinner = NSProgressIndicator.alloc().initWithFrame_(
-            NSMakeRect(self.PADDING, y, 16, 16)
-        )
+        self._api_key_spinner = NSProgressIndicator.alloc().initWithFrame_(NSMakeRect(self.PADDING, y, 16, 16))
         self._api_key_spinner.setStyle_(NSProgressIndicatorSpinningStyle)
         self._api_key_spinner.setIndeterminate_(True)
         self._api_key_spinner.setDisplayedWhenStopped_(False)
@@ -459,24 +468,21 @@ class SetupWizard:
         self._content_view.addSubview_(self._api_key_spinner)
 
         self._api_key_status_icon = self._create_label(
-            "",
-            NSMakeRect(self.PADDING + 20, y - 2, 18, 20),
-            font_size=14,
-            bold=True
+            "", NSMakeRect(self.PADDING + 20, y - 2, 18, 20), font_size=14, bold=True
         )
         self._content_view.addSubview_(self._api_key_status_icon)
 
         self._api_key_status_label = self._create_label(
             self._api_key_validation_message,
             NSMakeRect(self.PADDING + 44, y - 2, self.WIDTH - 2 * self.PADDING - 140, 20),
-            font_size=12
+            font_size=12,
         )
         self._content_view.addSubview_(self._api_key_status_label)
 
         self._skip_validation_button = self._create_button(
             "Skip Validation",
             NSMakeRect(self.WIDTH - self.PADDING - 116, y - 6, 116, 24),
-            action=self._skip_api_key_validation
+            action=self._skip_api_key_validation,
         )
         self._content_view.addSubview_(self._skip_validation_button)
 
@@ -488,13 +494,14 @@ class SetupWizard:
             "  OpenAI + OpenAI Realtime: platform.openai.com/api-keys",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 50),
             font_size=12,
-            color=self._accent_text_color()
+            color=self._accent_text_color(),
         )
         self._content_view.addSubview_(help_text)
 
         # Security note
         y -= 30
         from .keychain import get_storage_mode
+
         storage_mode = get_storage_mode()
         if storage_mode == "passphrase":
             security_text = "API keys use encrypted local storage (default)."
@@ -506,7 +513,7 @@ class SetupWizard:
             security_text,
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 24),
             font_size=11,
-            color=self._muted_text_color()
+            color=self._muted_text_color(),
         )
         self._content_view.addSubview_(security)
 
@@ -516,7 +523,7 @@ class SetupWizard:
             back_action=lambda: self._show_step(WizardStep.TRANSCRIPTION_MODE),
             next_title="Next",
             next_action=self._validate_and_continue_cloud,
-            next_enabled=False
+            next_enabled=False,
         )
         self._handle_api_key_input_changed()
 
@@ -530,17 +537,16 @@ class SetupWizard:
             "Local Transcription Setup",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 32),
             font_size=22,
-            bold=True
+            bold=True,
         )
         self._content_view.addSubview_(title)
 
         # Description
         y -= 50
         desc = self._create_label(
-            "Choose a local transcription engine:\n"
-            "All processing happens on your Mac - no data sent to cloud.",
+            "Choose a local transcription engine:\n" "All processing happens on your Mac - no data sent to cloud.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 40),
-            font_size=14
+            font_size=14,
         )
         self._content_view.addSubview_(desc)
 
@@ -552,32 +558,38 @@ class SetupWizard:
         providers = []
 
         # Apple Speech (always available on macOS 12+)
-        providers.append({
-            "id": "apple",
-            "name": "Apple (Built-in)",
-            "desc": "No download needed, uses macOS Speech",
-            "size": "0MB",
-            "available": True
-        })
+        providers.append(
+            {
+                "id": "apple",
+                "name": "Apple (Built-in)",
+                "desc": "No download needed, uses macOS Speech",
+                "size": "0MB",
+                "available": True,
+            }
+        )
 
         # Whisper Local
-        providers.append({
-            "id": "whisper_local",
-            "name": "Whisper Local",
-            "desc": "Best accuracy, 99+ languages",
-            "size": "~800MB download",
-            "available": True
-        })
+        providers.append(
+            {
+                "id": "whisper_local",
+                "name": "Whisper Local",
+                "desc": "Best accuracy, 99+ languages",
+                "size": "~800MB download",
+                "available": True,
+            }
+        )
 
         # Parakeet (Apple Silicon only)
         if is_apple_silicon:
-            providers.append({
-                "id": "parakeet",
-                "name": "Parakeet (Fastest)",
-                "desc": "30x faster on Apple Silicon",
-                "size": "~600MB download",
-                "available": True
-            })
+            providers.append(
+                {
+                    "id": "parakeet",
+                    "name": "Parakeet (Fastest)",
+                    "desc": "30x faster on Apple Silicon",
+                    "size": "~600MB download",
+                    "available": True,
+                }
+            )
 
         # Create provider option buttons
         for prov in providers:
@@ -588,7 +600,7 @@ class SetupWizard:
                 f"{prov['desc']} ({prov['size']})",
                 NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 50),
                 selected=is_selected,
-                action=lambda pid=prov["id"]: self._select_provider(pid)
+                action=lambda pid=prov["id"]: self._select_provider(pid),
             )
             self._content_view.addSubview_(btn)
             self._provider_buttons[prov["id"]] = btn
@@ -600,7 +612,7 @@ class SetupWizard:
             "download their models when you first use them.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 40),
             font_size=11,
-            color=self._muted_text_color()
+            color=self._muted_text_color(),
         )
         self._content_view.addSubview_(note)
 
@@ -609,7 +621,7 @@ class SetupWizard:
             back_title="Back",
             back_action=lambda: self._show_step(WizardStep.TRANSCRIPTION_MODE),
             next_title="Next",
-            next_action=lambda: self._continue_from_local_setup()
+            next_action=lambda: self._continue_from_local_setup(),
         )
 
     def _show_permissions(self):
@@ -620,10 +632,7 @@ class SetupWizard:
 
         y -= 36
         title = self._create_label(
-            "Permissions",
-            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 32),
-            font_size=22,
-            bold=True
+            "Permissions", NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 32), font_size=22, bold=True
         )
         self._content_view.addSubview_(title)
 
@@ -632,7 +641,7 @@ class SetupWizard:
             "WhisperHUD needs Microphone access to record audio. Accessibility is optional but recommended for global hotkeys and paste automation.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 36),
             font_size=13,
-            align=NSLeftTextAlignment
+            align=NSLeftTextAlignment,
         )
         self._content_view.addSubview_(desc)
 
@@ -646,16 +655,20 @@ class SetupWizard:
         if self._permission_statuses["microphone"]["status"] == self.PERMISSION_STATUS_DENIED:
             warning_lines.append("Microphone access is denied. Grant it before you can finish setup.")
         if self._permission_statuses["accessibility"]["status"] == self.PERMISSION_STATUS_DENIED:
-            warning_lines.append("Accessibility is denied. You can finish setup, but hotkeys and auto-paste will not work yet.")
+            warning_lines.append(
+                "Accessibility is denied. You can finish setup, but hotkeys and auto-paste will not work yet."
+            )
         if not warning_lines:
-            warning_lines.append("After changing permissions in System Settings, switch back to WhisperHUD and this page will refresh automatically.")
+            warning_lines.append(
+                "After changing permissions in System Settings, switch back to WhisperHUD and this page will refresh automatically."
+            )
 
         warning = self._create_label(
             "\n".join(warning_lines),
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 54),
             font_size=12,
             color=self._accent_text_color(),
-            align=NSLeftTextAlignment
+            align=NSLeftTextAlignment,
         )
         self._content_view.addSubview_(warning)
 
@@ -666,26 +679,16 @@ class SetupWizard:
             extra_action=self._refresh_permissions_step,
             next_title="Next",
             next_action=lambda: self._show_step(WizardStep.TRANSLATION),
-            next_enabled=self._can_continue_permissions_step()
+            next_enabled=self._can_continue_permissions_step(),
         )
 
     def _add_permission_row(self, permission_name: str, title_text: str, y: float):
         """Render a single permission row."""
         status_info = self._permission_statuses[permission_name]
-        row_title = self._create_label(
-            title_text,
-            NSMakeRect(self.PADDING, y, 180, 22),
-            font_size=15,
-            bold=True
-        )
+        row_title = self._create_label(title_text, NSMakeRect(self.PADDING, y, 180, 22), font_size=15, bold=True)
         self._content_view.addSubview_(row_title)
 
-        status_label = self._create_label(
-            "",
-            NSMakeRect(self.PADDING, y - 26, 180, 22),
-            font_size=13,
-            bold=True
-        )
+        status_label = self._create_label("", NSMakeRect(self.PADDING, y - 26, 180, 22), font_size=13, bold=True)
         self._content_view.addSubview_(status_label)
         self._permission_status_labels[permission_name] = status_label
 
@@ -694,7 +697,7 @@ class SetupWizard:
             NSMakeRect(self.PADDING + 190, y - 4, 220, 52),
             font_size=12,
             color=self._secondary_text_color(),
-            align=NSLeftTextAlignment
+            align=NSLeftTextAlignment,
         )
         self._content_view.addSubview_(detail_label)
         self._permission_detail_labels[permission_name] = detail_label
@@ -702,7 +705,7 @@ class SetupWizard:
         button = self._create_button(
             "Open System Settings",
             NSMakeRect(self.WIDTH - self.PADDING - 150, y - 2, 150, 32),
-            action=lambda perm=permission_name: self._open_permission_settings(perm)
+            action=lambda perm=permission_name: self._open_permission_settings(perm),
         )
         self._content_view.addSubview_(button)
         self._permission_open_buttons[permission_name] = button
@@ -722,7 +725,7 @@ class SetupWizard:
             "Translation Setup (Optional)",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 32),
             font_size=22,
-            bold=True
+            bold=True,
         )
         self._content_view.addSubview_(title)
 
@@ -732,7 +735,7 @@ class SetupWizard:
             "Skip for the fastest first transcript, or enable now to auto-translate after each transcription.",
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 34),
             font_size=13,
-            align=NSLeftTextAlignment
+            align=NSLeftTextAlignment,
         )
         self._content_view.addSubview_(desc)
 
@@ -741,21 +744,19 @@ class SetupWizard:
         self._ollama_running = self._check_ollama_running() if self._ollama_installed else False
 
         y -= 44
-        enable_label = self._create_label(
-            "Translation mode:",
-            NSMakeRect(self.PADDING, y, 180, 24),
-            font_size=13
-        )
+        enable_label = self._create_label("Translation mode:", NSMakeRect(self.PADDING, y, 180, 24), font_size=13)
         self._content_view.addSubview_(enable_label)
 
         self._translation_enable_popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
             NSMakeRect(self.PADDING + 160, y - 2, self.WIDTH - 2 * self.PADDING - 160, 26),
             False,
         )
-        self._translation_enable_popup.addItemsWithTitles_([
-            "Off (skip for now)",
-            "On (translate after transcription)",
-        ])
+        self._translation_enable_popup.addItemsWithTitles_(
+            [
+                "Off (skip for now)",
+                "On (translate after transcription)",
+            ]
+        )
         self._translation_enable_popup.selectItemAtIndex_(1 if self._translation_enabled else 0)
         self._translation_enable_popup._wizard_action = self._on_translation_enable_changed
         self._translation_enable_popup.setTarget_(self)
@@ -768,11 +769,7 @@ class SetupWizard:
             self._translation_provider = "apple"
 
         y -= 40
-        provider_label = self._create_label(
-            "Provider:",
-            NSMakeRect(self.PADDING, y, 180, 24),
-            font_size=13
-        )
+        provider_label = self._create_label("Provider:", NSMakeRect(self.PADDING, y, 180, 24), font_size=13)
         self._content_view.addSubview_(provider_label)
 
         self._translation_provider_choices = []
@@ -802,11 +799,7 @@ class SetupWizard:
             self._translation_models[self._translation_provider] = model_choices[0][0]
 
         y -= 40
-        model_label = self._create_label(
-            "Model:",
-            NSMakeRect(self.PADDING, y, 180, 24),
-            font_size=13
-        )
+        model_label = self._create_label("Model:", NSMakeRect(self.PADDING, y, 180, 24), font_size=13)
         self._content_view.addSubview_(model_label)
 
         self._translation_model_popup = NSPopUpButton.alloc().initWithFrame_pullsDown_(
@@ -836,11 +829,7 @@ class SetupWizard:
             self._translation_source_language = "auto"
 
         y -= 40
-        target_label = self._create_label(
-            "Target language:",
-            NSMakeRect(self.PADDING, y, 180, 24),
-            font_size=13
-        )
+        target_label = self._create_label("Target language:", NSMakeRect(self.PADDING, y, 180, 24), font_size=13)
         self._content_view.addSubview_(target_label)
 
         self._translation_target_choices = self._ordered_language_codes(language_map, include_auto=False)
@@ -860,11 +849,7 @@ class SetupWizard:
         self._content_view.addSubview_(self._translation_target_popup)
 
         y -= 40
-        source_label = self._create_label(
-            "Source language:",
-            NSMakeRect(self.PADDING, y, 180, 24),
-            font_size=13
-        )
+        source_label = self._create_label("Source language:", NSMakeRect(self.PADDING, y, 180, 24), font_size=13)
         self._content_view.addSubview_(source_label)
 
         self._translation_source_choices = ["auto"] + self._ordered_language_codes(language_map, include_auto=False)
@@ -909,9 +894,7 @@ class SetupWizard:
                 self._translation_provider,
                 self._translation_provider,
             )
-            summary_lines.append(
-                f"Translation on: {provider_name} • {model_name} • {source_name} -> {target_name}"
-            )
+            summary_lines.append(f"Translation on: {provider_name} • {model_name} • {source_name} -> {target_name}")
             if self._translation_provider == "ollama" and not self._ollama_running:
                 summary_lines.append("Ollama is not running yet; start it now or later in app settings.")
             if self._translation_provider in {"openai", "gemini", "anthropic"}:
@@ -958,7 +941,7 @@ class SetupWizard:
             extra_title="Skip Translation",
             extra_action=self._skip_translation_setup,
             next_title="Next",
-            next_action=lambda: self._show_step(WizardStep.COMPLETE)
+            next_action=lambda: self._show_step(WizardStep.COMPLETE),
         )
 
     def _show_complete(self):
@@ -968,10 +951,7 @@ class SetupWizard:
         # Title
         y -= 40
         title = self._create_label(
-            "Setup Complete!",
-            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 36),
-            font_size=24,
-            bold=True
+            "Setup Complete!", NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 36), font_size=24, bold=True
         )
         self._content_view.addSubview_(title)
 
@@ -984,7 +964,7 @@ class SetupWizard:
             "openai_realtime": "OpenAI Realtime",
             "apple": "Apple Speech",
             "whisper_local": "Whisper Local",
-            "parakeet": "Parakeet"
+            "parakeet": "Parakeet",
         }
         provider_name = provider_names.get(self._selected_provider, self._selected_provider)
 
@@ -998,11 +978,11 @@ class SetupWizard:
         if self._translation_enabled:
             t_provider = translation_provider_names.get(self._translation_provider, self._translation_provider)
             t_model = self._translation_models.get(self._translation_provider, "default")
-            t_source = "Auto detect" if self._translation_source_language == "auto" else self._translation_source_language
-            t_target = self._translation_target_language
-            translation_line = (
-                f"Translation: ON ({t_provider}, {t_model}, {t_source} -> {t_target})"
+            t_source = (
+                "Auto detect" if self._translation_source_language == "auto" else self._translation_source_language
             )
+            t_target = self._translation_target_language
+            translation_line = f"Translation: ON ({t_provider}, {t_model}, {t_source} -> {t_target})"
         else:
             translation_line = "Translation: OFF (you can enable it anytime)"
 
@@ -1031,7 +1011,7 @@ class SetupWizard:
             summary,
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 140),
             font_size=13,
-            align=NSLeftTextAlignment
+            align=NSLeftTextAlignment,
         )
         self._content_view.addSubview_(summary_label)
 
@@ -1047,7 +1027,7 @@ class SetupWizard:
             NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 112),
             font_size=13,
             color=self._secondary_text_color(),
-            align=NSLeftTextAlignment
+            align=NSLeftTextAlignment,
         )
         self._content_view.addSubview_(tips)
 
@@ -1056,7 +1036,7 @@ class SetupWizard:
             back_title="Back",
             back_action=lambda: self._show_step(WizardStep.TRANSLATION),
             next_title="Finish",
-            next_action=self._finish_wizard
+            next_action=self._finish_wizard,
         )
 
     # === UI Helper Methods ===
@@ -1093,10 +1073,12 @@ class SetupWizard:
             return False
 
         try:
-            match = appearance.bestMatchFromAppearancesWithNames_([
-                NSAppearanceNameAqua,
-                NSAppearanceNameDarkAqua,
-            ])
+            match = appearance.bestMatchFromAppearancesWithNames_(
+                [
+                    NSAppearanceNameAqua,
+                    NSAppearanceNameDarkAqua,
+                ]
+            )
             return match == NSAppearanceNameDarkAqua
         except Exception:
             return "dark" in str(appearance).lower()
@@ -1245,7 +1227,11 @@ class SetupWizard:
                 "message": "Global hotkeys and paste automation are ready.",
             }
 
-        status = self.PERMISSION_STATUS_DENIED if "accessibility" in self._permission_settings_opened else self.PERMISSION_STATUS_NOT_DETERMINED
+        status = (
+            self.PERMISSION_STATUS_DENIED
+            if "accessibility" in self._permission_settings_opened
+            else self.PERMISSION_STATUS_NOT_DETERMINED
+        )
         message = (
             "Hotkeys and auto-paste stay disabled until Accessibility access is granted."
             if status == self.PERMISSION_STATUS_DENIED
@@ -1267,11 +1253,7 @@ class SetupWizard:
 
         self._permission_settings_opened.add(permission_name)
         try:
-            result = subprocess.run(
-                ["open", settings_url],
-                capture_output=True,
-                timeout=5
-            )
+            result = subprocess.run(["open", settings_url], capture_output=True, timeout=5)
             return result.returncode == 0
         except Exception as exc:
             logger.error(f"Failed to open {permission_name} settings: {exc}")
@@ -1316,13 +1298,7 @@ class SetupWizard:
         self._content_view.addSubview_(dot_label)
 
     def _create_label(
-        self,
-        text: str,
-        frame,
-        font_size: float = 14,
-        bold: bool = False,
-        color=None,
-        align=None
+        self, text: str, frame, font_size: float = 14, bold: bool = False, color=None, align=None
     ) -> NSTextField:
         """Create a label with common settings."""
         label = NSTextField.alloc().initWithFrame_(frame)
@@ -1429,14 +1405,7 @@ class SetupWizard:
 
         return button
 
-    def _create_provider_button(
-        self,
-        title: str,
-        subtitle: str,
-        frame,
-        selected: bool,
-        action: Callable
-    ) -> NSButton:
+    def _create_provider_button(self, title: str, subtitle: str, frame, selected: bool, action: Callable) -> NSButton:
         """Create a provider selection button."""
         button = NSButton.alloc().initWithFrame_(frame)
         button.setBezelStyle_(1)
@@ -1458,13 +1427,7 @@ class SetupWizard:
         return button
 
     def _create_mode_card(
-        self,
-        title: str,
-        subtitle: str,
-        description: str,
-        frame,
-        selected: bool,
-        action: Callable
+        self, title: str, subtitle: str, description: str, frame, selected: bool, action: Callable
     ) -> NSButton:
         """Create a mode selection card button."""
         button = NSButton.alloc().initWithFrame_(frame)
@@ -1487,12 +1450,7 @@ class SetupWizard:
         return button
 
     def _create_local_provider_option(
-        self,
-        title: str,
-        description: str,
-        frame,
-        selected: bool,
-        action: Callable
+        self, title: str, description: str, frame, selected: bool, action: Callable
     ) -> NSButton:
         """Create a local provider option button."""
         button = NSButton.alloc().initWithFrame_(frame)
@@ -1508,7 +1466,7 @@ class SetupWizard:
 
     def buttonClicked_(self, sender):
         """Handle button click."""
-        if hasattr(sender, '_wizard_action') and sender._wizard_action:
+        if hasattr(sender, "_wizard_action") and sender._wizard_action:
             sender._wizard_action()
 
     def _add_navigation_buttons(
@@ -1519,25 +1477,19 @@ class SetupWizard:
         extra_action: Optional[Callable] = None,
         next_title: str = "Next",
         next_action: Optional[Callable] = None,
-        next_enabled: bool = True
+        next_enabled: bool = True,
     ):
         """Add navigation buttons at bottom."""
         y = self.PADDING
 
         # Cancel button (always shown)
-        cancel_btn = self._create_button(
-            "Cancel",
-            NSMakeRect(self.PADDING, y, 80, 32),
-            action=self._cancel_wizard
-        )
+        cancel_btn = self._create_button("Cancel", NSMakeRect(self.PADDING, y, 80, 32), action=self._cancel_wizard)
         self._content_view.addSubview_(cancel_btn)
 
         # Back button
         if back_title and back_action:
             back_btn = self._create_button(
-                back_title,
-                NSMakeRect(self.WIDTH - 2 * self.PADDING - 180, y, 80, 32),
-                action=back_action
+                back_title, NSMakeRect(self.WIDTH - 2 * self.PADDING - 180, y, 80, 32), action=back_action
             )
             self._content_view.addSubview_(back_btn)
 
@@ -1552,9 +1504,7 @@ class SetupWizard:
         # Next button
         if next_action:
             self._next_button = self._create_button(
-                next_title,
-                NSMakeRect(self.WIDTH - self.PADDING - 90, y, 90, 32),
-                action=next_action
+                next_title, NSMakeRect(self.WIDTH - self.PADDING - 90, y, 90, 32), action=next_action
             )
             self._next_button.setEnabled_(next_enabled)
             self._content_view.addSubview_(self._next_button)
@@ -1601,7 +1551,7 @@ class SetupWizard:
         *,
         validated_key: str = "",
         validated_provider: str = "",
-        acknowledged: Optional[bool] = None
+        acknowledged: Optional[bool] = None,
     ):
         """Update inline validation state and refresh the cloud UI."""
         self._api_key_validation_status = status
@@ -1659,6 +1609,7 @@ class SetupWizard:
 
     def _begin_api_key_validation(self, request_id: int, provider: str, api_key: str):
         """Start API key validation on a background thread."""
+
         def mark_validating():
             if not self._should_apply_api_key_validation_result(request_id, provider, api_key):
                 return
@@ -1788,9 +1739,9 @@ class SetupWizard:
         """Prompt for hidden input using AppleScript."""
         import subprocess
 
-        message_escaped = message.replace('"', '\\"').replace('\n', '\\n')
+        message_escaped = message.replace('"', '\\"').replace("\n", "\\n")
         title_escaped = title.replace('"', '\\"')
-        script = f'''
+        script = f"""
         tell application "System Events"
             activate
             set userInput to display dialog "{message_escaped}" default answer "" with title "{title_escaped}" with hidden answer buttons {{"Cancel", "Save"}} default button "Save"
@@ -1800,15 +1751,10 @@ class SetupWizard:
                 return ""
             end if
         end tell
-        '''
+        """
 
         try:
-            result = subprocess.run(
-                ['osascript', '-e', script],
-                capture_output=True,
-                text=True,
-                timeout=120
-            )
+            result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=120)
             if result.returncode == 0:
                 return result.stdout.strip()
         except Exception as e:
@@ -2029,25 +1975,18 @@ class SetupWizard:
 
         if get_storage_mode() == "passphrase" and not is_passphrase_unlocked():
             if has_passphrase_store():
-                passphrase = self._prompt_secure_input(
-                    "Unlock API Key Store",
-                    "Enter your API key storage passphrase."
-                )
+                passphrase = self._prompt_secure_input("Unlock API Key Store", "Enter your API key storage passphrase.")
                 if not passphrase:
                     self._show_error("Passphrase required to save API key")
                     return
             else:
                 passphrase = self._prompt_secure_input(
-                    "Create API Key Passphrase",
-                    "Create a passphrase to encrypt API keys."
+                    "Create API Key Passphrase", "Create a passphrase to encrypt API keys."
                 )
                 if not passphrase or len(passphrase) < 8:
                     self._show_error("Passphrase must be at least 8 characters")
                     return
-                confirm = self._prompt_secure_input(
-                    "Confirm Passphrase",
-                    "Re-enter your passphrase."
-                )
+                confirm = self._prompt_secure_input("Confirm Passphrase", "Re-enter your passphrase.")
                 if passphrase != confirm:
                     self._show_error("Passphrases do not match")
                     return
@@ -2099,6 +2038,7 @@ class SetupWizard:
         """Check if Ollama server is running."""
         try:
             import requests
+
             response = requests.get("http://localhost:11434/api/tags", timeout=2)
             return response.status_code == 200
         except Exception:
@@ -2166,6 +2106,7 @@ class SetupWizard:
     def _show_error(self, message: str):
         """Show an error alert."""
         import rumps
+
         rumps.alert(title="Error", message=message)
 
     def _cancel_wizard(self):
@@ -2218,19 +2159,21 @@ class SetupWizard:
             self._window.close()
 
         if self._on_complete:
-            self._on_complete({
-                "mode": self._transcription_mode,
-                "provider": self._selected_provider,
-                "api_key_set": self._transcription_mode == "cloud",
-                "translation_enabled": self._translation_enabled,
-                "translation_provider": self._translation_provider,
-                "translation_model": self._translation_models.get(self._translation_provider, "default"),
-                "translation_ready": (
-                    (self._translation_provider != "ollama")
-                    or self._ollama_running
-                    or not self._translation_enabled
-                ),
-            })
+            self._on_complete(
+                {
+                    "mode": self._transcription_mode,
+                    "provider": self._selected_provider,
+                    "api_key_set": self._transcription_mode == "cloud",
+                    "translation_enabled": self._translation_enabled,
+                    "translation_provider": self._translation_provider,
+                    "translation_model": self._translation_models.get(self._translation_provider, "default"),
+                    "translation_ready": (
+                        (self._translation_provider != "ollama")
+                        or self._ollama_running
+                        or not self._translation_enabled
+                    ),
+                }
+            )
 
     def _console_wizard(self):
         """Fallback console-based wizard."""
@@ -2245,8 +2188,7 @@ class SetupWizard:
 
 
 def show_setup_wizard(
-    on_complete: Optional[Callable[[dict], None]] = None,
-    on_cancel: Optional[Callable[[], None]] = None
+    on_complete: Optional[Callable[[dict], None]] = None, on_cancel: Optional[Callable[[], None]] = None
 ) -> SetupWizard:
     """
     Show the setup wizard.

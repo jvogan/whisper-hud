@@ -23,13 +23,23 @@ logger = get_logger("streaming_panel")
 
 try:
     from AppKit import (
-        NSWindow, NSView, NSColor, NSFont,
-        NSWindowStyleMaskBorderless, NSBackingStoreBuffered,
-        NSFloatingWindowLevel, NSScreen, NSTextField, NSWorkspace, NSButton,
+        NSWindow,
+        NSView,
+        NSColor,
+        NSFont,
+        NSWindowStyleMaskBorderless,
+        NSBackingStoreBuffered,
+        NSFloatingWindowLevel,
+        NSScreen,
+        NSTextField,
+        NSWorkspace,
+        NSButton,
         NSMakeRect,
         NSWindowCollectionBehaviorCanJoinAllSpaces,
         NSWindowCollectionBehaviorStationary,
-        NSScrollView, NSTextView, NSAccessibilityStaticTextRole
+        NSScrollView,
+        NSTextView,
+        NSAccessibilityStaticTextRole,
     )
     from Quartz import (
         CGWindowListCopyWindowInfo,
@@ -38,6 +48,7 @@ try:
     )
     from PyObjCTools import AppHelper
     from objc import super as objc_super
+
     HAS_APPKIT = True
 except ImportError:
     HAS_APPKIT = False
@@ -47,6 +58,7 @@ except ImportError:
 
 class StreamingPanelState(Enum):
     """Streaming panel display states."""
+
     HIDDEN = "hidden"
     TRANSCRIBING = "transcribing"
     TRANSLATING = "translating"
@@ -54,6 +66,7 @@ class StreamingPanelState(Enum):
 
 
 if HAS_APPKIT:
+
     class StreamingPanelWindow(NSWindow):
         """Borderless window that can dismiss on Escape or focus loss."""
 
@@ -161,10 +174,7 @@ class StreamingPanel:
 
         # Create borderless window
         self._window = StreamingPanelWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            frame,
-            NSWindowStyleMaskBorderless,
-            NSBackingStoreBuffered,
-            False
+            frame, NSWindowStyleMaskBorderless, NSBackingStoreBuffered, False
         )
         self._window.setDismissHandler_(self._handle_manual_dismiss)
         self._window.setDismissOnResign_(False)
@@ -177,8 +187,7 @@ class StreamingPanel:
         # Allow mouse events so users can select and copy text
         self._window.setIgnoresMouseEvents_(False)
         self._window.setCollectionBehavior_(
-            NSWindowCollectionBehaviorCanJoinAllSpaces
-            | NSWindowCollectionBehaviorStationary
+            NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary
         )
 
         # Create rounded background view
@@ -186,9 +195,7 @@ class StreamingPanel:
         self._window.setContentView_(content)
         content.setWantsLayer_(True)
         layer = content.layer()
-        layer.setBackgroundColor_(
-            NSColor.colorWithCalibratedWhite_alpha_(0.08, 0.95).CGColor()
-        )
+        layer.setBackgroundColor_(NSColor.colorWithCalibratedWhite_alpha_(0.08, 0.95).CGColor())
         layer.setCornerRadius_(self.CORNER_RADIUS)
         self._set_accessibility_attr(self._window, "setAccessibilityLabel_", "Transcription result")
         self._create_close_button(content)
@@ -347,13 +354,9 @@ class StreamingPanel:
     def _section_viewport_heights(self, panel_height: float):
         """Return viewport heights for the visible text sections."""
         content_width = self.WIDTH - 2 * self.PADDING - self.TEXT_INSET
-        desired = [
-            self._measured_text_height(self._transcription_text, self._latest_transcription, content_width)
-        ]
+        desired = [self._measured_text_height(self._transcription_text, self._latest_transcription, content_width)]
         if self._show_translation:
-            desired.append(
-                self._measured_text_height(self._translation_text, self._latest_translation, content_width)
-            )
+            desired.append(self._measured_text_height(self._translation_text, self._latest_translation, content_width))
 
         minimums = [float(self.MIN_TEXT_HEIGHT)] * len(desired)
         available = max(float(sum(minimums)), panel_height - self._base_panel_chrome_height())
@@ -385,7 +388,9 @@ class StreamingPanel:
         if not text_view:
             return
         frame = text_view.frame()
-        text_view.setFrame_(NSMakeRect(frame.origin.x, frame.origin.y, frame.size.width, max(height, frame.size.height)))
+        text_view.setFrame_(
+            NSMakeRect(frame.origin.x, frame.origin.y, frame.size.width, max(height, frame.size.height))
+        )
 
     def _layout_content(self, panel_height: Optional[float] = None):
         """Lay out controls for the current panel height."""
@@ -421,7 +426,9 @@ class StreamingPanel:
 
         transcription_y = button_y - self.LABEL_TO_TEXT_GAP - transcription_height
         if self._transcription_scroll:
-            self._transcription_scroll.setFrame_(NSMakeRect(self.PADDING, transcription_y, content_width, transcription_height))
+            self._transcription_scroll.setFrame_(
+                NSMakeRect(self.PADDING, transcription_y, content_width, transcription_height)
+            )
         self._set_text_view_document_height(
             self._transcription_text,
             self._measured_text_height(self._transcription_text, self._latest_transcription, document_width),
@@ -430,10 +437,14 @@ class StreamingPanel:
         translation_label_y = transcription_y - self.SECTION_SPACING - self.LABEL_HEIGHT
         translation_text_y = translation_label_y - self.LABEL_TO_TEXT_GAP - translation_height
         if self._translation_label:
-            self._translation_label.setFrame_(NSMakeRect(self.PADDING, translation_label_y, content_width, self.LABEL_HEIGHT))
+            self._translation_label.setFrame_(
+                NSMakeRect(self.PADDING, translation_label_y, content_width, self.LABEL_HEIGHT)
+            )
             self._translation_label.setHidden_(not self._show_translation)
         if self._translation_scroll:
-            self._translation_scroll.setFrame_(NSMakeRect(self.PADDING, translation_text_y, content_width, translation_height))
+            self._translation_scroll.setFrame_(
+                NSMakeRect(self.PADDING, translation_text_y, content_width, translation_height)
+            )
             self._translation_scroll.setHidden_(not self._show_translation)
         self._set_text_view_document_height(
             self._translation_text,
@@ -508,9 +519,7 @@ class StreamingPanel:
         self._transcription_label.setDrawsBackground_(False)
         self._transcription_label.setEditable_(False)
         self._transcription_label.setSelectable_(False)
-        self._transcription_label.setTextColor_(
-            NSColor.colorWithCalibratedRed_green_blue_alpha_(0.5, 0.7, 1.0, 1.0)
-        )
+        self._transcription_label.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.5, 0.7, 1.0, 1.0))
         self._transcription_label.setFont_(NSFont.systemFontOfSize_weight_(13, 0.5))
         self._transcription_label.setStringValue_("Transcription")
         content.addSubview_(self._transcription_label)
@@ -554,9 +563,7 @@ class StreamingPanel:
         self._translation_label.setDrawsBackground_(False)
         self._translation_label.setEditable_(False)
         self._translation_label.setSelectable_(False)
-        self._translation_label.setTextColor_(
-            NSColor.colorWithCalibratedRed_green_blue_alpha_(0.5, 1.0, 0.7, 1.0)
-        )
+        self._translation_label.setTextColor_(NSColor.colorWithCalibratedRed_green_blue_alpha_(0.5, 1.0, 0.7, 1.0))
         self._translation_label.setFont_(NSFont.systemFontOfSize_weight_(13, 0.5))
         self._translation_label.setStringValue_("Translation")
         self._translation_label.setHidden_(True)
@@ -643,9 +650,7 @@ class StreamingPanel:
                 self._resize_panel_to_fit_content()
                 # Only auto-scroll if user doesn't have text selected
                 if not self._has_text_selection(self._transcription_text):
-                    self._transcription_text.scrollRangeToVisible_(
-                        (len(text), 0)
-                    )
+                    self._transcription_text.scrollRangeToVisible_((len(text), 0))
 
         try:
             AppHelper.callAfter(_update)
@@ -690,9 +695,7 @@ class StreamingPanel:
                 self._resize_panel_to_fit_content()
                 # Only auto-scroll if user doesn't have text selected
                 if not self._has_text_selection(self._translation_text):
-                    self._translation_text.scrollRangeToVisible_(
-                        (len(text), 0)
-                    )
+                    self._translation_text.scrollRangeToVisible_((len(text), 0))
 
         try:
             AppHelper.callAfter(_update)

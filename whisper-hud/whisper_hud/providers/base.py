@@ -10,6 +10,7 @@ from typing import Optional, Callable, Any
 @dataclass
 class TranscriptionResult:
     """Result from a transcription request."""
+
     text: str
     duration_seconds: float
     cost_estimate: float  # in USD
@@ -83,11 +84,7 @@ class TranscriptionProvider(ABC):
         """Create a live transcription session for providers that support it."""
         raise NotImplementedError(f"{self.display_name} does not support live transcription sessions")
 
-    def transcribe_streaming(
-        self,
-        audio_bytes: bytes,
-        on_chunk: Callable[[str], None]
-    ) -> TranscriptionResult:
+    def transcribe_streaming(self, audio_bytes: bytes, on_chunk: Callable[[str], None]) -> TranscriptionResult:
         """
         Transcribe audio with streaming output.
 

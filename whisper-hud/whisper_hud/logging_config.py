@@ -10,11 +10,7 @@ import os
 from pathlib import Path
 
 
-def setup_logging(
-    level: int = logging.INFO,
-    log_file: bool = False,
-    log_dir: Path = None
-) -> logging.Logger:
+def setup_logging(level: int = logging.INFO, log_file: bool = False, log_dir: Path = None) -> logging.Logger:
     """
     Configure logging for WhisperHUD.
 
@@ -47,9 +43,7 @@ def setup_logging(
     console_handler.setLevel(level)
 
     # Use a simple format for console output
-    console_format = logging.Formatter(
-        "%(levelname)s: %(message)s"
-    )
+    console_format = logging.Formatter("%(levelname)s: %(message)s")
     console_handler.setFormatter(console_format)
     logger.addHandler(console_handler)
 
@@ -60,15 +54,11 @@ def setup_logging(
         log_dir.mkdir(parents=True, exist_ok=True)
         _tighten_permissions(log_dir, 0o700)
 
-        file_handler = logging.FileHandler(
-            log_dir / "whisper-hud.log",
-            encoding="utf-8"
-        )
+        file_handler = logging.FileHandler(log_dir / "whisper-hud.log", encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
 
         file_format = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
         file_handler.setFormatter(file_format)
         logger.addHandler(file_handler)

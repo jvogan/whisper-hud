@@ -33,7 +33,6 @@ from typing import Optional, Dict, List
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
-
 # Configuration
 GITHUB_REPO = "jvogan/whisper-hud"
 GITHUB_RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases"
@@ -81,15 +80,20 @@ def sign_file_eddsa(path: Path, private_key_path: Optional[Path] = None) -> Opti
         # Sign using openssl
         result = subprocess.run(
             [
-                "openssl", "pkeyutl", "-sign",
-                "-inkey", str(private_key_path),
-                "-in", str(path),
+                "openssl",
+                "pkeyutl",
+                "-sign",
+                "-inkey",
+                str(private_key_path),
+                "-in",
+                str(path),
             ],
             capture_output=True,
-            check=True
+            check=True,
         )
         import base64
-        return base64.b64encode(result.stdout).decode('ascii')
+
+        return base64.b64encode(result.stdout).decode("ascii")
     except subprocess.CalledProcessError as e:
         print(f"Warning: Failed to sign file: {e}")
         return None
@@ -127,6 +131,7 @@ def get_changelog_for_version(version: str) -> Optional[str]:
 
     # Find section for this version
     import re
+
     pattern = rf"##\s*\[?{re.escape(version)}\]?.*?\n(.*?)(?=\n##\s|\Z)"
     match = re.search(pattern, content, re.DOTALL)
 
@@ -189,11 +194,14 @@ def create_appcast(items: List[ET.Element]) -> ET.Element:
     sparkle_ns = "http://www.andymatuschak.org/xml-namespaces/sparkle"
     ET.register_namespace("sparkle", sparkle_ns)
 
-    rss = ET.Element("rss", {
-        "version": "2.0",
-        f"xmlns:sparkle": sparkle_ns,
-        "xmlns:dc": "http://purl.org/dc/elements/1.1/",
-    })
+    rss = ET.Element(
+        "rss",
+        {
+            "version": "2.0",
+            f"xmlns:sparkle": sparkle_ns,
+            "xmlns:dc": "http://purl.org/dc/elements/1.1/",
+        },
+    )
 
     channel = ET.SubElement(rss, "channel")
 
@@ -258,6 +266,7 @@ def find_latest_dmg(dist_dir: Path) -> Optional[Path]:
 def extract_version_from_dmg(dmg_path: Path) -> Optional[str]:
     """Extract version from DMG filename (e.g., WhisperHUD-1.0.0.dmg -> 1.0.0)."""
     import re
+
     match = re.search(r"(\d+\.\d+\.\d+)", dmg_path.name)
     if match:
         return match.group(1)
@@ -265,37 +274,18 @@ def extract_version_from_dmg(dmg_path: Path) -> Optional[str]:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Generate Sparkle appcast.xml for WhisperHUD"
-    )
+    parser = argparse.ArgumentParser(description="Generate Sparkle appcast.xml for WhisperHUD")
     parser.add_argument(
-        "version",
-        nargs="?",
-        help="Version number (e.g., 1.0.0). Auto-detected from DMG filename if not provided."
+        "version", nargs="?", help="Version number (e.g., 1.0.0). Auto-detected from DMG filename if not provided."
     )
+    parser.add_argument("dmg_path", nargs="?", help="Path to DMG file. Auto-detected from dist/ if not provided.")
     parser.add_argument(
-        "dmg_path",
-        nargs="?",
-        help="Path to DMG file. Auto-detected from dist/ if not provided."
+        "--output", "-o", default="dist/appcast.xml", help="Output path for appcast.xml (default: dist/appcast.xml)"
     )
+    parser.add_argument("--key", "-k", help="Path to EdDSA private key for signing")
+    parser.add_argument("--min-os", default="12.0", help="Minimum macOS version (default: 12.0)")
     parser.add_argument(
-        "--output", "-o",
-        default="dist/appcast.xml",
-        help="Output path for appcast.xml (default: dist/appcast.xml)"
-    )
-    parser.add_argument(
-        "--key", "-k",
-        help="Path to EdDSA private key for signing"
-    )
-    parser.add_argument(
-        "--min-os",
-        default="12.0",
-        help="Minimum macOS version (default: 12.0)"
-    )
-    parser.add_argument(
-        "--keep-history",
-        action="store_true",
-        help="Merge with existing appcast.xml to keep release history"
+        "--keep-history", action="store_true", help="Merge with existing appcast.xml to keep release history"
     )
 
     args = parser.parse_args()

@@ -19,18 +19,34 @@ logger = get_logger("pack_creator")
 
 try:
     from AppKit import (
-        NSWindow, NSView, NSButton, NSTextField, NSColor, NSFont,
-        NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
-        NSBackingStoreBuffered, NSScreen, NSMakeRect,
-        NSBezierPath, NSOpenPanel, NSApplication,
+        NSWindow,
+        NSView,
+        NSButton,
+        NSTextField,
+        NSColor,
+        NSFont,
+        NSWindowStyleMaskTitled,
+        NSWindowStyleMaskClosable,
+        NSBackingStoreBuffered,
+        NSScreen,
+        NSMakeRect,
+        NSBezierPath,
+        NSOpenPanel,
+        NSApplication,
         NSTextAlignmentCenter,
         NSBezelStyleRounded,
-        NSCompositingOperationSourceOver, NSZeroRect,
-        NSObject, NSAlert, NSProgressIndicator, NSImage,
-        NSAlertStyleWarning, NSAlertStyleInformational
+        NSCompositingOperationSourceOver,
+        NSZeroRect,
+        NSObject,
+        NSAlert,
+        NSProgressIndicator,
+        NSImage,
+        NSAlertStyleWarning,
+        NSAlertStyleInformational,
     )
     from PyObjCTools import AppHelper
     from objc import super as objc_super
+
     HAS_APPKIT = True
 except ImportError:
     HAS_APPKIT = False
@@ -39,35 +55,27 @@ except ImportError:
 # States to collect images for
 PACK_STATES = ["idle", "recording", "processing", "error"]
 STATE_INFO = {
-    "idle": {
-        "label": "Idle",
-        "description": "Sleeping, relaxed, peaceful",
-        "example": "Eyes closed, Zzz..."
-    },
+    "idle": {"label": "Idle", "description": "Sleeping, relaxed, peaceful", "example": "Eyes closed, Zzz..."},
     "recording": {
         "label": "Recording",
         "description": "Alert, active, listening",
-        "example": "Wide eyes, holding mic/pen"
+        "example": "Wide eyes, holding mic/pen",
     },
     "processing": {
         "label": "Processing",
         "description": "Thinking, confused",
-        "example": "Question mark, scratching head"
+        "example": "Question mark, scratching head",
     },
-    "error": {
-        "label": "Error",
-        "description": "Distressed, dizzy",
-        "example": "X eyes, stars, fallen over"
-    }
+    "error": {"label": "Error", "description": "Distressed, dizzy", "example": "X eyes, stars, fallen over"},
 }
 
 
-def _hex_to_nscolor(hex_color: str) -> 'NSColor':
+def _hex_to_nscolor(hex_color: str) -> "NSColor":
     """Convert hex color string to NSColor."""
     if not HAS_APPKIT:
         return None
     try:
-        hex_color = hex_color.lstrip('#')
+        hex_color = hex_color.lstrip("#")
         if len(hex_color) >= 6:
             r = int(hex_color[0:2], 16) / 255.0
             g = int(hex_color[2:4], 16) / 255.0
@@ -79,6 +87,7 @@ def _hex_to_nscolor(hex_color: str) -> 'NSColor':
 
 
 if HAS_APPKIT:
+
     class ImagePreviewBox(NSView):
         """A preview box for displaying an uploaded image."""
 
@@ -120,25 +129,21 @@ if HAS_APPKIT:
             if self._image:
                 # Draw the image centered
                 img_size = self._image.size()
-                scale = min(
-                    (bounds.size.width - 16) / img_size.width,
-                    (bounds.size.height - 16) / img_size.height
-                )
+                scale = min((bounds.size.width - 16) / img_size.width, (bounds.size.height - 16) / img_size.height)
                 draw_width = img_size.width * scale
                 draw_height = img_size.height * scale
                 x = (bounds.size.width - draw_width) / 2
                 y = (bounds.size.height - draw_height) / 2
 
                 self._image.drawInRect_fromRect_operation_fraction_(
-                    NSMakeRect(x, y, draw_width, draw_height),
-                    NSZeroRect,
-                    NSCompositingOperationSourceOver,
-                    1.0
+                    NSMakeRect(x, y, draw_width, draw_height), NSZeroRect, NSCompositingOperationSourceOver, 1.0
                 )
             else:
                 # Draw placeholder text
                 text_color = NSColor.colorWithCalibratedWhite_alpha_(0.5, 1.0)
-                text = NSTextField.alloc().initWithFrame_(NSMakeRect(0, bounds.size.height / 2 - 10, bounds.size.width, 20))
+                text = NSTextField.alloc().initWithFrame_(
+                    NSMakeRect(0, bounds.size.height / 2 - 10, bounds.size.width, 20)
+                )
                 text.setStringValue_(self._placeholder_text)
                 text.setAlignment_(NSTextAlignmentCenter)
                 text.setFont_(NSFont.systemFontOfSize_(11))
@@ -181,10 +186,7 @@ if HAS_APPKIT:
             # Draw subtle glow/background
             glow_color = _hex_to_nscolor(self._bg_color)
             glow_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                glow_color.redComponent(),
-                glow_color.greenComponent(),
-                glow_color.blueComponent(),
-                0.3
+                glow_color.redComponent(), glow_color.greenComponent(), glow_color.blueComponent(), 0.3
             )
             glow_color.setFill()
             glow_path = NSBezierPath.bezierPathWithOvalInRect_(NSMakeRect(x, y, size, size))
@@ -194,10 +196,7 @@ if HAS_APPKIT:
             if self._icon:
                 icon_rect = NSMakeRect(x + 4, y + 4, size - 8, size - 8)
                 self._icon.drawInRect_fromRect_operation_fraction_(
-                    icon_rect,
-                    NSZeroRect,
-                    NSCompositingOperationSourceOver,
-                    1.0
+                    icon_rect, NSZeroRect, NSCompositingOperationSourceOver, 1.0
                 )
 
     class PackCreatorDelegate(NSObject):
@@ -256,7 +255,7 @@ class PackCreatorWindow:
         self._source_images: Dict[str, str] = {}
 
         # Processed images (NSImage with background removed)
-        self._processed_images: Dict[str, 'NSImage'] = {}
+        self._processed_images: Dict[str, "NSImage"] = {}
 
         # Processing status
         self._processing_complete = False
@@ -266,11 +265,11 @@ class PackCreatorWindow:
         # UI elements
         self._name_field = None
         self._desc_field = None
-        self._image_previews: Dict[str, 'ImagePreviewBox'] = {}
-        self._browse_buttons: Dict[str, 'NSButton'] = {}
+        self._image_previews: Dict[str, "ImagePreviewBox"] = {}
+        self._browse_buttons: Dict[str, "NSButton"] = {}
         self._progress_bar = None
         self._status_label = None
-        self._widget_previews: Dict[str, 'WidgetPreviewView'] = {}
+        self._widget_previews: Dict[str, "WidgetPreviewView"] = {}
 
         # Delegate
         self._delegate = None
@@ -307,7 +306,7 @@ class PackCreatorWindow:
             NSMakeRect(x, y, width, height),
             NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
             NSBackingStoreBuffered,
-            False
+            False,
         )
         self._window.setTitle_("Create Character Pack")
         self._window.setReleasedWhenClosed_(False)
@@ -341,9 +340,7 @@ class PackCreatorWindow:
 
         # Title
         title = self._create_label(
-            NSMakeRect(20, height - 50, width - 40, 30),
-            "Step 1: Name Your Pack",
-            bold=True, size=18
+            NSMakeRect(20, height - 50, width - 40, 30), "Step 1: Name Your Pack", bold=True, size=18
         )
         content.addSubview_(title)
 
@@ -351,15 +348,13 @@ class PackCreatorWindow:
         subtitle = self._create_label(
             NSMakeRect(20, height - 75, width - 40, 20),
             "Give your character pack a unique name and description",
-            size=12, color=NSColor.secondaryLabelColor()
+            size=12,
+            color=NSColor.secondaryLabelColor(),
         )
         content.addSubview_(subtitle)
 
         # Pack name field
-        name_label = self._create_label(
-            NSMakeRect(20, height - 130, 100, 24),
-            "Pack Name:"
-        )
+        name_label = self._create_label(NSMakeRect(20, height - 130, 100, 24), "Pack Name:")
         content.addSubview_(name_label)
 
         self._name_field = NSTextField.alloc().initWithFrame_(NSMakeRect(130, height - 130, 400, 24))
@@ -370,24 +365,18 @@ class PackCreatorWindow:
         content.addSubview_(self._name_field)
 
         # Pack ID (auto-generated) preview
-        id_label = self._create_label(
-            NSMakeRect(20, height - 165, 100, 24),
-            "Pack ID:"
-        )
+        id_label = self._create_label(NSMakeRect(20, height - 165, 100, 24), "Pack ID:")
         content.addSubview_(id_label)
 
         self._id_preview = self._create_label(
             NSMakeRect(130, height - 165, 400, 24),
             self._generate_pack_id(self._pack_name) or "(generated from name)",
-            color=NSColor.secondaryLabelColor()
+            color=NSColor.secondaryLabelColor(),
         )
         content.addSubview_(self._id_preview)
 
         # Description field
-        desc_label = self._create_label(
-            NSMakeRect(20, height - 210, 100, 24),
-            "Description:"
-        )
+        desc_label = self._create_label(NSMakeRect(20, height - 210, 100, 24), "Description:")
         content.addSubview_(desc_label)
 
         self._desc_field = NSTextField.alloc().initWithFrame_(NSMakeRect(130, height - 250, 400, 60))
@@ -399,7 +388,8 @@ class PackCreatorWindow:
         method_label = self._create_label(
             NSMakeRect(20, height - 310, width - 40, 20),
             f"Background removal: {self._image_processor.get_background_removal_method()}",
-            size=11, color=NSColor.secondaryLabelColor()
+            size=11,
+            color=NSColor.secondaryLabelColor(),
         )
         content.addSubview_(method_label)
 
@@ -414,9 +404,7 @@ class PackCreatorWindow:
 
         # Title
         title = self._create_label(
-            NSMakeRect(20, height - 50, width - 40, 30),
-            "Step 2: Upload Images",
-            bold=True, size=18
+            NSMakeRect(20, height - 50, width - 40, 30), "Step 2: Upload Images", bold=True, size=18
         )
         content.addSubview_(title)
 
@@ -424,7 +412,8 @@ class PackCreatorWindow:
         subtitle = self._create_label(
             NSMakeRect(20, height - 75, width - 40, 20),
             "Select an image for each widget state. Backgrounds will be removed automatically.",
-            size=12, color=NSColor.secondaryLabelColor()
+            size=12,
+            color=NSColor.secondaryLabelColor(),
         )
         content.addSubview_(subtitle)
 
@@ -432,10 +421,7 @@ class PackCreatorWindow:
         x_positions = [30, 350]
         y_positions = [height - 280, height - 480]
 
-        states_grid = [
-            ["idle", "recording"],
-            ["processing", "error"]
-        ]
+        states_grid = [["idle", "recording"], ["processing", "error"]]
 
         self._image_previews = {}
         self._browse_buttons = {}
@@ -449,9 +435,7 @@ class PackCreatorWindow:
 
                 # State label
                 state_label = self._create_label(
-                    NSMakeRect(x, y + 130, 280, 20),
-                    f"{info['label']} - {info['description']}",
-                    bold=True, size=12
+                    NSMakeRect(x, y + 130, 280, 20), f"{info['label']} - {info['description']}", bold=True, size=12
                 )
                 content.addSubview_(state_label)
 
@@ -459,7 +443,8 @@ class PackCreatorWindow:
                 example = self._create_label(
                     NSMakeRect(x, y + 110, 280, 18),
                     f"Example: {info['example']}",
-                    size=10, color=NSColor.secondaryLabelColor()
+                    size=10,
+                    color=NSColor.secondaryLabelColor(),
                 )
                 content.addSubview_(example)
 
@@ -502,9 +487,7 @@ class PackCreatorWindow:
 
         # Title
         title = self._create_label(
-            NSMakeRect(20, height - 50, width - 40, 30),
-            "Step 3: Processing Images",
-            bold=True, size=18
+            NSMakeRect(20, height - 50, width - 40, 30), "Step 3: Processing Images", bold=True, size=18
         )
         content.addSubview_(title)
 
@@ -512,14 +495,13 @@ class PackCreatorWindow:
         subtitle = self._create_label(
             NSMakeRect(20, height - 75, width - 40, 20),
             "Removing backgrounds from your images...",
-            size=12, color=NSColor.secondaryLabelColor()
+            size=12,
+            color=NSColor.secondaryLabelColor(),
         )
         content.addSubview_(subtitle)
 
         # Progress bar
-        self._progress_bar = NSProgressIndicator.alloc().initWithFrame_(
-            NSMakeRect(40, height - 130, width - 80, 20)
-        )
+        self._progress_bar = NSProgressIndicator.alloc().initWithFrame_(NSMakeRect(40, height - 130, width - 80, 20))
         self._progress_bar.setIndeterminate_(False)
         self._progress_bar.setMinValue_(0)
         self._progress_bar.setMaxValue_(len(PACK_STATES))
@@ -527,17 +509,11 @@ class PackCreatorWindow:
         content.addSubview_(self._progress_bar)
 
         # Status label
-        self._status_label = self._create_label(
-            NSMakeRect(40, height - 170, width - 80, 24),
-            "Starting...",
-            size=13
-        )
+        self._status_label = self._create_label(NSMakeRect(40, height - 170, width - 80, 24), "Starting...", size=13)
         content.addSubview_(self._status_label)
 
         # Results area
-        self._results_area = NSView.alloc().initWithFrame_(
-            NSMakeRect(40, height - 400, width - 80, 200)
-        )
+        self._results_area = NSView.alloc().initWithFrame_(NSMakeRect(40, height - 400, width - 80, 200))
         content.addSubview_(self._results_area)
 
         # Navigation (disabled during processing)
@@ -554,9 +530,7 @@ class PackCreatorWindow:
 
         # Title
         title = self._create_label(
-            NSMakeRect(20, height - 50, width - 40, 30),
-            "Step 4: Preview & Save",
-            bold=True, size=18
+            NSMakeRect(20, height - 50, width - 40, 30), "Step 4: Preview & Save", bold=True, size=18
         )
         content.addSubview_(title)
 
@@ -564,26 +538,18 @@ class PackCreatorWindow:
         subtitle = self._create_label(
             NSMakeRect(20, height - 75, width - 40, 20),
             f"Preview your '{self._pack_name}' character pack at different widget sizes",
-            size=12, color=NSColor.secondaryLabelColor()
+            size=12,
+            color=NSColor.secondaryLabelColor(),
         )
         content.addSubview_(subtitle)
 
         # Widget size previews
-        sizes = [
-            ("Small", 24),
-            ("Medium", 32),
-            ("Large", 44),
-            ("XLarge", 56)
-        ]
+        sizes = [("Small", 24), ("Medium", 32), ("Large", 44), ("XLarge", 56)]
 
         x_pos = 40
         for size_name, size_px in sizes:
             # Size label
-            size_label = self._create_label(
-                NSMakeRect(x_pos, height - 120, 120, 20),
-                size_name,
-                bold=True, size=12
-            )
+            size_label = self._create_label(NSMakeRect(x_pos, height - 120, 120, 20), size_name, bold=True, size=12)
             content.addSubview_(size_label)
 
             # State previews
@@ -599,27 +565,27 @@ class PackCreatorWindow:
                 state_label = self._create_label(
                     NSMakeRect(x_pos + size_px + 20, y_pos + (size_px // 2) - 8, 80, 16),
                     STATE_INFO[state]["label"],
-                    size=10, color=NSColor.secondaryLabelColor()
+                    size=10,
+                    color=NSColor.secondaryLabelColor(),
                 )
                 content.addSubview_(state_label)
 
-                y_pos -= (size_px + 30)
+                y_pos -= size_px + 30
 
             x_pos += 150
 
         # Pack info summary
         summary_y = 120
         info_label = self._create_label(
-            NSMakeRect(40, summary_y, width - 80, 20),
-            f"Pack: {self._pack_name}",
-            bold=True, size=13
+            NSMakeRect(40, summary_y, width - 80, 20), f"Pack: {self._pack_name}", bold=True, size=13
         )
         content.addSubview_(info_label)
 
         id_label = self._create_label(
             NSMakeRect(40, summary_y - 25, width - 80, 20),
             f"ID: {self._pack_id}",
-            size=11, color=NSColor.secondaryLabelColor()
+            size=11,
+            color=NSColor.secondaryLabelColor(),
         )
         content.addSubview_(id_label)
 
@@ -627,7 +593,8 @@ class PackCreatorWindow:
             desc_label = self._create_label(
                 NSMakeRect(40, summary_y - 50, width - 80, 20),
                 self._pack_description,
-                size=11, color=NSColor.secondaryLabelColor()
+                size=11,
+                color=NSColor.secondaryLabelColor(),
             )
             content.addSubview_(desc_label)
 
@@ -700,12 +667,12 @@ class PackCreatorWindow:
             return ""
         # Convert to lowercase, replace spaces with dashes, remove non-alphanumeric
         pack_id = name.lower().strip()
-        pack_id = pack_id.replace(' ', '-')
-        pack_id = ''.join(c for c in pack_id if c.isalnum() or c == '-')
+        pack_id = pack_id.replace(" ", "-")
+        pack_id = "".join(c for c in pack_id if c.isalnum() or c == "-")
         # Remove consecutive dashes
-        while '--' in pack_id:
-            pack_id = pack_id.replace('--', '-')
-        return pack_id.strip('-')
+        while "--" in pack_id:
+            pack_id = pack_id.replace("--", "-")
+        return pack_id.strip("-")
 
     def _start_processing(self):
         """Start background processing of images."""
@@ -732,6 +699,7 @@ class PackCreatorWindow:
                         self._status_label.setStringValue_(f"Processing {STATE_INFO[s]['label']}...")
                     if self._progress_bar:
                         self._progress_bar.setDoubleValue_(idx)
+
                 AppHelper.callAfter(update_status)
 
                 if state not in source_images:
@@ -749,6 +717,7 @@ class PackCreatorWindow:
                         img = NSImage.alloc().initWithContentsOfFile_(path)
                         if img:
                             from .image_processor import crop_preserving_alpha
+
                             self._processed_images[state] = crop_preserving_alpha(img, 128)
                         if state not in self._processed_images or self._processed_images[state] is None:
                             self._processing_errors[state] = "Failed to process image"
@@ -767,8 +736,7 @@ class PackCreatorWindow:
                     self._progress_bar.setDoubleValue_(len(PACK_STATES))
 
                 if self._processing_errors:
-                    error_msg = ", ".join(f"{STATE_INFO[s]['label']}: {e}"
-                                          for s, e in self._processing_errors.items())
+                    error_msg = ", ".join(f"{STATE_INFO[s]['label']}: {e}" for s, e in self._processing_errors.items())
                     if self._status_label:
                         self._status_label.setStringValue_(f"Completed with errors: {error_msg}")
                 else:
@@ -776,7 +744,7 @@ class PackCreatorWindow:
                         self._status_label.setStringValue_("Processing complete!")
 
                 # Enable next button
-                if hasattr(self, '_next_btn') and self._next_btn:
+                if hasattr(self, "_next_btn") and self._next_btn:
                     # Only enable if we have all required images
                     all_present = all(s in self._processed_images for s in PACK_STATES)
                     self._next_btn.setEnabled_(all_present)
@@ -808,10 +776,10 @@ class PackCreatorWindow:
 
             # Check if pack ID already exists
             from .character_packs import pack_id_exists
+
             if pack_id_exists(self._pack_id):
                 self._show_alert(
-                    "Pack Exists",
-                    f"A pack with ID '{self._pack_id}' already exists. Please choose a different name."
+                    "Pack Exists", f"A pack with ID '{self._pack_id}' already exists. Please choose a different name."
                 )
                 return
 
@@ -819,10 +787,7 @@ class PackCreatorWindow:
             # Validate all images are selected
             missing = [STATE_INFO[s]["label"] for s in PACK_STATES if s not in self._source_images]
             if missing:
-                self._show_alert(
-                    "Images Required",
-                    f"Please select images for: {', '.join(missing)}"
-                )
+                self._show_alert("Images Required", f"Please select images for: {', '.join(missing)}")
                 return
 
         elif self._current_step == 3:
@@ -831,10 +796,7 @@ class PackCreatorWindow:
                 return
             missing = [STATE_INFO[s]["label"] for s in PACK_STATES if s not in self._processed_images]
             if missing:
-                self._show_alert(
-                    "Processing Failed",
-                    f"Failed to process images for: {', '.join(missing)}"
-                )
+                self._show_alert("Processing Failed", f"Failed to process images for: {', '.join(missing)}")
                 return
 
         if self._current_step < self._max_steps:
@@ -853,11 +815,7 @@ class PackCreatorWindow:
         from .character_packs import save_user_pack
 
         success, result = save_user_pack(
-            self._pack_id,
-            self._pack_name,
-            self._pack_description,
-            self._processed_images,
-            self._image_processor
+            self._pack_id, self._pack_name, self._pack_description, self._processed_images, self._image_processor
         )
 
         if success:
@@ -868,8 +826,10 @@ class PackCreatorWindow:
             # Show success message
             alert = NSAlert.alloc().init()
             alert.setMessageText_("Pack Created!")
-            alert.setInformativeText_(f"Your character pack '{self._pack_name}' has been created.\n\n"
-                                      f"You can now select it from Settings > Appearance > Character Packs.")
+            alert.setInformativeText_(
+                f"Your character pack '{self._pack_name}' has been created.\n\n"
+                f"You can now select it from Settings > Appearance > Character Packs."
+            )
             alert.setAlertStyle_(NSAlertStyleInformational)
             alert.runModal()
         else:
@@ -928,7 +888,7 @@ class PackCreatorWindow:
         """Handle name field change."""
         name = sender.stringValue().strip()
         pack_id = self._generate_pack_id(name)
-        if hasattr(self, '_id_preview') and self._id_preview:
+        if hasattr(self, "_id_preview") and self._id_preview:
             self._id_preview.setStringValue_(pack_id or "(generated from name)")
 
     def _show_alert(self, title: str, message: str):

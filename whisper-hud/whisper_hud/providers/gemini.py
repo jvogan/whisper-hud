@@ -36,7 +36,7 @@ class GeminiProvider(TranscriptionProvider):
             "name": "Gemini 3 Flash",
             "description": "Latest, fastest, frontier intelligence",
             "cost_per_minute": 0.001,
-            "recommended": True
+            "recommended": True,
         },
         {
             "id": "gemini-2.5-flash",
@@ -62,9 +62,7 @@ class GeminiProvider(TranscriptionProvider):
             try:
                 from google import genai
             except ImportError:
-                raise RuntimeError(
-                    "google-genai package not installed. Install with: pip install google-genai"
-                )
+                raise RuntimeError("google-genai package not installed. Install with: pip install google-genai")
 
             api_key = get_api_key("gemini")
             if not api_key:
@@ -77,11 +75,7 @@ class GeminiProvider(TranscriptionProvider):
         """Transcribe audio using Gemini."""
         if not audio_bytes:
             return TranscriptionResult(
-                text="",
-                duration_seconds=0,
-                cost_estimate=0,
-                provider=self.name,
-                model=self.model
+                text="", duration_seconds=0, cost_estimate=0, provider=self.name, model=self.model
             )
 
         client = self._get_client()
@@ -106,10 +100,7 @@ Preserve natural punctuation."""
             raise RuntimeError(self._build_transcribe_error_message(e)) from e
 
         # Get the model config for cost calculation
-        model_config = next(
-            (m for m in self.MODELS if m["id"] == self.model),
-            self.MODELS[0]
-        )
+        model_config = next((m for m in self.MODELS if m["id"] == self.model), self.MODELS[0])
 
         # Estimate duration from audio bytes (16kHz, 16-bit mono = 32KB/sec)
         duration_seconds = len(audio_bytes) / 32000
@@ -120,8 +111,7 @@ Preserve natural punctuation."""
         text = self._extract_transcription_text(response)
         if text is None:
             raise RuntimeError(
-                "Gemini transcription returned an unexpected response format. "
-                "No transcription text was found."
+                "Gemini transcription returned an unexpected response format. " "No transcription text was found."
             )
 
         return TranscriptionResult(
@@ -130,7 +120,7 @@ Preserve natural punctuation."""
             cost_estimate=cost,
             provider=self.name,
             model=self.model,
-            language=None
+            language=None,
         )
 
     def is_configured(self) -> bool:
@@ -217,11 +207,7 @@ Preserve natural punctuation."""
             return None
         return text.strip()
 
-    def transcribe_streaming(
-        self,
-        audio_bytes: bytes,
-        on_chunk: Callable[[str], None]
-    ) -> TranscriptionResult:
+    def transcribe_streaming(self, audio_bytes: bytes, on_chunk: Callable[[str], None]) -> TranscriptionResult:
         """
         Transcribe audio with streaming output.
 
@@ -234,11 +220,7 @@ Preserve natural punctuation."""
         """
         if not audio_bytes:
             return TranscriptionResult(
-                text="",
-                duration_seconds=0,
-                cost_estimate=0,
-                provider=self.name,
-                model=self.model
+                text="", duration_seconds=0, cost_estimate=0, provider=self.name, model=self.model
             )
 
         client = self._get_client()
@@ -269,10 +251,7 @@ Preserve natural punctuation."""
         final_text = cumulative_text.strip()
 
         # Get the model config for cost calculation
-        model_config = next(
-            (m for m in self.MODELS if m["id"] == self.model),
-            self.MODELS[0]
-        )
+        model_config = next((m for m in self.MODELS if m["id"] == self.model), self.MODELS[0])
 
         # Estimate duration from audio bytes (16kHz, 16-bit mono = 32KB/sec)
         duration_seconds = len(audio_bytes) / 32000
@@ -286,5 +265,5 @@ Preserve natural punctuation."""
             cost_estimate=cost,
             provider=self.name,
             model=self.model,
-            language=None
+            language=None,
         )

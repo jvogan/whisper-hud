@@ -17,6 +17,7 @@ try:
     import AppKit
     from PyObjCTools import AppHelper
     from objc import super as objc_super
+
     NSWindow = AppKit.NSWindow
     NSView = AppKit.NSView
     NSColor = AppKit.NSColor
@@ -56,13 +57,13 @@ except ImportError:
     HAS_APPKIT = False
 
 
-def _hex_to_nscolor(hex_color: str) -> 'NSColor':
+def _hex_to_nscolor(hex_color: str) -> "NSColor":
     """Convert hex color string to NSColor."""
     if not HAS_APPKIT:
         return None
 
     try:
-        hex_color = hex_color.lstrip('#')
+        hex_color = hex_color.lstrip("#")
         if len(hex_color) == 6:
             r = int(hex_color[0:2], 16) / 255.0
             g = int(hex_color[2:4], 16) / 255.0
@@ -92,6 +93,7 @@ DEFAULT_WIDGET_BOTTOM_MARGIN = 100
 
 
 if HAS_APPKIT:
+
     class DraggableWindow(NSWindow):
         """A borderless window that can be dragged by clicking anywhere."""
 
@@ -175,7 +177,7 @@ if HAS_APPKIT:
             defaults = {
                 "idle": {"background": "#232329", "icon": "#66A5FF", "background_hover": "#383840"},
                 "recording": {"background": "#D92626", "icon": "#FFFFFF"},
-                "processing": {"background": "#BF8C19", "icon": "#FFFFFF"}
+                "processing": {"background": "#BF8C19", "icon": "#FFFFFF"},
             }
 
             if self._appearance_config and "colors" in self._appearance_config:
@@ -185,16 +187,9 @@ if HAS_APPKIT:
             return defaults.get(state_name, {})
 
         def _setup_tracking(self):
-            options = (
-                NSTrackingMouseEnteredAndExited
-                | NSTrackingActiveAlways
-                | NSTrackingInVisibleRect
-            )
+            options = NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
             tracking_area = NSTrackingArea.alloc().initWithRect_options_owner_userInfo_(
-                self.bounds(),
-                options,
-                self,
-                None
+                self.bounds(), options, self, None
             )
             self.addTrackingArea_(tracking_area)
 
@@ -221,7 +216,7 @@ if HAS_APPKIT:
 
         def drawRect_(self, rect):
             # Get dimensions (default to medium if not set)
-            dims = getattr(self, '_dims', (48, 48, 24, 22, 13))
+            dims = getattr(self, "_dims", (48, 48, 24, 22, 13))
             corner_radius = dims[2]
             icon_size = dims[3]
             icon_offset = dims[4]
@@ -255,10 +250,7 @@ if HAS_APPKIT:
                         glow_alpha = 0.24 + (0.18 * (0.5 + 0.5 * math.sin(animation_phase * math.tau)))
                     # Create a soft glow with reduced opacity
                     glow_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                        bg_color.redComponent(),
-                        bg_color.greenComponent(),
-                        bg_color.blueComponent(),
-                        glow_alpha
+                        bg_color.redComponent(), bg_color.greenComponent(), bg_color.blueComponent(), glow_alpha
                     )
                     glow_color.setFill()
                     # Slightly larger circle behind the icon for glow effect
@@ -288,10 +280,7 @@ if HAS_APPKIT:
             is_character_pack = False
             if self._appearance_config:
                 custom_icon = self._appearance_config.get("custom_icon", {})
-                is_character_pack = (
-                    custom_icon.get("per_state", False)
-                    and custom_icon.get("shape_mode") == "alpha"
-                )
+                is_character_pack = custom_icon.get("per_state", False) and custom_icon.get("shape_mode") == "alpha"
 
             if is_character_pack and self._custom_icon:
                 # Character pack icons fill almost the entire widget (95%)
@@ -305,10 +294,7 @@ if HAS_APPKIT:
             if self._custom_icon:
                 # Draw custom icon
                 self._custom_icon.drawInRect_fromRect_operation_fraction_(
-                    icon_rect,
-                    NSZeroRect,
-                    NSCompositingOperationSourceOver,
-                    1.0
+                    icon_rect, NSZeroRect, NSCompositingOperationSourceOver, 1.0
                 )
             else:
                 # Draw default circle icon
@@ -317,17 +303,16 @@ if HAS_APPKIT:
                     return
 
                 if self._state == WidgetState.RECORDING:
-                    icon_rect = self._scaled_rect(icon_rect, 0.92 + (0.16 * (0.5 + 0.5 * math.sin(animation_phase * math.tau))))
+                    icon_rect = self._scaled_rect(
+                        icon_rect, 0.92 + (0.16 * (0.5 + 0.5 * math.sin(animation_phase * math.tau)))
+                    )
 
                 icon_path = NSBezierPath.bezierPathWithOvalInRect_(icon_rect)
                 icon_hex = colors.get("icon", "#66A5FF")
                 icon_color = _hex_to_nscolor(icon_hex)
                 # Make icon fully opaque
                 icon_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                    icon_color.redComponent(),
-                    icon_color.greenComponent(),
-                    icon_color.blueComponent(),
-                    1.0
+                    icon_color.redComponent(), icon_color.greenComponent(), icon_color.blueComponent(), 1.0
                 )
                 icon_color.setFill()
                 icon_path.fill()
@@ -351,7 +336,7 @@ if HAS_APPKIT:
                 icon_color.redComponent(),
                 icon_color.greenComponent(),
                 icon_color.blueComponent(),
-                0.18 + (0.18 * pulse)
+                0.18 + (0.18 * pulse),
             )
             ring_color.setStroke()
             ring_path.stroke()
@@ -372,14 +357,11 @@ if HAS_APPKIT:
                 spinner_rect.size.width / 2.0,
                 start_angle,
                 end_angle,
-                True
+                True,
             )
             spinner_path.setLineWidth_(3.0)
             spinner_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                icon_color.redComponent(),
-                icon_color.greenComponent(),
-                icon_color.blueComponent(),
-                1.0
+                icon_color.redComponent(), icon_color.greenComponent(), icon_color.blueComponent(), 1.0
             )
             spinner_color.setStroke()
             spinner_path.stroke()
@@ -401,6 +383,7 @@ if HAS_APPKIT:
 
         def mouseDown_(self, event):
             import time
+
             # Store mouse position in screen coordinates for stable dragging
             window = self.window()
             if window:
@@ -428,8 +411,8 @@ if HAS_APPKIT:
             current_screen_y = window_frame.origin.y + mouse_in_window.y
 
             # Calculate movement from initial screen position
-            dx = current_screen_x - getattr(self, '_initial_screen_x', current_screen_x)
-            dy = current_screen_y - getattr(self, '_initial_screen_y', current_screen_y)
+            dx = current_screen_x - getattr(self, "_initial_screen_x", current_screen_x)
+            dy = current_screen_y - getattr(self, "_initial_screen_y", current_screen_y)
 
             # Only start dragging if moved more than 12 pixels
             # This prevents accidental drags when trying to click
@@ -440,7 +423,7 @@ if HAS_APPKIT:
                 return
 
             # Calculate new window position based on initial window origin + drag delta
-            initial_origin = getattr(self, '_initial_window_origin', (0, 0))
+            initial_origin = getattr(self, "_initial_window_origin", (0, 0))
             new_x = initial_origin[0] + dx
             new_y = initial_origin[1] + dy
 
@@ -448,6 +431,7 @@ if HAS_APPKIT:
 
         def mouseUp_(self, event):
             import time
+
             # Only trigger click if:
             # 1. We didn't drag
             # 2. Mouse was held for less than 0.5 seconds
@@ -507,7 +491,7 @@ class FloatingWidget:
         on_record_stop: Callable[[], None],
         size: str = "medium",
         initial_position: Optional[dict] = None,
-        on_position_changed: Optional[Callable[[float, float], None]] = None
+        on_position_changed: Optional[Callable[[float, float], None]] = None,
     ):
         self._on_record_start = on_record_start
         self._on_record_stop = on_record_stop
@@ -572,10 +556,7 @@ class FloatingWidget:
 
         # Create borderless, draggable window
         self._window = DraggableWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(x, y, width, height),
-            NSWindowStyleMaskBorderless,
-            NSBackingStoreBuffered,
-            False
+            NSMakeRect(x, y, width, height), NSWindowStyleMaskBorderless, NSBackingStoreBuffered, False
         )
 
         # Configure window
@@ -585,8 +566,7 @@ class FloatingWidget:
         # Disable shadow for cleaner look and to prevent ghosting during drag
         self._window.setHasShadow_(False)
         self._window.setCollectionBehavior_(
-            NSWindowCollectionBehaviorCanJoinAllSpaces
-            | NSWindowCollectionBehaviorStationary
+            NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary
         )
         self._window.setMovableByWindowBackground_(True)
 
@@ -636,12 +616,14 @@ class FloatingWidget:
     def _update_view(self):
         """Update view state."""
         if self._view:
+
             def _update():
                 if self._view:
                     self._view.setState_(self._state)
                     self._apply_accessibility_metadata()
                     # Update custom icon for new state
                     self._update_custom_icon()
+
             AppHelper.callAfter(_update)
 
     def _build_accessibility_label(self, state: WidgetState) -> str:
@@ -959,7 +941,7 @@ def create_floating_widget(
     on_record_stop: Callable[[], None],
     size: str = "medium",
     initial_position: Optional[dict] = None,
-    on_position_changed: Optional[Callable[[float, float], None]] = None
+    on_position_changed: Optional[Callable[[float, float], None]] = None,
 ) -> Optional[FloatingWidget]:
     """Create a floating widget if AppKit is available."""
     if HAS_APPKIT:
@@ -968,6 +950,6 @@ def create_floating_widget(
             on_record_stop,
             size=size,
             initial_position=initial_position,
-            on_position_changed=on_position_changed
+            on_position_changed=on_position_changed,
         )
     return None
