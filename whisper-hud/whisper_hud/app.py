@@ -688,10 +688,15 @@ class WhisperHUDApp(rumps.App):
             # Create provider submenu with its models
             provider_obj = self.transcriber.get_provider(p["id"])
             provider_models = provider_obj.get_models() if provider_obj else []
+            provider_callback = (
+                (lambda sender, pid=p["id"]: self._open_provider_setup(pid))
+                if not is_configured
+                else None
+            )
 
             if len(provider_models) > 1:
                 # Multiple models - create submenu
-                provider_submenu = rumps.MenuItem(f"{prefix}{p['name']} {status_icon}")
+                provider_submenu = rumps.MenuItem(f"{prefix}{p['name']} {status_icon}", callback=provider_callback)
                 for model in provider_models:
                     is_model_selected = is_provider_selected and model["id"] == current_model_id
                     model_prefix = "● " if is_model_selected else "   "
@@ -706,13 +711,21 @@ class WhisperHUDApp(rumps.App):
                 model = provider_models[0]
                 providers_menu.add(rumps.MenuItem(
                     f"{prefix}{p['name']} {status_icon}",
-                    callback=lambda sender, pid=p["id"], mid=model["id"]: self._select_provider_and_model(pid, mid)
+                    callback=(
+                        provider_callback
+                        if provider_callback is not None
+                        else lambda sender, pid=p["id"], mid=model["id"]: self._select_provider_and_model(pid, mid)
+                    )
                 ))
             else:
                 # No models defined
                 providers_menu.add(rumps.MenuItem(
                     f"{prefix}{p['name']} {status_icon}",
-                    callback=lambda sender, pid=p["id"]: self._select_provider(pid)
+                    callback=(
+                        provider_callback
+                        if provider_callback is not None
+                        else lambda sender, pid=p["id"]: self._select_provider(pid)
+                    )
                 ))
 
         providers_menu.add(rumps.separator)
@@ -2852,6 +2865,18 @@ class WhisperHUDApp(rumps.App):
         self._refresh_widget_tooltip()
         self._schedule_menu_rebuild()
 
+    def _open_provider_setup(self, provider_id: str):
+        """Open provider-specific setup when a cloud provider needs credentials."""
+        credential_provider = self._transcription_credential_provider(provider_id)
+        if credential_provider == "openai":
+            self._set_openai_key(None)
+        elif credential_provider == "gemini":
+            self._set_gemini_key(None)
+        elif credential_provider == "anthropic":
+            self._set_anthropic_key(None)
+        else:
+            self._select_provider(provider_id)
+
     def _select_provider_and_model(self, provider_id: str, model_id: str):
         """Change both provider and model in one action."""
         self.config.default_provider = provider_id
@@ -2878,169 +2903,101 @@ class WhisperHUDApp(rumps.App):
         )
         self._schedule_menu_rebuild()
 
-    def _set_openai_key(self, _):
-        """Prompt for OpenAI API key using AppleScript for proper paste support."""
+    def _prompt_api_key(
+        self,
+        *,
+        provider_id: str,
+        provider_name: str,
+        dialog_message: str,
+        validation_message: str,
+        success_message: str,
+        invalid_title: str,
+        key_prefix: str = "",
+    ) -> None:
+        """Prompt for and validate a provider API key."""
         if self._is_passphrase_mode() and not self._ensure_passphrase_unlocked():
             return
 
-        message = "Enter your OpenAI API key.\n\nGet your key at: platform.openai.com/api-keys"
-        if get_api_key("openai"):
+        existing_key = get_api_key(provider_id) or ""
+        message = dialog_message
+        if existing_key:
             message += "\n\nA key is already saved. Enter a new key to replace it."
         key = self._applescript_input_dialog(
-            "OpenAI API Key",
+            f"Enter {provider_name} API Key",
             message,
+            default=existing_key,
         )
 
-        if key:
-            if not key.startswith("sk-"):
-                rumps.alert(
-                    title="Invalid Key Format",
-                    message="OpenAI API keys should start with 'sk-'"
-                )
-                return
-
-            # Validate the key with a quick API call
-            self._notify(
-                "WhisperHUD",
-                "Validating API Key",
-                "Checking key with OpenAI..."
+        if not key:
+            return
+        if key_prefix and not key.startswith(key_prefix):
+            rumps.alert(
+                title="Invalid Key Format",
+                message=f"{provider_name} API keys should start with '{key_prefix}'"
             )
+            return
 
-            def do_validate():
-                is_valid, error = validate_api_key("openai", key)
-                if is_valid:
-                    if not set_api_key("openai", key):
-                        self._notify(
-                            "WhisperHUD",
-                            "Could Not Save Key",
-                            "Unlock API key storage first in Privacy & Security."
-                        )
-                        return
-                    # Reset cached clients so new key is used immediately
-                    self.transcriber.reset_provider("openai")
-                    self.transcriber.reset_provider("openai_realtime")
-                    self.translator.reset_provider("openai")
-                    self._schedule_menu_rebuild()
+        self._notify("WhisperHUD", "Validating API Key", validation_message)
+
+        def do_validate():
+            is_valid, error = validate_api_key(provider_id, key)
+            if is_valid:
+                if not set_api_key(provider_id, key):
                     self._notify(
                         "WhisperHUD",
-                        "API Key Saved",
-                        "OpenAI key validated and saved securely."
+                        "Could Not Save Key",
+                        "Unlock API key storage first in Privacy & Security."
                     )
-                else:
-                    self._notify(
-                        "WhisperHUD",
-                        "Invalid API Key",
-                        error or "Key validation failed"
-                    )
+                    return
+                self._reset_cloud_clients()
+                self._schedule_menu_rebuild()
+                self._notify("WhisperHUD", "API Key Saved", success_message)
+            else:
+                self._notify(
+                    "WhisperHUD",
+                    invalid_title,
+                    error or "Key validation failed"
+                )
 
-            threading.Thread(target=do_validate, daemon=True).start()
+        threading.Thread(target=do_validate, daemon=True).start()
+
+    def _set_openai_key(self, _):
+        """Prompt for OpenAI API key using AppleScript for proper paste support."""
+        self._prompt_api_key(
+            provider_id="openai",
+            provider_name="OpenAI",
+            dialog_message="Enter your OpenAI API key.\n\nGet your key at: platform.openai.com/api-keys",
+            validation_message="Checking key with OpenAI...",
+            success_message="OpenAI key validated and saved securely.",
+            invalid_title="Invalid API Key",
+            key_prefix="sk-",
+        )
 
     def _set_gemini_key(self, _):
         """Prompt for Gemini API key using AppleScript for proper paste support."""
-        if self._is_passphrase_mode() and not self._ensure_passphrase_unlocked():
-            return
-
-        message = "Enter your Google AI API key.\n\nGet your key at: aistudio.google.com/apikey"
-        if get_api_key("gemini"):
-            message += "\n\nA key is already saved. Enter a new key to replace it."
-        key = self._applescript_input_dialog(
-            "Gemini API Key",
-            message,
+        self._prompt_api_key(
+            provider_id="gemini",
+            provider_name="Gemini",
+            dialog_message="Enter your Google AI API key.\n\nGet your key at: aistudio.google.com/apikey",
+            validation_message="Checking key with Google AI...",
+            success_message="Gemini key validated and saved securely.",
+            invalid_title="Invalid API Key",
         )
-
-        if key:
-            # Validate the key with a quick API call
-            self._notify(
-                "WhisperHUD",
-                "Validating API Key",
-                "Checking key with Google AI..."
-            )
-
-            def do_validate():
-                is_valid, error = validate_api_key("gemini", key)
-                if is_valid:
-                    if not set_api_key("gemini", key):
-                        self._notify(
-                            "WhisperHUD",
-                            "Could Not Save Key",
-                            "Unlock API key storage first in Privacy & Security."
-                        )
-                        return
-                    # Reset cached clients so new key is used immediately
-                    self.transcriber.reset_provider("gemini")
-                    self.translator.reset_provider("gemini")
-                    self._schedule_menu_rebuild()
-                    self._notify(
-                        "WhisperHUD",
-                        "API Key Saved",
-                        "Gemini key validated and saved securely."
-                    )
-                else:
-                    self._notify(
-                        "WhisperHUD",
-                        "Invalid API Key",
-                        error or "Key validation failed"
-                    )
-
-            threading.Thread(target=do_validate, daemon=True).start()
 
     def _set_anthropic_key(self, _):
         """Prompt for Anthropic API key using AppleScript for proper paste support."""
-        if self._is_passphrase_mode() and not self._ensure_passphrase_unlocked():
-            return
-
-        message = (
-            "Enter your Anthropic API key.\n\n"
-            "Get your key at: console.anthropic.com/settings/keys"
+        self._prompt_api_key(
+            provider_id="anthropic",
+            provider_name="Anthropic",
+            dialog_message=(
+                "Enter your Anthropic API key.\n\n"
+                "Get your key at: console.anthropic.com/settings/keys"
+            ),
+            validation_message="Checking key with Anthropic...",
+            success_message="Anthropic key validated and saved securely.",
+            invalid_title="Invalid API Key",
+            key_prefix="sk-ant-",
         )
-        if get_api_key("anthropic"):
-            message += "\n\nA key is already saved. Enter a new key to replace it."
-        key = self._applescript_input_dialog(
-            "Anthropic API Key",
-            message,
-        )
-
-        if key:
-            if not key.startswith("sk-ant-"):
-                rumps.alert(
-                    title="Invalid Key Format",
-                    message="Anthropic API keys should start with 'sk-ant-'"
-                )
-                return
-
-            # Validate the key with a quick API call
-            self._notify(
-                "WhisperHUD",
-                "Validating API Key",
-                "Checking key with Anthropic..."
-            )
-
-            def do_validate():
-                is_valid, error = validate_api_key("anthropic", key)
-                if is_valid:
-                    if not set_api_key("anthropic", key):
-                        self._notify(
-                            "WhisperHUD",
-                            "Could Not Save Key",
-                            "Unlock API key storage first in Privacy & Security."
-                        )
-                        return
-                    # Reset cached client so new key is used immediately
-                    self.translator.reset_provider("anthropic")
-                    self._schedule_menu_rebuild()
-                    self._notify(
-                        "WhisperHUD",
-                        "API Key Saved",
-                        "Anthropic key validated and saved securely."
-                    )
-                else:
-                    self._notify(
-                        "WhisperHUD",
-                        "Invalid API Key",
-                        error or "Key validation failed"
-                    )
-
-            threading.Thread(target=do_validate, daemon=True).start()
 
     def _applescript_input_dialog(
         self,

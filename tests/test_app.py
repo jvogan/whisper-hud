@@ -270,6 +270,83 @@ def test_build_menu_reflects_provider_availability(monkeypatch):
     assert "Reset Position" in recording_titles
 
 
+def test_needs_setup_cloud_provider_click_opens_provider_setup(monkeypatch):
+    """Clicking an unconfigured cloud provider should open its key setup dialog."""
+    app = _build_menu_app(monkeypatch)
+    app.transcriber.get_available_providers.return_value = [
+        {"id": "openai", "name": "OpenAI", "category": "cloud", "configured": True},
+        {"id": "gemini", "name": "Gemini", "category": "cloud", "configured": False},
+        {
+            "id": "whisper_local",
+            "name": "Whisper Local",
+            "category": "local",
+            "configured": False,
+            "requires_download": True,
+        },
+    ]
+    gemini_provider = MagicMock(
+        get_models=MagicMock(return_value=[{"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash"}]),
+        get_current_model=MagicMock(return_value="gemini-2.5-flash"),
+        is_configured=MagicMock(return_value=False),
+    )
+    openai_provider = MagicMock(
+        get_models=MagicMock(return_value=[{"id": "gpt-4o", "name": "GPT-4o", "recommended": True}]),
+        get_current_model=MagicMock(return_value="gpt-4o"),
+        is_configured=MagicMock(return_value=True),
+    )
+    whisper_local_provider = MagicMock(
+        get_models=MagicMock(return_value=[{"id": "tiny", "name": "Tiny", "downloaded": False}]),
+        get_current_model=MagicMock(return_value="tiny"),
+        is_configured=MagicMock(return_value=False),
+    )
+    app.transcriber.get_provider.side_effect = lambda provider_id: {
+        "openai": openai_provider,
+        "gemini": gemini_provider,
+        "whisper_local": whisper_local_provider,
+    }.get(provider_id)
+    app._open_provider_setup = MagicMock()
+
+    app._build_menu()
+
+    provider_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Providers & Keys")
+    gemini_item = next(item for item in provider_menu.items if getattr(item, "title", None) == "   Gemini ⚠️")
+
+    gemini_item.callback(None)
+
+    app._open_provider_setup.assert_called_once_with("gemini")
+
+
+def test_set_openai_key_prefills_existing_key(monkeypatch):
+    """The provider setup dialog should be prefilled with any stored key."""
+    app = _build_recording_app()
+    app._is_passphrase_mode = MagicMock(return_value=False)
+    app._applescript_input_dialog = MagicMock(return_value="")
+    monkeypatch.setattr("whisper_hud.app.get_api_key", MagicMock(return_value="sk-existing"))
+
+    app._set_openai_key(None)
+
+    app._applescript_input_dialog.assert_called_once_with(
+        "Enter OpenAI API Key",
+        "Enter your OpenAI API key.\n\nGet your key at: platform.openai.com/api-keys\n\nA key is already saved. Enter a new key to replace it.",
+        default="sk-existing",
+    )
+
+
+def test_open_provider_setup_uses_backing_credential_dialog():
+    """Cloud provider setup should route through the backing credential provider."""
+    app = _build_recording_app()
+    app._set_openai_key = MagicMock()
+    app._set_gemini_key = MagicMock()
+    app._set_anthropic_key = MagicMock()
+
+    app._open_provider_setup("openai_realtime")
+    app._open_provider_setup("gemini")
+
+    app._set_openai_key.assert_called_once_with(None)
+    app._set_gemini_key.assert_called_once_with(None)
+    app._set_anthropic_key.assert_not_called()
+
+
 def test_hotkey_press_starts_recording():
     """Starting a hotkey turn should mark recording active and start the recorder."""
     app = _build_recording_app()
