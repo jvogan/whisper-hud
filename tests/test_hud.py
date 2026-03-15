@@ -70,6 +70,7 @@ def _build_fake_hud(monkeypatch):
     hud._indicator_view.layer.return_value = MagicMock()
     hud._level_bars = []
     hud._ensure_window = MagicMock()
+    hud._update_window_frame = MagicMock()
     monkeypatch.setattr(hud, "_get_indicator_color", lambda state: f"color-{state.value}")
     return hud
 

@@ -11,8 +11,8 @@ Features:
 
 import threading
 import time
-from typing import Optional
 from enum import Enum
+from typing import Optional
 
 from .logging_config import get_logger
 
@@ -20,18 +20,25 @@ logger = get_logger("streaming_panel")
 
 try:
     from AppKit import (
-        NSWindow, NSColor, NSFont,
+        NSWindow, NSView, NSColor, NSFont,
         NSWindowStyleMaskBorderless, NSBackingStoreBuffered,
-        NSFloatingWindowLevel, NSScreen, NSTextField,
+        NSFloatingWindowLevel, NSScreen, NSTextField, NSWorkspace, NSButton,
         NSMakeRect,
         NSWindowCollectionBehaviorCanJoinAllSpaces,
         NSWindowCollectionBehaviorStationary,
         NSScrollView, NSTextView
     )
+    from Quartz import (
+        CGWindowListCopyWindowInfo,
+        kCGNullWindowID,
+        kCGWindowListOptionOnScreenOnly,
+    )
     from PyObjCTools import AppHelper
+    from objc import super as objc_super
     HAS_APPKIT = True
 except ImportError:
     HAS_APPKIT = False
+    CGWindowListCopyWindowInfo = None
     logger.warning("PyObjC not available, streaming panel will use console")
 
 
@@ -41,6 +48,44 @@ class StreamingPanelState(Enum):
     TRANSCRIBING = "transcribing"
     TRANSLATING = "translating"
     COMPLETE = "complete"
+
+
+if HAS_APPKIT:
+    class StreamingPanelWindow(NSWindow):
+        """Borderless window that can dismiss on Escape or focus loss."""
+
+        def canBecomeKeyWindow(self):
+            return True
+
+        def canBecomeMainWindow(self):
+            return False
+
+        def setDismissHandler_(self, handler):
+            self._dismiss_handler = handler
+
+        def setDismissOnResign_(self, should_dismiss):
+            self._dismiss_on_resign = should_dismiss
+
+        def keyDown_(self, event):
+            if event and getattr(event, "keyCode", lambda: None)() == 53:
+                dismiss = getattr(self, "_dismiss_handler", None)
+                if dismiss:
+                    dismiss()
+                return
+            objc_super(StreamingPanelWindow, self).keyDown_(event)
+
+        def resignKeyWindow(self):
+            objc_super(StreamingPanelWindow, self).resignKeyWindow()
+            if getattr(self, "_dismiss_on_resign", False):
+                dismiss = getattr(self, "_dismiss_handler", None)
+                if dismiss:
+                    dismiss()
+
+    class StreamingPanelContentView(NSView):
+        """Content view that keeps clicks inside the panel from dismissing it."""
+
+        def mouseDown_(self, event):
+            objc_super(StreamingPanelContentView, self).mouseDown_(event)
 
 
 class StreamingPanel:
@@ -58,6 +103,7 @@ class StreamingPanel:
 
     def __init__(self):
         self._window: Optional[NSWindow] = None
+        self._close_button: Optional[NSButton] = None
         self._transcription_label: Optional[NSTextField] = None
         self._transcription_text: Optional[NSTextView] = None
         self._translation_label: Optional[NSTextField] = None
@@ -73,6 +119,7 @@ class StreamingPanel:
         self._update_interval = 0.066  # ~15 updates/sec
         self._pending_transcription: Optional[str] = None
         self._pending_translation: Optional[str] = None
+        self._latest_transcription = ""
 
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable the streaming panel."""
@@ -82,24 +129,27 @@ class StreamingPanel:
 
     def _ensure_window(self):
         """Create window if needed (must be called on main thread)."""
-        if not HAS_APPKIT or self._window is not None:
+        if not HAS_APPKIT:
             return
 
-        # Position in center of screen
-        screen = NSScreen.mainScreen()
-        if not screen:
+        if self._window is not None:
+            self._update_window_frame()
             return
-        screen_rect = screen.visibleFrame()
-        x = screen_rect.origin.x + (screen_rect.size.width - self.WIDTH) / 2
-        y = screen_rect.origin.y + (screen_rect.size.height - self.HEIGHT) / 2 + 50
+
+        screen = self._screen_for_frontmost_window()
+        frame = self._window_frame_for_screen(screen)
+        if frame is None:
+            return
 
         # Create borderless window
-        self._window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(x, y, self.WIDTH, self.HEIGHT),
+        self._window = StreamingPanelWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            frame,
             NSWindowStyleMaskBorderless,
             NSBackingStoreBuffered,
             False
         )
+        self._window.setDismissHandler_(self._handle_manual_dismiss)
+        self._window.setDismissOnResign_(False)
 
         # Configure window
         self._window.setLevel_(NSFloatingWindowLevel + 1)
@@ -114,19 +164,137 @@ class StreamingPanel:
         )
 
         # Create rounded background view
-        content = self._window.contentView()
+        content = StreamingPanelContentView.alloc().initWithFrame_(frame)
+        self._window.setContentView_(content)
         content.setWantsLayer_(True)
         layer = content.layer()
         layer.setBackgroundColor_(
             NSColor.colorWithCalibratedWhite_alpha_(0.08, 0.95).CGColor()
         )
         layer.setCornerRadius_(self.CORNER_RADIUS)
+        self._create_close_button(content)
 
         # Create transcription section
         self._create_transcription_section(content)
 
         # Create translation section (initially hidden)
         self._create_translation_section(content)
+
+    def _rect_components(self, rect):
+        """Return rect components for AppKit and Quartz dict rectangles."""
+        if rect is None:
+            return 0.0, 0.0, 0.0, 0.0
+        if isinstance(rect, dict):
+            return (
+                float(rect.get("X", 0.0)),
+                float(rect.get("Y", 0.0)),
+                float(rect.get("Width", 0.0)),
+                float(rect.get("Height", 0.0)),
+            )
+        return (
+            float(rect.origin.x),
+            float(rect.origin.y),
+            float(rect.size.width),
+            float(rect.size.height),
+        )
+
+    def _intersection_area(self, rect_a, rect_b):
+        """Return overlap area between two rectangles."""
+        ax, ay, aw, ah = self._rect_components(rect_a)
+        bx, by, bw, bh = self._rect_components(rect_b)
+        left = max(ax, bx)
+        right = min(ax + aw, bx + bw)
+        bottom = max(ay, by)
+        top = min(ay + ah, by + bh)
+        if right <= left or top <= bottom:
+            return 0.0
+        return (right - left) * (top - bottom)
+
+    def _screen_for_frontmost_window(self):
+        """Return the screen containing the frontmost application window."""
+        if not HAS_APPKIT:
+            return None
+
+        main_screen = NSScreen.mainScreen()
+        screens = list(NSScreen.screens() or [])
+        if len(screens) <= 1:
+            return main_screen
+
+        try:
+            workspace = NSWorkspace.sharedWorkspace()
+            app = workspace.frontmostApplication() if workspace else None
+            pid = app.processIdentifier() if app else None
+            if not pid or not CGWindowListCopyWindowInfo:
+                return main_screen
+
+            windows = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID) or []
+            best_screen = main_screen
+            best_overlap = 0.0
+            for window in windows:
+                if window.get("kCGWindowOwnerPID") != pid:
+                    continue
+                bounds = window.get("kCGWindowBounds")
+                if not bounds:
+                    continue
+
+                for screen in screens:
+                    overlap = self._intersection_area(bounds, screen.visibleFrame())
+                    if overlap > best_overlap:
+                        best_overlap = overlap
+                        best_screen = screen
+
+                if best_overlap > 0:
+                    return best_screen
+        except Exception:
+            logger.debug("Falling back to main screen for streaming panel placement", exc_info=True)
+
+        return main_screen
+
+    def _window_frame_for_screen(self, screen):
+        """Calculate a centered panel frame clamped to the visible screen."""
+        if not screen:
+            return None
+
+        screen_rect = screen.visibleFrame()
+        screen_x, screen_y, screen_width, screen_height = self._rect_components(screen_rect)
+        width = min(self.WIDTH, screen_width)
+        height = min(self.HEIGHT, screen_height)
+
+        x = screen_x + (screen_width - width) / 2
+        y = screen_y + (screen_height - height) / 2 + 50
+
+        min_x = screen_x
+        max_x = screen_x + screen_width - width
+        min_y = screen_y
+        max_y = screen_y + screen_height - height
+        x = min(max(x, min_x), max_x)
+        y = min(max(y, min_y), max_y)
+        return NSMakeRect(x, y, width, height)
+
+    def _update_window_frame(self):
+        """Move the panel to the active screen while keeping it visible."""
+        if not self._window:
+            return
+
+        screen = self._screen_for_frontmost_window()
+        frame = self._window_frame_for_screen(screen)
+        if frame is None:
+            return
+        self._window.setFrame_display_(frame, False)
+
+    def _create_close_button(self, content):
+        """Create a manual dismiss button."""
+        self._close_button = NSButton.alloc().initWithFrame_(
+            NSMakeRect(self.WIDTH - self.PADDING - 28, self.HEIGHT - self.PADDING - 22, 28, 22)
+        )
+        self._close_button.setTitle_("×")
+        self._close_button.setBezelStyle_(1)
+        self._close_button.setBordered_(False)
+        self._close_button.setFont_(NSFont.systemFontOfSize_weight_(18, 0.5))
+        self._close_button.setContentTintColor_(NSColor.colorWithCalibratedWhite_alpha_(0.85, 1.0))
+        self._close_button.setTarget_(self)
+        self._close_button.setAction_("closePanel:")
+        content.addSubview_(self._close_button)
 
     def _create_transcription_section(self, content):
         """Create the transcription display section."""
@@ -237,6 +405,7 @@ class StreamingPanel:
 
     def update_transcription(self, text: str):
         """Update the transcription text with throttling."""
+        self._latest_transcription = text
         if not HAS_APPKIT or not self._enabled:
             logger.info(f"Transcription length: {len(text)} chars")
             return
@@ -332,6 +501,13 @@ class StreamingPanel:
             except Exception:
                 pass
 
+    def _auto_dismiss_delay_for_text(self, auto_dismiss: float) -> float:
+        """Return completion dismiss delay based on the final transcription length."""
+        word_count = len(self._latest_transcription.split())
+        if word_count == 0:
+            return auto_dismiss
+        return 3.0 + 0.5 * (word_count // 10)
+
     def show_complete(self, auto_dismiss: float = 2.0):
         """Show completion and schedule dismiss."""
         if not self._enabled:
@@ -355,8 +531,9 @@ class StreamingPanel:
         except Exception:
             pass
 
-        if auto_dismiss > 0:
-            self._schedule_dismiss(auto_dismiss)
+        dismiss_delay = self._auto_dismiss_delay_for_text(auto_dismiss)
+        if dismiss_delay > 0:
+            self._schedule_dismiss(dismiss_delay)
 
     def _schedule_dismiss(self, delay: float):
         """Schedule panel dismissal."""
@@ -385,6 +562,7 @@ class StreamingPanel:
         self._last_translation_update = 0.0
         self._pending_transcription = None
         self._pending_translation = None
+        self._latest_transcription = ""
 
         def _update():
             self._ensure_window()
@@ -413,12 +591,23 @@ class StreamingPanel:
             if hasattr(self, '_translation_scroll'):
                 self._translation_scroll.setHidden_(not self._show_translation)
 
-            self._window.orderFront_(None)
+            self._update_window_frame()
+            self._window.setDismissOnResign_(True)
+            self._window.makeKeyAndOrderFront_(None)
 
         try:
             AppHelper.callAfter(_update)
         except Exception:
             pass
+
+    def _handle_manual_dismiss(self):
+        """Dismiss the panel from Escape, outside clicks, or the close button."""
+        if self._state != StreamingPanelState.HIDDEN:
+            self.hide()
+
+    def closePanel_(self, _sender):
+        """Objective-C action for the close button."""
+        self._handle_manual_dismiss()
 
     def hide(self):
         """Hide the streaming panel."""
@@ -433,6 +622,8 @@ class StreamingPanel:
 
         def _hide():
             if self._window:
+                if hasattr(self._window, "setDismissOnResign_"):
+                    self._window.setDismissOnResign_(False)
                 self._window.orderOut_(None)
 
         try:
