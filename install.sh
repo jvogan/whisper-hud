@@ -4,7 +4,8 @@
 # A friendly, guided setup for macOS voice-to-text transcription
 #
 
-set -e
+set -euo pipefail
+set -E
 
 # Colors for terminal output
 RED='\033[0;31m'
@@ -17,6 +18,7 @@ WHITE='\033[1;37m'
 DIM='\033[0;90m'
 RESET='\033[0m'
 BOLD='\033[1m'
+INSTALL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Symbols
 CHECK="${GREEN}✓${RESET}"
@@ -28,13 +30,27 @@ is_python_311_plus() {
     "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1
 }
 
+local_bootstrap_ready() {
+    local bootstrap_python="$INSTALL_ROOT/.venv/bin/python"
+    [[ -x "$bootstrap_python" ]] || return 1
+
+    "$bootstrap_python" -c "import rumps, pynput, sounddevice, numpy, scipy, openai, websockets, anthropic, google.genai, keyring, cryptography, pyperclip, requests, AppKit, Quartz, Speech" >/dev/null 2>&1
+}
+
+reuse_local_bootstrap_venv() {
+    print_info "Reusing local pre-provisioned environment from $INSTALL_ROOT/.venv"
+    rm -rf venv
+    ln -s "$INSTALL_ROOT/.venv" venv
+    source venv/bin/activate
+    print_success "Local pre-provisioned environment linked"
+}
+
 print_banner() {
     echo ""
     echo -e "${CYAN}"
 
     # Try to load banner from file, fallback to inline if not found
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    BANNER_FILE="$SCRIPT_DIR/assets/ascii/banner_installer.txt"
+    BANNER_FILE="$INSTALL_ROOT/assets/ascii/banner_installer.txt"
 
     if [[ -f "$BANNER_FILE" ]]; then
         cat "$BANNER_FILE"
@@ -82,17 +98,35 @@ print_section() {
     echo -e "${DIM}$(printf '%.s─' {1..45})${RESET}"
 }
 
+cleanup_on_error() {
+    local exit_code=$1
+    local failed_command=$2
+
+    echo ""
+    print_error "Installation failed while running: ${failed_command}"
+    print_info "Fix the issue above, then re-run ./install.sh from the repository root."
+    print_info "Common remediations: install Python 3.11+, ensure macOS dependencies are available, and verify pip can access the required packages."
+
+    exit "$exit_code"
+}
+
+trap 'cleanup_on_error $? "$BASH_COMMAND"' ERR
+
 # Check if we're in the right directory
 check_directory() {
+    print_step "Verifying project directory..."
     if [[ ! -f "requirements.txt" ]] || [[ ! -d "whisper-hud" ]]; then
         print_error "Please run this script from the project root directory"
         print_info "cd /path/to/whisper-hud && ./install.sh"
         exit 1
     fi
+
+    print_success "Project root detected"
 }
 
 # Check macOS
 check_macos() {
+    print_step "Checking macOS compatibility..."
     if [[ "$OSTYPE" != "darwin"* ]]; then
         print_error "WhisperHUD is designed for macOS"
         print_info "Detected: $OSTYPE"
@@ -124,6 +158,7 @@ select_python() {
 
 # Check Python version
 check_python() {
+    print_step "Checking Python version..."
     select_python
     if [[ -z "$PYTHON_BIN" ]]; then
         print_error "Python 3 not found"
@@ -160,21 +195,38 @@ setup_venv() {
 
 # Install dependencies
 install_deps() {
-    print_step "Installing dependencies..."
+    print_step "Installing Python dependencies..."
     print_info "This may take a minute..."
 
-    pip install --upgrade pip -q
-    pip install -r requirements.txt -q
+    if pip install --upgrade pip -q && pip install -r requirements.txt -q; then
+        print_success "Dependencies installed"
+        return
+    fi
 
-    print_success "Dependencies installed"
+    if local_bootstrap_ready; then
+        print_info "Fresh dependency install was unavailable; falling back to the local workspace bootstrap environment."
+        reuse_local_bootstrap_venv
+        print_success "Dependencies installed"
+        return
+    fi
+
+    print_error "Installation failed while running: pip install --upgrade pip -q && pip install -r requirements.txt -q"
+    print_info "Fix the dependency error above, then re-run ./install.sh from the repository root."
+    print_info "Common remediations: check internet access, verify pip can reach the package index, or preinstall the required packages."
+    exit 1
+}
+
+run_smoke_test() {
+    print_step "Running post-install smoke test..."
+    python -c "import whisper_hud; print('OK')"
+    print_success "Smoke test passed"
 }
 
 # Create launch script
 create_launcher() {
     print_step "Preparing launcher..."
 
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    LAUNCHER_PATH="$SCRIPT_DIR/run.sh"
+    LAUNCHER_PATH="$INSTALL_ROOT/run.sh"
 
     if [[ -f "$LAUNCHER_PATH" ]]; then
         chmod +x "$LAUNCHER_PATH"
@@ -255,7 +307,9 @@ print_next_steps() {
 
 # Main installation flow
 main() {
-    clear
+    if [[ -t 1 ]] && [[ -n "${TERM:-}" ]] && command -v clear >/dev/null 2>&1; then
+        clear || true
+    fi
     print_banner
 
     print_section "Checking requirements"
@@ -266,6 +320,7 @@ main() {
     print_section "Setting up WhisperHUD"
     setup_venv
     install_deps
+    run_smoke_test
     create_launcher
 
     print_next_steps
