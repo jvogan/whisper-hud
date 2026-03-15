@@ -15,6 +15,42 @@ class TestPaste:
 
         assert escape_applescript_string(value) == 'backslash \\\\\\\\ quote \\" newline \\n carriage \\r tab \\t'
 
+    def test_escape_applescript_string_strips_null_bytes(self):
+        """Null bytes should be removed before building AppleScript source."""
+        from whisper_hud.paste import escape_applescript_string
+
+        assert escape_applescript_string("a\x00b") == "ab"
+
+    def test_escape_applescript_string_preserves_backslash_quote_sequence(self):
+        """Backslashes immediately before quotes should be escaped exactly once."""
+        from whisper_hud.paste import escape_applescript_string
+
+        assert escape_applescript_string('\\"') == '\\\\\\"'
+
+    def test_as_applescript_string_expression_uses_character_ids_for_unicode(self):
+        """Unicode text should avoid raw source literals that can fail in osascript."""
+        from whisper_hud.paste import _as_applescript_string_expression
+
+        expression = _as_applescript_string_expression("A🙂漢א")
+
+        assert expression == (
+            '"A" & (character id 55357) & (character id 56898) & (character id 28450) & (character id 1488)'
+        )
+
+    def test_as_applescript_string_expression_strips_null_bytes(self):
+        """Null bytes should not appear in AppleScript expressions."""
+        from whisper_hud.paste import _as_applescript_string_expression
+
+        assert _as_applescript_string_expression("a\x00b") == '"ab"'
+
+    def test_as_applescript_string_expression_chunks_long_literals(self):
+        """Long AppleScript literals should be split into safe-sized chunks."""
+        from whisper_hud.paste import _as_applescript_string_expression, MAX_APPLESCRIPT_LITERAL_LENGTH
+
+        expression = _as_applescript_string_expression("a" * (MAX_APPLESCRIPT_LITERAL_LENGTH + 1))
+
+        assert expression == f'"{"a" * MAX_APPLESCRIPT_LITERAL_LENGTH}" & "a"'
+
     def test_get_accessibility_error_message(self):
         """Test that accessibility error message is informative."""
         from whisper_hud.paste import get_accessibility_error_message
@@ -205,6 +241,19 @@ class TestPaste:
         assert result is True
         script = mock_run.call_args.args[0][2]
         assert 'keystroke "say \\"hi\\""' in script
+
+    @patch('whisper_hud.paste.subprocess.run')
+    def test_insert_text_direct_unicode_uses_character_ids(self, mock_run):
+        """Unicode direct insertion should use character ids instead of raw literals."""
+        from whisper_hud.paste import insert_text_direct
+
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = insert_text_direct("🙂")
+
+        assert result is True
+        script = mock_run.call_args.args[0][2]
+        assert 'keystroke (character id 55357) & (character id 56898)' in script
 
     @patch('whisper_hud.paste.insert_text', return_value=True)
     def test_insert_text_direct_long_text_falls_back_to_clipboard(self, mock_insert_text):

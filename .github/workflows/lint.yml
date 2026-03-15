@@ -28,6 +28,10 @@ jobs:
         run: |
           ruff check .
 
+      - name: Run mypy
+        run: |
+          mypy whisper-hud/whisper_hud/
+
   syntax-check:
     runs-on: macos-latest
 

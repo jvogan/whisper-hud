@@ -1,6 +1,7 @@
 """Tests for credential storage and API key management."""
 
 import builtins
+import logging
 from unittest.mock import Mock, patch
 
 
@@ -21,13 +22,13 @@ class TestKeychainMode:
         from whisper_hud.keychain import set_api_key
 
         with patch("whisper_hud.keychain.get_storage_mode", return_value="keychain"):
-            result = set_api_key("openai", "sk-test-key-123")
+            result = set_api_key("openai", "sk-" + ("a" * 40))
 
         assert result is True
         mock_keychain["set"].assert_called_once_with(
             "whisper-hud",
             "whisper-hud.openai",
-            "sk-test-key-123",
+            "sk-" + ("a" * 40),
         )
 
     def test_delete_api_key(self, mock_keychain):
@@ -64,6 +65,87 @@ class TestKeychainMode:
         assert not ok
         assert "gemini" in message
 
+    def test_set_api_key_format_validation_strips_openai_whitespace(self, mock_keychain):
+        """Leading and trailing whitespace should be removed before storing."""
+        from whisper_hud.keychain import set_api_key
+
+        raw_key = f"  {'sk-' + ('a' * 40)}  "
+
+        with patch("whisper_hud.keychain.get_storage_mode", return_value="keychain"):
+            result = set_api_key("openai", raw_key)
+
+        assert result is True
+        mock_keychain["set"].assert_called_once_with(
+            "whisper-hud",
+            "whisper-hud.openai",
+            "sk-" + ("a" * 40),
+        )
+
+    def test_set_api_key_format_validation_rejects_openai_prefix(self, mock_keychain):
+        """OpenAI keys should require the sk- prefix."""
+        from whisper_hud.keychain import set_api_key
+
+        with patch("whisper_hud.keychain.get_storage_mode", return_value="keychain"):
+            try:
+                set_api_key("openai", "pk-" + ("a" * 40))
+                assert False, "Expected ValueError"
+            except ValueError as exc:
+                assert str(exc) == "OpenAI API keys must start with 'sk-'"
+
+        mock_keychain["set"].assert_not_called()
+
+    def test_set_api_key_format_validation_rejects_openai_short_key(self, mock_keychain):
+        """OpenAI keys should meet the minimum length requirement."""
+        from whisper_hud.keychain import set_api_key
+
+        with patch("whisper_hud.keychain.get_storage_mode", return_value="keychain"):
+            try:
+                set_api_key("openai", "sk-short-key")
+                assert False, "Expected ValueError"
+            except ValueError as exc:
+                assert str(exc) == "OpenAI API keys must be at least 40 characters"
+
+        mock_keychain["set"].assert_not_called()
+
+    def test_set_api_key_format_validation_rejects_embedded_whitespace(self, mock_keychain):
+        """Internal whitespace should be rejected after trimming."""
+        from whisper_hud.keychain import set_api_key
+
+        with patch("whisper_hud.keychain.get_storage_mode", return_value="keychain"):
+            try:
+                set_api_key("openai", "sk-valid-key has-space-and-length-padding-1234567890")
+                assert False, "Expected ValueError"
+            except ValueError as exc:
+                assert str(exc) == "OpenAI API key must not contain whitespace"
+
+        mock_keychain["set"].assert_not_called()
+
+    def test_set_api_key_format_validation_rejects_short_gemini_key(self, mock_keychain):
+        """Gemini keys should meet the minimum length requirement."""
+        from whisper_hud.keychain import set_api_key
+
+        with patch("whisper_hud.keychain.get_storage_mode", return_value="keychain"):
+            try:
+                set_api_key("gemini", "short-gemini-key")
+                assert False, "Expected ValueError"
+            except ValueError as exc:
+                assert str(exc) == "Gemini API keys must be at least 20 characters"
+
+        mock_keychain["set"].assert_not_called()
+
+    def test_set_api_key_format_validation_rejects_empty_after_trimming(self, mock_keychain):
+        """Whitespace-only values should not be stored."""
+        from whisper_hud.keychain import set_api_key
+
+        with patch("whisper_hud.keychain.get_storage_mode", return_value="keychain"):
+            try:
+                set_api_key("gemini", "   ")
+                assert False, "Expected ValueError"
+            except ValueError as exc:
+                assert str(exc) == "Gemini API key cannot be empty"
+
+        mock_keychain["set"].assert_not_called()
+
 
 class TestSessionOnlyMode:
     """Tests for in-memory session-only mode."""
@@ -74,8 +156,9 @@ class TestSessionOnlyMode:
 
         with patch("whisper_hud.keychain.get_storage_mode", return_value="none"):
             clear_api_keys(mode="none")
-            assert set_api_key("openai", "sk-openai-session")
-            assert get_api_key("openai") == "sk-openai-session"
+            valid_openai_key = "sk-" + ("b" * 40)
+            assert set_api_key("openai", valid_openai_key)
+            assert get_api_key("openai") == valid_openai_key
             assert delete_api_key("openai")
             assert get_api_key("openai") is None
 
@@ -101,15 +184,16 @@ class TestPassphraseMode:
                     assert ok
                     assert has_passphrase_store()
 
-                    assert set_api_key("openai", "sk-passphrase-123")
-                    assert get_api_key("openai") == "sk-passphrase-123"
+                    valid_openai_key = "sk-" + ("c" * 40)
+                    assert set_api_key("openai", valid_openai_key)
+                    assert get_api_key("openai") == valid_openai_key
 
                     lock_passphrase_store()
                     assert get_api_key("openai") is None
 
                     ok, _ = unlock_passphrase_store("correct horse battery staple")
                     assert ok
-                    assert get_api_key("openai") == "sk-passphrase-123"
+                    assert get_api_key("openai") == valid_openai_key
 
     def test_passphrase_store_rejects_wrong_passphrase(self, temp_config_dir):
         """Unlock should fail with wrong passphrase once store exists."""
@@ -141,7 +225,8 @@ class TestPassphraseMode:
                     lock_passphrase_store()
                     ok, _ = unlock_passphrase_store("old-passphrase-123")
                     assert ok
-                    assert set_api_key("gemini", "gm-key")
+                    valid_gemini_key = "g" * 20
+                    assert set_api_key("gemini", valid_gemini_key)
 
                     ok, _ = change_passphrase("old-passphrase-123", "new-passphrase-456")
                     assert ok
@@ -149,7 +234,7 @@ class TestPassphraseMode:
                     lock_passphrase_store()
                     ok, _ = unlock_passphrase_store("new-passphrase-456")
                     assert ok
-                    assert get_api_key("gemini") == "gm-key"
+                    assert get_api_key("gemini") == valid_gemini_key
 
 
 class TestUtilityFunctions:
@@ -210,9 +295,9 @@ class TestValidateApiKey:
         assert error == "Connection timed out"
         mock_get.assert_called_once()
 
-    def test_validate_api_key_returns_false_when_requests_missing(self):
+    def test_validate_api_key_returns_false_when_requests_not_installed(self, caplog):
         """Missing requests should not bypass validation."""
-        from whisper_hud.keychain import validate_api_key
+        from whisper_hud.keychain import REQUESTS_MISSING_WARNING, validate_api_key
 
         original_import = builtins.__import__
 
@@ -221,11 +306,13 @@ class TestValidateApiKey:
                 raise ImportError("No module named 'requests'")
             return original_import(name, *args, **kwargs)
 
-        with patch("builtins.__import__", side_effect=import_without_requests):
-            is_valid, error = validate_api_key("openai", "sk-no-requests")
+        with caplog.at_level(logging.WARNING, logger="whisper_hud.keychain"):
+            with patch("builtins.__import__", side_effect=import_without_requests):
+                is_valid, error = validate_api_key("openai", "sk-no-requests")
 
         assert is_valid is False
-        assert error == "requests package is required for API key validation"
+        assert error == REQUESTS_MISSING_WARNING
+        assert REQUESTS_MISSING_WARNING in caplog.text
 
     def test_validate_api_key_returns_false_for_empty_key(self):
         """An empty key should not validate successfully."""
