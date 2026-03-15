@@ -173,6 +173,7 @@ class WhisperHUDApp(rumps.App):
             initial_position=self.config.widget_position,
             on_position_changed=self._save_widget_position
         )
+        self._refresh_widget_tooltip()
 
         # Apply appearance to widget and HUD
         self._apply_appearance_to_components()
@@ -2118,6 +2119,18 @@ class WhisperHUDApp(rumps.App):
         }
         return names.get(provider_id, provider_id.title())
 
+    def _refresh_widget_tooltip(self):
+        """Keep the floating widget tooltip aligned with provider and hotkey config."""
+        widget = getattr(self, "widget", None)
+        if not widget:
+            return
+
+        widget.set_tooltip_context(
+            self._get_provider_display_name(self.config.default_provider),
+            format_hotkey_display(self.config.hotkey),
+            self.config.hotkey_mode,
+        )
+
     def _select_or_download_provider(self, provider_id: str, provider_info: dict):
         """Select a provider, or prompt for download if needed."""
         # If provider isn't available due to missing deps or OS constraints, show guidance
@@ -2854,12 +2867,14 @@ class WhisperHUDApp(rumps.App):
         """Change default provider."""
         self.config.default_provider = provider_id
         self.config.save()
+        self._refresh_widget_tooltip()
         self._schedule_menu_rebuild()
 
     def _select_provider_and_model(self, provider_id: str, model_id: str):
         """Change both provider and model in one action."""
         self.config.default_provider = provider_id
         self.transcriber.set_provider_model(provider_id, model_id)
+        self._refresh_widget_tooltip()
         self._schedule_menu_rebuild()
 
     def _select_provider_model_or_download(self, provider_id: str, model_id: str, downloaded: bool, provider_info: dict):
@@ -2868,6 +2883,7 @@ class WhisperHUDApp(rumps.App):
             # Set provider first so download targets the right one
             self.config.default_provider = provider_id
             self.config.save()
+            self._refresh_widget_tooltip()
             self._prompt_model_download(provider_id)
         else:
             self._select_provider_and_model(provider_id, model_id)
@@ -3919,6 +3935,7 @@ class WhisperHUDApp(rumps.App):
                 f"New hotkey: {display}"
             )
 
+            self._refresh_widget_tooltip()
             self._schedule_menu_rebuild()
         else:
             # Restart listener with old hotkey
@@ -3961,6 +3978,7 @@ class WhisperHUDApp(rumps.App):
             "Hotkey reset to ⌘⇧Space"
         )
 
+        self._refresh_widget_tooltip()
         self._schedule_menu_rebuild()
 
     def _set_hotkey_mode(self, mode: str):
@@ -3980,6 +3998,7 @@ class WhisperHUDApp(rumps.App):
             f"Recording mode: {mode_name}"
         )
 
+        self._refresh_widget_tooltip()
         self._schedule_menu_rebuild()
 
     def _copy_from_history(self, index: int):

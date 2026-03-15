@@ -6,9 +6,12 @@ and allows click-to-record as an alternative to the hotkey.
 Supports customizable colors and icons.
 """
 
+from __future__ import annotations
+
+import math
 import threading
-from typing import Callable, Optional
 from enum import Enum
+from typing import Callable, Optional
 
 try:
     from AppKit import (
@@ -90,6 +93,7 @@ if HAS_APPKIT:
             # Appearance configuration
             self._appearance_config = None
             self._custom_icon = None  # Cached custom icon image
+            self._animation_phase = 0.0
 
             # Enable layer backing for smooth rendering
             self.setWantsLayer_(True)
@@ -108,6 +112,11 @@ if HAS_APPKIT:
         def setCustomIcon_(self, icon):
             """Set a custom icon image."""
             self._custom_icon = icon
+            self.setNeedsDisplay_(True)
+
+        def setAnimationPhase_(self, phase):
+            """Update the animation phase used when drawing active states."""
+            self._animation_phase = phase
             self.setNeedsDisplay_(True)
 
         def _getStateColors(self):
@@ -147,6 +156,7 @@ if HAS_APPKIT:
             corner_radius = dims[2]
             icon_size = dims[3]
             icon_offset = dims[4]
+            animation_phase = getattr(self, "_animation_phase", 0.0)
 
             # Get colors from appearance config
             colors = self._getStateColors()
@@ -171,12 +181,15 @@ if HAS_APPKIT:
                 if self._state != WidgetState.IDLE:
                     bg_hex = colors.get("background", "#D92626")
                     bg_color = _hex_to_nscolor(bg_hex)
+                    glow_alpha = 0.35
+                    if self._state == WidgetState.RECORDING:
+                        glow_alpha = 0.24 + (0.18 * (0.5 + 0.5 * math.sin(animation_phase * math.tau)))
                     # Create a soft glow with reduced opacity
                     glow_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
                         bg_color.redComponent(),
                         bg_color.greenComponent(),
                         bg_color.blueComponent(),
-                        0.35  # Subtle glow
+                        glow_alpha
                     )
                     glow_color.setFill()
                     # Slightly larger circle behind the icon for glow effect
@@ -230,6 +243,13 @@ if HAS_APPKIT:
                 )
             else:
                 # Draw default circle icon
+                if self._state == WidgetState.PROCESSING:
+                    self._draw_processing_spinner(icon_rect, colors, animation_phase)
+                    return
+
+                if self._state == WidgetState.RECORDING:
+                    icon_rect = self._scaled_rect(icon_rect, 0.92 + (0.16 * (0.5 + 0.5 * math.sin(animation_phase * math.tau))))
+
                 icon_path = NSBezierPath.bezierPathWithOvalInRect_(icon_rect)
                 icon_hex = colors.get("icon", "#66A5FF")
                 icon_color = _hex_to_nscolor(icon_hex)
@@ -242,6 +262,63 @@ if HAS_APPKIT:
                 )
                 icon_color.setFill()
                 icon_path.fill()
+
+                if self._state == WidgetState.RECORDING:
+                    self._draw_recording_ring(icon_rect, icon_color, animation_phase)
+
+        def _scaled_rect(self, rect, scale):
+            center_x = rect.origin.x + (rect.size.width / 2.0)
+            center_y = rect.origin.y + (rect.size.height / 2.0)
+            width = rect.size.width * scale
+            height = rect.size.height * scale
+            return NSMakeRect(center_x - (width / 2.0), center_y - (height / 2.0), width, height)
+
+        def _draw_recording_ring(self, icon_rect, icon_color, animation_phase):
+            pulse = 0.5 + 0.5 * math.sin(animation_phase * math.tau)
+            ring_rect = self._scaled_rect(icon_rect, 1.35 + (0.12 * pulse))
+            ring_path = NSBezierPath.bezierPathWithOvalInRect_(ring_rect)
+            ring_path.setLineWidth_(2.6)
+            ring_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                icon_color.redComponent(),
+                icon_color.greenComponent(),
+                icon_color.blueComponent(),
+                0.18 + (0.18 * pulse)
+            )
+            ring_color.setStroke()
+            ring_path.stroke()
+
+        def _draw_processing_spinner(self, icon_rect, colors, animation_phase):
+            icon_hex = colors.get("icon", "#FFFFFF")
+            icon_color = _hex_to_nscolor(icon_hex)
+            spinner_rect = self._scaled_rect(icon_rect, 1.08)
+            start_angle = 90 - (animation_phase * 360.0)
+            end_angle = start_angle - 250.0
+
+            spinner_path = NSBezierPath.bezierPath()
+            spinner_path.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
+                (
+                    spinner_rect.origin.x + (spinner_rect.size.width / 2.0),
+                    spinner_rect.origin.y + (spinner_rect.size.height / 2.0),
+                ),
+                spinner_rect.size.width / 2.0,
+                start_angle,
+                end_angle,
+                True
+            )
+            spinner_path.setLineWidth_(3.0)
+            spinner_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                icon_color.redComponent(),
+                icon_color.greenComponent(),
+                icon_color.blueComponent(),
+                1.0
+            )
+            spinner_color.setStroke()
+            spinner_path.stroke()
+
+            center_dot = self._scaled_rect(icon_rect, 0.34)
+            dot_path = NSBezierPath.bezierPathWithOvalInRect_(center_dot)
+            spinner_color.setFill()
+            dot_path.fill()
 
         def mouseEntered_(self, event):
             self._is_hovering = True
@@ -379,6 +456,13 @@ class FloatingWidget:
         self._on_position_changed = on_position_changed
         self._appearance_config: Optional[dict] = None
         self._image_processor = None
+        self._animation_phase = 0.0
+        self._animation_timer: Optional[threading.Timer] = None
+        self._animation_generation = 0
+        self._animation_interval = 1.0 / 15.0
+        self._tooltip_provider = "Unknown"
+        self._tooltip_hotkey = ""
+        self._tooltip_mode = "push_to_talk"
 
     def _get_dimensions(self):
         """Get current size dimensions."""
@@ -442,6 +526,8 @@ class FloatingWidget:
             self._update_custom_icon()
 
         self._window.setContentView_(self._view)
+        self._update_tooltip()
+        self._update_animation_phase()
 
     def _handle_click(self):
         """Handle click on widget."""
@@ -473,10 +559,91 @@ class FloatingWidget:
                     self._update_custom_icon()
             AppHelper.callAfter(_update)
 
+    def _update_animation_phase(self):
+        """Push the current animation phase to the view."""
+        if not HAS_APPKIT or not self._view:
+            return
+
+        def _update():
+            if self._view:
+                self._view.setAnimationPhase_(self._animation_phase)
+
+        AppHelper.callAfter(_update)
+
+    def _cancel_animation_timer_locked(self):
+        if self._animation_timer:
+            self._animation_timer.cancel()
+            self._animation_timer = None
+
+    def _state_uses_animation(self) -> bool:
+        return self._state in {WidgetState.RECORDING, WidgetState.PROCESSING}
+
+    def _restart_animation_for_state_locked(self):
+        self._animation_generation += 1
+        self._cancel_animation_timer_locked()
+        if not self._state_uses_animation() or not self._visible:
+            self._animation_phase = 0.0
+            self._update_animation_phase()
+            return
+
+        self._animation_phase = 0.0
+        self._update_animation_phase()
+        self._schedule_animation_tick_locked()
+
+    def _schedule_animation_tick_locked(self):
+        timer = threading.Timer(
+            self._animation_interval,
+            self._animation_tick,
+            args=(self._animation_generation,),
+        )
+        timer.daemon = True
+        self._animation_timer = timer
+        timer.start()
+
+    def _animation_tick(self, generation: int):
+        with self._lock:
+            if generation != self._animation_generation:
+                return
+            if not self._state_uses_animation() or not self._visible:
+                self._animation_timer = None
+                return
+
+            self._animation_phase = (self._animation_phase + 0.12) % 1.0
+            self._animation_timer = None
+            self._schedule_animation_tick_locked()
+
+        self._update_animation_phase()
+
+    def _build_tooltip_text(self) -> str:
+        provider = self._tooltip_provider or "Unknown"
+        hotkey = self._tooltip_hotkey or "Not set"
+        action = "Hold" if self._tooltip_mode == "push_to_talk" else "Press"
+        return f"Provider: {provider}\nHotkey: {action} {hotkey}"
+
+    def _update_tooltip(self):
+        if not HAS_APPKIT or not self._view:
+            return
+
+        tooltip = self._build_tooltip_text()
+
+        def _apply_tooltip():
+            if self._view:
+                self._view.setToolTip_(tooltip)
+
+        AppHelper.callAfter(_apply_tooltip)
+
+    def set_tooltip_context(self, provider_name: str, hotkey_display: str, hotkey_mode: str):
+        """Update tooltip metadata shown when the widget is hovered."""
+        self._tooltip_provider = provider_name or "Unknown"
+        self._tooltip_hotkey = hotkey_display or "Not set"
+        self._tooltip_mode = hotkey_mode or "push_to_talk"
+        self._update_tooltip()
+
     def set_state(self, state: WidgetState):
         """Set widget state."""
         with self._lock:
             self._state = state
+            self._restart_animation_for_state_locked()
             self._update_view()
 
     def set_idle(self):
@@ -496,7 +663,8 @@ class FloatingWidget:
         if not HAS_APPKIT:
             return
 
-        self._visible = True
+        with self._lock:
+            self._visible = True
 
         def _show():
             self._ensure_window()
@@ -504,13 +672,17 @@ class FloatingWidget:
                 self._window.orderFront_(None)
 
         AppHelper.callAfter(_show)
+        with self._lock:
+            self._restart_animation_for_state_locked()
 
     def hide(self):
         """Hide the widget."""
         if not HAS_APPKIT:
             return
 
-        self._visible = False
+        with self._lock:
+            self._visible = False
+            self._restart_animation_for_state_locked()
 
         def _hide():
             if self._window:
