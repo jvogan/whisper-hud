@@ -11,8 +11,11 @@ Features:
 
 import threading
 import time
+import math
 from enum import Enum
 from typing import Optional
+
+import pyperclip
 
 from .logging_config import get_logger
 
@@ -100,16 +103,28 @@ class StreamingPanel:
     HEIGHT = 280
     CORNER_RADIUS = 16
     PADDING = 16
+    HEADER_HEIGHT = 26
+    LABEL_HEIGHT = 24
+    SECTION_SPACING = 16
+    LABEL_TO_TEXT_GAP = 4
+    MIN_TEXT_HEIGHT = 90
+    TEXT_INSET = 10
+    MAX_SCREEN_HEIGHT_RATIO = 0.6
+    COPY_FEEDBACK_DURATION = 1.0
 
     def __init__(self):
         self._window: Optional[NSWindow] = None
         self._close_button: Optional[NSButton] = None
+        self._copy_button: Optional[NSButton] = None
         self._transcription_label: Optional[NSTextField] = None
         self._transcription_text: Optional[NSTextView] = None
+        self._transcription_scroll: Optional[NSScrollView] = None
         self._translation_label: Optional[NSTextField] = None
         self._translation_text: Optional[NSTextView] = None
+        self._translation_scroll: Optional[NSScrollView] = None
         self._state = StreamingPanelState.HIDDEN
         self._dismiss_timer: Optional[threading.Timer] = None
+        self._copy_feedback_timer: Optional[threading.Timer] = None
         self._enabled = True
         self._lock = threading.Lock()
         self._show_translation = False
@@ -120,6 +135,7 @@ class StreamingPanel:
         self._pending_transcription: Optional[str] = None
         self._pending_translation: Optional[str] = None
         self._latest_transcription = ""
+        self._latest_translation = ""
 
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable the streaming panel."""
@@ -258,7 +274,7 @@ class StreamingPanel:
         screen_rect = screen.visibleFrame()
         screen_x, screen_y, screen_width, screen_height = self._rect_components(screen_rect)
         width = min(self.WIDTH, screen_width)
-        height = min(self.HEIGHT, screen_height)
+        height = min(self._target_panel_height_for_screen(screen), screen_height)
 
         x = screen_x + (screen_width - width) / 2
         y = screen_y + (screen_height - height) / 2 + 50
@@ -270,6 +286,168 @@ class StreamingPanel:
         x = min(max(x, min_x), max_x)
         y = min(max(y, min_y), max_y)
         return NSMakeRect(x, y, width, height)
+
+    def _max_panel_height_for_screen(self, screen) -> float:
+        """Return the maximum panel height for the given screen."""
+        if not screen:
+            return float(self.HEIGHT)
+        _, _, _, screen_height = self._rect_components(screen.visibleFrame())
+        return max(float(self.HEIGHT), screen_height * self.MAX_SCREEN_HEIGHT_RATIO)
+
+    def _estimated_text_height(self, text: str, width: float) -> float:
+        """Estimate the document height for wrapped text."""
+        if width <= 0:
+            return float(self.MIN_TEXT_HEIGHT)
+        chars_per_line = max(1, int(width / 7.5))
+        lines = 0
+        for raw_line in (text or "").splitlines() or [""]:
+            lines += max(1, int(math.ceil(len(raw_line) / chars_per_line)))
+        return max(float(self.MIN_TEXT_HEIGHT), lines * 22.0 + self.TEXT_INSET)
+
+    def _measured_text_height(self, text_view, text: str, width: float) -> float:
+        """Measure text height using AppKit when available, otherwise estimate."""
+        if text_view:
+            try:
+                layout_manager = text_view.layoutManager()
+                text_container = text_view.textContainer()
+                if layout_manager and text_container:
+                    text_container.setContainerSize_((width, 10_000_000.0))
+                    text_container.setWidthTracksTextView_(True)
+                    layout_manager.ensureLayoutForTextContainer_(text_container)
+                    used_rect = layout_manager.usedRectForTextContainer_(text_container)
+                    return max(float(self.MIN_TEXT_HEIGHT), float(used_rect.size.height) + self.TEXT_INSET)
+            except Exception:
+                logger.debug("Falling back to estimated text height", exc_info=True)
+        return self._estimated_text_height(text, width)
+
+    def _base_panel_chrome_height(self) -> float:
+        """Return the height used by non-scrollable chrome."""
+        base = self.PADDING * 2 + self.HEADER_HEIGHT + self.LABEL_TO_TEXT_GAP
+        if self._show_translation:
+            base += self.SECTION_SPACING + self.LABEL_HEIGHT + self.LABEL_TO_TEXT_GAP
+        return float(base)
+
+    def _target_panel_height_for_screen(self, screen) -> float:
+        """Return the desired panel height for current content on the target screen."""
+        content_width = self.WIDTH - 2 * self.PADDING - self.TEXT_INSET
+        transcription_height = self._measured_text_height(
+            self._transcription_text, self._latest_transcription, content_width
+        )
+        total_height = self._base_panel_chrome_height() + transcription_height
+        if self._show_translation:
+            translation_height = self._measured_text_height(
+                self._translation_text, self._latest_translation, content_width
+            )
+            total_height += translation_height
+        return min(max(float(self.HEIGHT), total_height), self._max_panel_height_for_screen(screen))
+
+    def _section_viewport_heights(self, panel_height: float):
+        """Return viewport heights for the visible text sections."""
+        content_width = self.WIDTH - 2 * self.PADDING - self.TEXT_INSET
+        desired = [
+            self._measured_text_height(self._transcription_text, self._latest_transcription, content_width)
+        ]
+        if self._show_translation:
+            desired.append(
+                self._measured_text_height(self._translation_text, self._latest_translation, content_width)
+            )
+
+        minimums = [float(self.MIN_TEXT_HEIGHT)] * len(desired)
+        available = max(float(sum(minimums)), panel_height - self._base_panel_chrome_height())
+        heights = minimums[:]
+        extras = [max(0.0, want - minimum) for want, minimum in zip(desired, minimums)]
+        remaining = max(0.0, available - sum(minimums))
+        total_extra = sum(extras)
+        if total_extra <= 0 or remaining <= 0:
+            return heights
+
+        for idx, extra in enumerate(extras):
+            share = remaining * (extra / total_extra)
+            heights[idx] += min(extra, share)
+
+        leftover = available - sum(heights)
+        for idx, extra in enumerate(extras):
+            if leftover <= 0:
+                break
+            room = extra - (heights[idx] - minimums[idx])
+            if room <= 0:
+                continue
+            delta = min(room, leftover)
+            heights[idx] += delta
+            leftover -= delta
+        return heights
+
+    def _set_text_view_document_height(self, text_view, height: float):
+        """Resize the text view document so the scroll view can scroll when needed."""
+        if not text_view:
+            return
+        frame = text_view.frame()
+        text_view.setFrame_(NSMakeRect(frame.origin.x, frame.origin.y, frame.size.width, max(height, frame.size.height)))
+
+    def _layout_content(self, panel_height: Optional[float] = None):
+        """Lay out controls for the current panel height."""
+        if not self._window:
+            return
+
+        if panel_height is None:
+            panel_height = self._window.frame().size.height
+
+        content = self._window.contentView()
+        if not content:
+            return
+
+        content.setFrame_(NSMakeRect(0, 0, self.WIDTH, panel_height))
+
+        button_y = panel_height - self.PADDING - self.HEADER_HEIGHT
+        close_x = self.WIDTH - self.PADDING - 28
+        copy_x = close_x - 76 - 8
+        label_width = copy_x - self.PADDING - 8
+
+        if self._transcription_label:
+            self._transcription_label.setFrame_(NSMakeRect(self.PADDING, button_y, label_width, self.LABEL_HEIGHT))
+        if self._copy_button:
+            self._copy_button.setFrame_(NSMakeRect(copy_x, button_y, 76, self.HEADER_HEIGHT))
+        if self._close_button:
+            self._close_button.setFrame_(NSMakeRect(close_x, button_y, 28, 22))
+
+        viewport_heights = self._section_viewport_heights(panel_height)
+        transcription_height = viewport_heights[0]
+        translation_height = viewport_heights[1] if self._show_translation and len(viewport_heights) > 1 else 0.0
+        content_width = self.WIDTH - 2 * self.PADDING
+        document_width = content_width - self.TEXT_INSET
+
+        transcription_y = button_y - self.LABEL_TO_TEXT_GAP - transcription_height
+        if self._transcription_scroll:
+            self._transcription_scroll.setFrame_(NSMakeRect(self.PADDING, transcription_y, content_width, transcription_height))
+        self._set_text_view_document_height(
+            self._transcription_text,
+            self._measured_text_height(self._transcription_text, self._latest_transcription, document_width),
+        )
+
+        translation_label_y = transcription_y - self.SECTION_SPACING - self.LABEL_HEIGHT
+        translation_text_y = translation_label_y - self.LABEL_TO_TEXT_GAP - translation_height
+        if self._translation_label:
+            self._translation_label.setFrame_(NSMakeRect(self.PADDING, translation_label_y, content_width, self.LABEL_HEIGHT))
+            self._translation_label.setHidden_(not self._show_translation)
+        if self._translation_scroll:
+            self._translation_scroll.setFrame_(NSMakeRect(self.PADDING, translation_text_y, content_width, translation_height))
+            self._translation_scroll.setHidden_(not self._show_translation)
+        self._set_text_view_document_height(
+            self._translation_text,
+            self._measured_text_height(self._translation_text, self._latest_translation, document_width),
+        )
+
+    def _resize_panel_to_fit_content(self):
+        """Resize the panel to fit current content up to the per-screen maximum."""
+        if not self._window:
+            return
+
+        screen = self._screen_for_frontmost_window()
+        frame = self._window_frame_for_screen(screen)
+        if frame is None:
+            return
+        self._window.setFrame_display_(frame, False)
+        self._layout_content(frame.size.height)
 
     def _update_window_frame(self):
         """Move the panel to the active screen while keeping it visible."""
@@ -296,9 +474,18 @@ class StreamingPanel:
         self._close_button.setAction_("closePanel:")
         content.addSubview_(self._close_button)
 
+        self._copy_button = NSButton.alloc().initWithFrame_(
+            NSMakeRect(self.WIDTH - self.PADDING - 112, self.HEIGHT - self.PADDING - self.HEADER_HEIGHT, 76, 26)
+        )
+        self._copy_button.setTitle_("Copy")
+        self._copy_button.setBezelStyle_(1)
+        self._copy_button.setTarget_(self)
+        self._copy_button.setAction_("copyTranscription:")
+        content.addSubview_(self._copy_button)
+
     def _create_transcription_section(self, content):
         """Create the transcription display section."""
-        y_offset = self.HEIGHT - self.PADDING - 24
+        y_offset = self.HEIGHT - self.PADDING - self.HEADER_HEIGHT
 
         # Transcription label
         self._transcription_label = NSTextField.alloc().initWithFrame_(
@@ -317,7 +504,7 @@ class StreamingPanel:
 
         # Transcription text area (scrollable)
         text_height = 90
-        y_offset -= text_height + 4
+        y_offset -= text_height + self.LABEL_TO_TEXT_GAP
 
         scroll_view = NSScrollView.alloc().initWithFrame_(
             NSMakeRect(self.PADDING, y_offset, self.WIDTH - 2 * self.PADDING, text_height)
@@ -339,6 +526,7 @@ class StreamingPanel:
 
         scroll_view.setDocumentView_(self._transcription_text)
         content.addSubview_(scroll_view)
+        self._transcription_scroll = scroll_view
 
     def _create_translation_section(self, content):
         """Create the translation display section."""
@@ -422,6 +610,7 @@ class StreamingPanel:
         def _update():
             if self._transcription_text:
                 self._transcription_text.setString_(text)
+                self._resize_panel_to_fit_content()
                 # Only auto-scroll if user doesn't have text selected
                 if not self._has_text_selection(self._transcription_text):
                     self._transcription_text.scrollRangeToVisible_(
@@ -450,6 +639,7 @@ class StreamingPanel:
 
     def update_translation(self, text: str):
         """Update the translation text with throttling."""
+        self._latest_translation = text
         if not HAS_APPKIT or not self._enabled:
             logger.info(f"Translation length: {len(text)} chars")
             return
@@ -466,6 +656,7 @@ class StreamingPanel:
         def _update():
             if self._translation_text:
                 self._translation_text.setString_(text)
+                self._resize_panel_to_fit_content()
                 # Only auto-scroll if user doesn't have text selected
                 if not self._has_text_selection(self._translation_text):
                     self._translation_text.scrollRangeToVisible_(
@@ -494,6 +685,8 @@ class StreamingPanel:
             if pending_transl and self._translation_text:
                 self._translation_text.setString_(pending_transl)
                 self._translation_text.scrollRangeToVisible_((len(pending_transl), 0))
+            if pending_trans or pending_transl:
+                self._resize_panel_to_fit_content()
 
         if pending_trans or pending_transl:
             try:
@@ -563,6 +756,7 @@ class StreamingPanel:
         self._pending_transcription = None
         self._pending_translation = None
         self._latest_transcription = ""
+        self._latest_translation = ""
 
         def _update():
             self._ensure_window()
@@ -574,6 +768,7 @@ class StreamingPanel:
                 self._transcription_text.setString_("")
             if self._translation_text:
                 self._translation_text.setString_("")
+            self._reset_copy_button_title()
 
             # Reset label colors
             if self._transcription_label:
@@ -586,12 +781,7 @@ class StreamingPanel:
                 self._translation_label.setStringValue_("Translation")
 
             # Show/hide translation section
-            if self._translation_label:
-                self._translation_label.setHidden_(not self._show_translation)
-            if hasattr(self, '_translation_scroll'):
-                self._translation_scroll.setHidden_(not self._show_translation)
-
-            self._update_window_frame()
+            self._resize_panel_to_fit_content()
             self._window.setDismissOnResign_(True)
             self._window.makeKeyAndOrderFront_(None)
 
@@ -609,6 +799,41 @@ class StreamingPanel:
         """Objective-C action for the close button."""
         self._handle_manual_dismiss()
 
+    def _reset_copy_button_title(self):
+        """Reset the copy button title to its default label."""
+        if self._copy_button:
+            self._copy_button.setTitle_("Copy")
+
+    def _show_copy_feedback(self):
+        """Show a brief copy confirmation on the button."""
+        if self._copy_button:
+            self._copy_button.setTitle_("Copied!")
+
+        with self._lock:
+            if self._copy_feedback_timer:
+                self._copy_feedback_timer.cancel()
+            self._copy_feedback_timer = threading.Timer(self.COPY_FEEDBACK_DURATION, self._restore_copy_button)
+            self._copy_feedback_timer.start()
+
+    def _restore_copy_button(self):
+        """Restore the copy button title on the main thread."""
+        with self._lock:
+            self._copy_feedback_timer = None
+
+        if not HAS_APPKIT:
+            return
+
+        try:
+            AppHelper.callAfter(self._reset_copy_button_title)
+        except Exception:
+            pass
+
+    def copyTranscription_(self, _sender):
+        """Objective-C action for copying the current transcription."""
+        pyperclip.copy(self._latest_transcription)
+        if HAS_APPKIT and self._enabled:
+            self._show_copy_feedback()
+
     def hide(self):
         """Hide the streaming panel."""
         with self._lock:
@@ -616,11 +841,15 @@ class StreamingPanel:
             if self._dismiss_timer:
                 self._dismiss_timer.cancel()
                 self._dismiss_timer = None
+            if self._copy_feedback_timer:
+                self._copy_feedback_timer.cancel()
+                self._copy_feedback_timer = None
 
         if not HAS_APPKIT:
             return
 
         def _hide():
+            self._reset_copy_button_title()
             if self._window:
                 if hasattr(self._window, "setDismissOnResign_"):
                     self._window.setDismissOnResign_(False)

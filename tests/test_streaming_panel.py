@@ -156,3 +156,66 @@ def test_window_frame_is_clamped_to_visible_screen(monkeypatch):
     assert frame.origin.y == 20
     assert frame.size.width == 120
     assert frame.size.height == 30
+
+
+def test_target_panel_height_grows_with_text_and_respects_screen_cap():
+    panel = StreamingPanel()
+    panel._latest_transcription = "word " * 800
+    screen = _FakeScreen(_rect(0, 0, 1440, 1000))
+
+    target_height = panel._target_panel_height_for_screen(screen)
+
+    assert target_height == 600
+
+
+def test_target_panel_height_stays_at_fixed_minimum_for_short_text():
+    panel = StreamingPanel()
+    panel._latest_transcription = "short text"
+    screen = _FakeScreen(_rect(0, 0, 1440, 1200))
+
+    assert panel._target_panel_height_for_screen(screen) == panel.HEIGHT
+
+
+def test_estimated_text_height_accounts_for_wrapping():
+    panel = StreamingPanel()
+
+    short_height = panel._estimated_text_height("hello world", 300)
+    wrapped_height = panel._estimated_text_height("x" * 400, 120)
+
+    assert short_height == panel.MIN_TEXT_HEIGHT
+    assert wrapped_height > short_height
+    assert wrapped_height >= 5 * panel.MIN_TEXT_HEIGHT
+
+
+def test_copy_button_copies_latest_transcription_and_shows_feedback(monkeypatch):
+    monkeypatch.setattr(streaming_panel_module, "HAS_APPKIT", True)
+    copied = {}
+
+    panel = StreamingPanel()
+    panel._latest_transcription = "final transcript"
+    panel._enabled = True
+    panel._show_copy_feedback = MagicMock()
+    monkeypatch.setattr(streaming_panel_module.pyperclip, "copy", lambda text: copied.setdefault("text", text))
+
+    panel.copyTranscription_(None)
+
+    assert copied["text"] == "final transcript"
+    panel._show_copy_feedback.assert_called_once_with()
+
+
+def test_restore_copy_button_resets_button_title(monkeypatch):
+    monkeypatch.setattr(streaming_panel_module, "HAS_APPKIT", True)
+    monkeypatch.setattr(
+        streaming_panel_module,
+        "AppHelper",
+        SimpleNamespace(callAfter=lambda fn: fn()),
+        raising=False,
+    )
+
+    button = MagicMock()
+    panel = StreamingPanel()
+    panel._copy_button = button
+
+    panel._restore_copy_button()
+
+    button.setTitle_.assert_called_once_with("Copy")
