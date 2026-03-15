@@ -6,10 +6,12 @@ A multi-step wizard using PyObjC/AppKit that guides users through:
 2. Transcription Mode - Choose between Cloud or Local transcription
 3. Cloud Setup (if cloud selected) - Choose provider, enter API key
 4. Local Setup (if local selected) - Download model
-5. Translation Setup (Optional) - Configure translation provider
-6. Complete - Summary and usage tips
+5. Permissions - Check microphone and accessibility access
+6. Translation Setup (Optional) - Configure translation provider
+7. Complete - Summary and usage tips
 """
 
+import subprocess
 import threading
 import platform
 from typing import Callable, Optional
@@ -42,14 +44,30 @@ try:
 except ImportError:
     HAS_APPKIT = False
 
+try:
+    from AVFoundation import AVCaptureDevice, AVMediaTypeAudio
+    HAS_AVFOUNDATION = True
+except ImportError:
+    AVCaptureDevice = None
+    AVMediaTypeAudio = "soun"
+    HAS_AVFOUNDATION = False
+
+try:
+    from Quartz import AXIsProcessTrusted
+    HAS_ACCESSIBILITY_API = True
+except ImportError:
+    AXIsProcessTrusted = None
+    HAS_ACCESSIBILITY_API = False
+
 
 class WizardStep(Enum):
     WELCOME = 0
     TRANSCRIPTION_MODE = 1
     CLOUD_SETUP = 2
     LOCAL_SETUP = 3
-    TRANSLATION = 4
-    COMPLETE = 5
+    PERMISSIONS = 4
+    TRANSLATION = 5
+    COMPLETE = 6
 
 
 class SetupWizard:
@@ -63,6 +81,11 @@ class SetupWizard:
     WIDTH = 560
     HEIGHT = 480
     PADDING = 24
+    PERMISSION_STATUS_GRANTED = "granted"
+    PERMISSION_STATUS_DENIED = "denied"
+    PERMISSION_STATUS_NOT_DETERMINED = "not-determined"
+    MICROPHONE_SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+    ACCESSIBILITY_SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 
     def __init__(
         self,
@@ -130,6 +153,14 @@ class SetupWizard:
         self._api_key_validation_timer = None
         self._api_key_validation_request_id = 0
         self._api_key_validation_lock = threading.Lock()
+        self._permission_status_labels = {}
+        self._permission_detail_labels = {}
+        self._permission_open_buttons = {}
+        self._permission_settings_opened = set()
+        self._permission_statuses = {
+            "microphone": self._default_permission_state("microphone"),
+            "accessibility": self._default_permission_state("accessibility"),
+        }
 
         # Prefill from current config when rerunning setup.
         try:
@@ -193,6 +224,8 @@ class SetupWizard:
         )
 
         self._window.setTitle_("WhisperHUD Setup")
+        if hasattr(self._window, "setDelegate_"):
+            self._window.setDelegate_(self)
         self._content_view = self._window.contentView()
         self._refresh_appearance()
 
@@ -229,6 +262,8 @@ class SetupWizard:
             self._show_cloud_setup()
         elif step == WizardStep.LOCAL_SETUP:
             self._show_local_setup()
+        elif step == WizardStep.PERMISSIONS:
+            self._show_permissions()
         elif step == WizardStep.TRANSLATION:
             self._show_translation()
         elif step == WizardStep.COMPLETE:
@@ -576,6 +611,103 @@ class SetupWizard:
             next_title="Next",
             next_action=lambda: self._continue_from_local_setup()
         )
+
+    def _show_permissions(self):
+        """Show permission guidance and current status."""
+        self._refresh_permission_statuses()
+
+        y = self.HEIGHT - self.PADDING
+
+        y -= 36
+        title = self._create_label(
+            "Permissions",
+            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 32),
+            font_size=22,
+            bold=True
+        )
+        self._content_view.addSubview_(title)
+
+        y -= 44
+        desc = self._create_label(
+            "WhisperHUD needs Microphone access to record audio. Accessibility is optional but recommended for global hotkeys and paste automation.",
+            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 36),
+            font_size=13,
+            align=NSLeftTextAlignment
+        )
+        self._content_view.addSubview_(desc)
+
+        y -= 82
+        self._add_permission_row("microphone", "Microphone", y)
+        y -= 96
+        self._add_permission_row("accessibility", "Accessibility", y)
+
+        y -= 26
+        warning_lines = []
+        if self._permission_statuses["microphone"]["status"] == self.PERMISSION_STATUS_DENIED:
+            warning_lines.append("Microphone access is denied. Grant it before you can finish setup.")
+        if self._permission_statuses["accessibility"]["status"] == self.PERMISSION_STATUS_DENIED:
+            warning_lines.append("Accessibility is denied. You can finish setup, but hotkeys and auto-paste will not work yet.")
+        if not warning_lines:
+            warning_lines.append("After changing permissions in System Settings, switch back to WhisperHUD and this page will refresh automatically.")
+
+        warning = self._create_label(
+            "\n".join(warning_lines),
+            NSMakeRect(self.PADDING, y, self.WIDTH - 2 * self.PADDING, 54),
+            font_size=12,
+            color=self._accent_text_color(),
+            align=NSLeftTextAlignment
+        )
+        self._content_view.addSubview_(warning)
+
+        self._add_navigation_buttons(
+            back_title="Back",
+            back_action=self._go_back_from_permissions,
+            extra_title="Refresh",
+            extra_action=self._refresh_permissions_step,
+            next_title="Next",
+            next_action=lambda: self._show_step(WizardStep.TRANSLATION),
+            next_enabled=self._can_continue_permissions_step()
+        )
+
+    def _add_permission_row(self, permission_name: str, title_text: str, y: float):
+        """Render a single permission row."""
+        status_info = self._permission_statuses[permission_name]
+        row_title = self._create_label(
+            title_text,
+            NSMakeRect(self.PADDING, y, 180, 22),
+            font_size=15,
+            bold=True
+        )
+        self._content_view.addSubview_(row_title)
+
+        status_label = self._create_label(
+            "",
+            NSMakeRect(self.PADDING, y - 26, 180, 22),
+            font_size=13,
+            bold=True
+        )
+        self._content_view.addSubview_(status_label)
+        self._permission_status_labels[permission_name] = status_label
+
+        detail_label = self._create_label(
+            status_info["message"],
+            NSMakeRect(self.PADDING + 190, y - 4, 220, 52),
+            font_size=12,
+            color=self._secondary_text_color(),
+            align=NSLeftTextAlignment
+        )
+        self._content_view.addSubview_(detail_label)
+        self._permission_detail_labels[permission_name] = detail_label
+
+        button = self._create_button(
+            "Open System Settings",
+            NSMakeRect(self.WIDTH - self.PADDING - 150, y - 2, 150, 32),
+            action=lambda perm=permission_name: self._open_permission_settings(perm)
+        )
+        self._content_view.addSubview_(button)
+        self._permission_open_buttons[permission_name] = button
+
+        self._update_permission_row(permission_name)
 
     def _show_translation(self):
         """Show translation setup step with full first-run configuration."""
@@ -1006,9 +1138,155 @@ class SetupWizard:
             WizardStep.WELCOME,
             WizardStep.TRANSCRIPTION_MODE,
             setup_step,
+            WizardStep.PERMISSIONS,
             WizardStep.TRANSLATION,
             WizardStep.COMPLETE,
         ]
+
+    def _default_permission_state(self, permission_name: str) -> dict[str, str]:
+        """Return a placeholder permission state."""
+        labels = {
+            "microphone": "Check microphone permission before recording your first transcript.",
+            "accessibility": "Accessibility enables global hotkeys and paste automation.",
+        }
+        return {
+            "status": self.PERMISSION_STATUS_NOT_DETERMINED,
+            "message": labels.get(permission_name, ""),
+        }
+
+    def _permission_status_title(self, status: str) -> str:
+        """Return display text for a permission status."""
+        return {
+            self.PERMISSION_STATUS_GRANTED: "Granted",
+            self.PERMISSION_STATUS_DENIED: "Denied",
+            self.PERMISSION_STATUS_NOT_DETERMINED: "Not Determined",
+        }.get(status, "Unknown")
+
+    def _permission_status_color(self, status: str):
+        """Return a color for a permission status label."""
+        if not HAS_APPKIT:
+            return None
+        if status == self.PERMISSION_STATUS_GRANTED:
+            return NSColor.colorWithCalibratedRed_green_blue_alpha_(0.35, 0.85, 0.45, 1.0)
+        if status == self.PERMISSION_STATUS_DENIED:
+            return NSColor.colorWithCalibratedRed_green_blue_alpha_(0.95, 0.35, 0.35, 1.0)
+        return NSColor.colorWithCalibratedRed_green_blue_alpha_(0.95, 0.75, 0.3, 1.0)
+
+    def _update_permission_row(self, permission_name: str):
+        """Refresh the rendered status for a permission row."""
+        status_info = self._permission_statuses.get(permission_name, self._default_permission_state(permission_name))
+        status_label = self._permission_status_labels.get(permission_name)
+        detail_label = self._permission_detail_labels.get(permission_name)
+        color = self._permission_status_color(status_info["status"])
+
+        if status_label:
+            status_label.setStringValue_(self._permission_status_title(status_info["status"]))
+            if color is not None:
+                status_label.setTextColor_(color)
+
+        if detail_label:
+            detail_label.setStringValue_(status_info["message"])
+            if color is not None and status_info["status"] == self.PERMISSION_STATUS_DENIED:
+                detail_label.setTextColor_(color)
+
+    def _refresh_permission_statuses(self):
+        """Re-check current macOS permission states."""
+        self._permission_statuses = {
+            "microphone": self._get_microphone_permission_state(),
+            "accessibility": self._get_accessibility_permission_state(),
+        }
+
+    def _refresh_permissions_step(self):
+        """Refresh cached permission state and the current UI."""
+        self._refresh_permission_statuses()
+        if self._current_step == WizardStep.PERMISSIONS:
+            self._show_step(WizardStep.PERMISSIONS)
+
+    def _get_microphone_permission_state(self) -> dict[str, str]:
+        """Return the microphone permission state."""
+        if not HAS_AVFOUNDATION or AVCaptureDevice is None:
+            return {
+                "status": self.PERMISSION_STATUS_NOT_DETERMINED,
+                "message": "Microphone status is unavailable in this environment. macOS will prompt when recording starts.",
+            }
+
+        try:
+            status = AVCaptureDevice.authorizationStatusForMediaType_(AVMediaTypeAudio)
+        except Exception:
+            status = None
+
+        if status == 3:
+            return {
+                "status": self.PERMISSION_STATUS_GRANTED,
+                "message": "Ready to record audio.",
+            }
+        if status in {1, 2}:
+            return {
+                "status": self.PERMISSION_STATUS_DENIED,
+                "message": "Recording is blocked until you allow WhisperHUD in Privacy & Security > Microphone.",
+            }
+        return {
+            "status": self.PERMISSION_STATUS_NOT_DETERMINED,
+            "message": "macOS will ask for microphone access the first time WhisperHUD records.",
+        }
+
+    def _get_accessibility_permission_state(self) -> dict[str, str]:
+        """Return the accessibility permission state."""
+        trusted = False
+        if HAS_ACCESSIBILITY_API and AXIsProcessTrusted is not None:
+            try:
+                trusted = bool(AXIsProcessTrusted())
+            except Exception:
+                trusted = False
+
+        if trusted:
+            return {
+                "status": self.PERMISSION_STATUS_GRANTED,
+                "message": "Global hotkeys and paste automation are ready.",
+            }
+
+        status = self.PERMISSION_STATUS_DENIED if "accessibility" in self._permission_settings_opened else self.PERMISSION_STATUS_NOT_DETERMINED
+        message = (
+            "Hotkeys and auto-paste stay disabled until Accessibility access is granted."
+            if status == self.PERMISSION_STATUS_DENIED
+            else "Recommended for global hotkeys and paste automation. You can grant it later."
+        )
+        return {
+            "status": status,
+            "message": message,
+        }
+
+    def _open_permission_settings(self, permission_name: str) -> bool:
+        """Open the relevant macOS System Settings pane for a permission."""
+        settings_url = {
+            "microphone": self.MICROPHONE_SETTINGS_URL,
+            "accessibility": self.ACCESSIBILITY_SETTINGS_URL,
+        }.get(permission_name)
+        if not settings_url:
+            return False
+
+        self._permission_settings_opened.add(permission_name)
+        try:
+            result = subprocess.run(
+                ["open", settings_url],
+                capture_output=True,
+                timeout=5
+            )
+            return result.returncode == 0
+        except Exception as exc:
+            logger.error(f"Failed to open {permission_name} settings: {exc}")
+            return False
+
+    def _can_continue_permissions_step(self) -> bool:
+        """Return whether the permissions step can continue."""
+        microphone_status = self._permission_statuses.get("microphone", {}).get("status")
+        return microphone_status != self.PERMISSION_STATUS_DENIED
+
+    def windowDidBecomeKey_(self, _notification):
+        """Refresh permissions when the user returns from System Settings."""
+        self._refresh_permission_statuses()
+        if self._current_step == WizardStep.PERMISSIONS:
+            self._show_step(WizardStep.PERMISSIONS)
 
     def _get_step_progress(self, step: WizardStep) -> tuple[int, int]:
         """Return the 1-based step position and total visible steps."""
@@ -1793,13 +2071,13 @@ class SetupWizard:
             except Exception:
                 pass
 
-        # Continue to translation step
-        self._show_step(WizardStep.TRANSLATION)
+        # Continue to the permissions step.
+        self._show_step(WizardStep.PERMISSIONS)
 
     def _continue_from_local_setup(self):
-        """Continue from local setup to translation."""
-        # Just continue - model download will happen when user first uses it
-        self._show_step(WizardStep.TRANSLATION)
+        """Continue from local setup to permissions."""
+        # Just continue - model download will happen when user first uses it.
+        self._show_step(WizardStep.PERMISSIONS)
 
     def _skip_translation_setup(self):
         """Skip translation setup and continue to completion."""
@@ -1807,7 +2085,11 @@ class SetupWizard:
         self._show_step(WizardStep.COMPLETE)
 
     def _go_back_from_translation(self):
-        """Go back from translation to appropriate setup step."""
+        """Go back from translation to the permissions step."""
+        self._show_step(WizardStep.PERMISSIONS)
+
+    def _go_back_from_permissions(self):
+        """Go back from the permissions step to the selected setup step."""
         if self._transcription_mode == "cloud":
             self._show_step(WizardStep.CLOUD_SETUP)
         else:
@@ -1896,6 +2178,11 @@ class SetupWizard:
     def _finish_wizard(self):
         """Finish wizard and save settings."""
         from .config import Config
+
+        self._refresh_permission_statuses()
+        if not self._can_continue_permissions_step():
+            self._show_error("Microphone permission is required before finishing setup")
+            return
 
         config = Config.load()
         config.default_provider = self._selected_provider

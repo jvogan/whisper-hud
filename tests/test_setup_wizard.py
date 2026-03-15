@@ -83,6 +83,7 @@ def test_get_step_sequence_defaults_to_local_path():
         WizardStep.WELCOME,
         WizardStep.TRANSCRIPTION_MODE,
         WizardStep.LOCAL_SETUP,
+        WizardStep.PERMISSIONS,
         WizardStep.TRANSLATION,
         WizardStep.COMPLETE,
     ]
@@ -92,9 +93,10 @@ def test_get_step_progress_tracks_cloud_flow_when_navigating_back():
     wizard = SetupWizard()
     wizard._transcription_mode = "cloud"
 
-    assert wizard._get_step_progress(WizardStep.CLOUD_SETUP) == (3, 5)
-    assert wizard._get_step_progress(WizardStep.TRANSLATION) == (4, 5)
-    assert wizard._get_step_progress(WizardStep.COMPLETE) == (5, 5)
+    assert wizard._get_step_progress(WizardStep.CLOUD_SETUP) == (3, 6)
+    assert wizard._get_step_progress(WizardStep.PERMISSIONS) == (4, 6)
+    assert wizard._get_step_progress(WizardStep.TRANSLATION) == (5, 6)
+    assert wizard._get_step_progress(WizardStep.COMPLETE) == (6, 6)
 
 
 def test_add_step_progress_renders_label_and_dots(monkeypatch):
@@ -115,7 +117,7 @@ def test_add_step_progress_renders_label_and_dots(monkeypatch):
 
     wizard._add_step_progress(WizardStep.TRANSLATION)
 
-    assert [label.text for label in labels] == ["Step 4 of 5", "● ● ● ● ○"]
+    assert [label.text for label in labels] == ["Step 5 of 6", "● ● ● ● ● ○"]
     assert wizard._content_view.subviews == labels
 
 
@@ -418,4 +420,145 @@ class TestSetupWizardApiKeyValidation:
                     wizard._validate_and_continue_cloud()
 
         mock_set.assert_called_once_with("openai", "not-validated")
-        mock_show_step.assert_called_once_with(WizardStep.TRANSLATION)
+        mock_show_step.assert_called_once_with(WizardStep.PERMISSIONS)
+
+
+def test_permissions_step_blocks_when_microphone_denied():
+    wizard = SetupWizard()
+    wizard._permission_statuses = {
+        "microphone": {
+            "status": wizard.PERMISSION_STATUS_DENIED,
+            "message": "blocked",
+        },
+        "accessibility": {
+            "status": wizard.PERMISSION_STATUS_NOT_DETERMINED,
+            "message": "later",
+        },
+    }
+
+    assert wizard._can_continue_permissions_step() is False
+
+
+def test_permissions_step_allows_accessibility_denial():
+    wizard = SetupWizard()
+    wizard._permission_statuses = {
+        "microphone": {
+            "status": wizard.PERMISSION_STATUS_GRANTED,
+            "message": "ready",
+        },
+        "accessibility": {
+            "status": wizard.PERMISSION_STATUS_DENIED,
+            "message": "blocked",
+        },
+    }
+
+    assert wizard._can_continue_permissions_step() is True
+
+
+def test_local_setup_advances_to_permissions():
+    wizard = SetupWizard()
+    shown_steps = []
+    wizard._show_step = shown_steps.append
+
+    wizard._continue_from_local_setup()
+
+    assert shown_steps == [WizardStep.PERMISSIONS]
+
+
+def test_go_back_from_translation_returns_to_permissions():
+    wizard = SetupWizard()
+    shown_steps = []
+    wizard._show_step = shown_steps.append
+
+    wizard._go_back_from_translation()
+
+    assert shown_steps == [WizardStep.PERMISSIONS]
+
+
+def test_open_permission_settings_uses_expected_deep_link(monkeypatch):
+    wizard = SetupWizard()
+    calls = []
+
+    def fake_run(cmd, capture_output, timeout):
+        calls.append((cmd, capture_output, timeout))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(setup_wizard.subprocess, "run", fake_run)
+
+    assert wizard._open_permission_settings("microphone") is True
+    assert wizard._open_permission_settings("accessibility") is True
+    assert calls == [
+        (["open", wizard.MICROPHONE_SETTINGS_URL], True, 5),
+        (["open", wizard.ACCESSIBILITY_SETTINGS_URL], True, 5),
+    ]
+
+
+def test_accessibility_permission_state_defaults_to_not_determined(monkeypatch):
+    wizard = SetupWizard()
+
+    monkeypatch.setattr(setup_wizard, "HAS_ACCESSIBILITY_API", True, raising=False)
+    monkeypatch.setattr(setup_wizard, "AXIsProcessTrusted", lambda: False, raising=False)
+
+    state = wizard._get_accessibility_permission_state()
+
+    assert state["status"] == wizard.PERMISSION_STATUS_NOT_DETERMINED
+
+
+def test_accessibility_permission_state_changes_to_denied_after_settings_opened(monkeypatch):
+    wizard = SetupWizard()
+    wizard._permission_settings_opened.add("accessibility")
+
+    monkeypatch.setattr(setup_wizard, "HAS_ACCESSIBILITY_API", True, raising=False)
+    monkeypatch.setattr(setup_wizard, "AXIsProcessTrusted", lambda: False, raising=False)
+
+    state = wizard._get_accessibility_permission_state()
+
+    assert state["status"] == wizard.PERMISSION_STATUS_DENIED
+
+
+def test_microphone_permission_state_maps_avfoundation_status(monkeypatch):
+    wizard = SetupWizard()
+    fake_capture_device = SimpleNamespace(authorizationStatusForMediaType_=lambda _media: 2)
+
+    monkeypatch.setattr(setup_wizard, "HAS_AVFOUNDATION", True, raising=False)
+    monkeypatch.setattr(setup_wizard, "AVCaptureDevice", fake_capture_device, raising=False)
+    monkeypatch.setattr(setup_wizard, "AVMediaTypeAudio", "audio", raising=False)
+
+    state = wizard._get_microphone_permission_state()
+
+    assert state["status"] == wizard.PERMISSION_STATUS_DENIED
+
+
+def test_window_did_become_key_refreshes_permissions_step(monkeypatch):
+    wizard = SetupWizard()
+    wizard._current_step = WizardStep.PERMISSIONS
+    calls = []
+
+    monkeypatch.setattr(wizard, "_refresh_permission_statuses", lambda: calls.append("refresh"))
+    monkeypatch.setattr(wizard, "_show_step", lambda step: calls.append(step))
+
+    wizard.windowDidBecomeKey_(None)
+
+    assert calls == ["refresh", WizardStep.PERMISSIONS]
+
+
+def test_finish_wizard_stops_when_microphone_denied(monkeypatch):
+    wizard = SetupWizard()
+    wizard._permission_statuses = {
+        "microphone": {
+            "status": wizard.PERMISSION_STATUS_DENIED,
+            "message": "blocked",
+        },
+        "accessibility": {
+            "status": wizard.PERMISSION_STATUS_GRANTED,
+            "message": "ready",
+        },
+    }
+    errors = []
+
+    monkeypatch.setattr(wizard, "_refresh_permission_statuses", lambda: None)
+    monkeypatch.setattr(wizard, "_show_error", errors.append)
+
+    wizard._finish_wizard()
+
+    assert errors == ["Microphone permission is required before finishing setup"]
