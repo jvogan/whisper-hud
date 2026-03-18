@@ -336,7 +336,11 @@ def test_reload_config_invalidates_cache_and_updates_provider_models(mock_config
 
 
 def test_transcribe_falls_back_to_next_configured_provider(mock_config, monkeypatch, sample_audio_bytes):
-    """An unavailable primary provider should dispatch transcription to the next configured provider."""
+    """An unavailable cloud primary provider falls back using local-first order, then cloud.
+
+    openai (cloud, unconfigured) → tries apple, whisper_local, parakeet (all unconfigured)
+    → falls back to gemini (cloud, configured).
+    """
     provider_classes = {
         "openai": PrimaryProvider,
         "gemini": SecondaryProvider,

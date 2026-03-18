@@ -332,8 +332,8 @@ def test_needs_setup_cloud_provider_click_opens_provider_setup(monkeypatch):
     app._open_provider_setup.assert_called_once_with("gemini")
 
 
-def test_set_openai_key_prefills_existing_key(monkeypatch):
-    """The provider setup dialog should be prefilled with any stored key."""
+def test_set_openai_key_does_not_prefill_existing_key(monkeypatch):
+    """The provider setup dialog must NOT pre-fill the existing key (prevents on-screen exposure)."""
     app = _build_recording_app()
     app._is_passphrase_mode = MagicMock(return_value=False)
     app._applescript_input_dialog = MagicMock(return_value="")
@@ -344,7 +344,7 @@ def test_set_openai_key_prefills_existing_key(monkeypatch):
     app._applescript_input_dialog.assert_called_once_with(
         "Enter OpenAI API Key",
         "Enter your OpenAI API key.\n\nGet your key at: platform.openai.com/api-keys\n\nA key is already saved. Enter a new key to replace it.",
-        default="sk-existing",
+        default="",
     )
 
 

@@ -285,8 +285,15 @@ class TranscriptionManager:
 
     def _find_fallback_provider(self, current_provider: str) -> Optional[TranscriptionProvider]:
         """Find a fallback provider if the current one isn't configured."""
-        # Priority: other cloud providers first, then local
-        fallback_order = ["gemini", "openai", "apple", "whisper_local", "parakeet"]
+        local_providers = {"apple", "whisper_local", "parakeet"}
+
+        # If user selected a local provider, only fall back to other local providers
+        # to respect their privacy choice — never silently route to a cloud vendor.
+        if current_provider in local_providers:
+            fallback_order = ["apple", "whisper_local", "parakeet"]
+        else:
+            # Cloud provider can fall back to any; prefer local first
+            fallback_order = ["apple", "whisper_local", "parakeet", "gemini", "openai"]
 
         for pid in fallback_order:
             if pid == current_provider:

@@ -98,7 +98,7 @@ def _keychain_set_api_key(provider: str, api_key: str) -> bool:
         keyring.set_password(SERVICE_NAME, _account_name(provider), api_key)
         return True
     except Exception as e:
-        logger.error(f"Failed to store API key in keychain: {e}")
+        logger.error(f"Failed to store API key in keychain: {type(e).__name__}")
         return False
 
 
@@ -109,7 +109,7 @@ def _keychain_delete_api_key(provider: str) -> bool:
     except keyring.errors.PasswordDeleteError:
         return True
     except Exception as e:
-        logger.error(f"Failed to delete API key from keychain: {e}")
+        logger.error(f"Failed to delete API key from keychain: {type(e).__name__}")
         return False
 
 
@@ -194,7 +194,7 @@ def _write_passphrase_store(keys: dict[str, str], passphrase: str, rotate_salt: 
         salt_b64 = None
 
     if not salt_b64:
-        salt_b64 = base64.b64encode(os.urandom(16)).decode("utf-8")
+        salt_b64 = base64.b64encode(os.urandom(32)).decode("utf-8")
 
     salt = base64.b64decode(salt_b64.encode("utf-8"))
     ciphertext = _encrypt_keys(keys, passphrase, salt)
@@ -231,7 +231,7 @@ def _write_passphrase_store(keys: dict[str, str], passphrase: str, rotate_salt: 
         _ensure_credentials_file_permissions(path)
         return True
     except Exception as e:
-        logger.error(f"Failed to write encrypted credential store: {e}")
+        logger.error(f"Failed to write encrypted credential store: {type(e).__name__}")
         if temp_path and temp_path.exists():
             try:
                 temp_path.unlink()
@@ -611,7 +611,7 @@ def _validate_openai_key(api_key: str) -> tuple[bool, str]:
             return False, "API key lacks permissions"
         elif response.status_code == 429:
             # Rate limited but key is valid
-            return True, ""
+            return True, "Key accepted (rate-limited, could not fully verify)"
         else:
             return False, f"API error: {response.status_code}"
     except ImportError:
@@ -643,7 +643,7 @@ def _validate_gemini_key(api_key: str) -> tuple[bool, str]:
             return False, "API key not authorized"
         elif response.status_code == 429:
             # Rate limited but key is valid
-            return True, ""
+            return True, "Key accepted (rate-limited, could not fully verify)"
         else:
             return False, f"API error: {response.status_code}"
     except ImportError:
@@ -677,7 +677,7 @@ def _validate_anthropic_key(api_key: str) -> tuple[bool, str]:
             return False, "API key lacks permissions"
         elif response.status_code == 429:
             # Rate limited but key is valid
-            return True, ""
+            return True, "Key accepted (rate-limited, could not fully verify)"
         else:
             return False, f"API error: {response.status_code}"
     except ImportError:

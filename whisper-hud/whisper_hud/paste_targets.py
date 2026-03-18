@@ -9,6 +9,7 @@ even when that app isn't focused. Supports:
 - Terminal.app
 """
 
+import re
 import subprocess
 import time
 from typing import Optional, List
@@ -300,6 +301,10 @@ class PasteTargetManager:
         valid_sessions = self.get_tmux_sessions()
         if session not in valid_sessions:
             logger.warning(f"tmux session not found in running sessions")
+            return False
+
+        if not re.match(r'^[a-zA-Z0-9_\-\.]+$', session):
+            logger.warning("tmux session name contains unsafe characters, rejecting")
             return False
 
         try:

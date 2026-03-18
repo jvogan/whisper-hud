@@ -22,7 +22,7 @@ from .logging_config import get_logger
 logger = get_logger("encryption")
 
 HISTORY_KEY_FILE = "history_encryption.key"
-SCRYPT_PARAMS = {"n": 2**14, "r": 8, "p": 1, "length": 32}
+SCRYPT_PARAMS = {"n": 2**17, "r": 8, "p": 1, "length": 32}
 _session_history_key: Optional[bytes] = None
 
 
@@ -165,7 +165,7 @@ def unlock_history_encryption(passphrase: str, create_if_missing: bool = True) -
         try:
             from cryptography.fernet import Fernet
 
-            salt = os.urandom(16)
+            salt = os.urandom(32)
             history_key = Fernet.generate_key()
             wrapped_key = _wrap_history_key(passphrase, salt, history_key)
             payload = {
@@ -277,7 +277,7 @@ def rewrap_history_key(current_passphrase: str, new_passphrase: str) -> tuple[bo
         current_salt = base64.b64decode(salt_b64.encode("utf-8"))
         history_key = _unwrap_history_key(current_passphrase, current_salt, wrapped_key)
 
-        new_salt = os.urandom(16)
+        new_salt = os.urandom(32)
         new_wrapped_key = _wrap_history_key(new_passphrase, new_salt, history_key)
         new_payload = {
             "version": 1,
@@ -380,7 +380,7 @@ def secure_delete(filepath: str) -> bool:
         logger.debug(f"Secure delete failed, attempting regular delete: {e}")
         try:
             os.unlink(filepath)
-            return True
+            return False
         except Exception as e2:
             logger.error(f"Failed to delete file {filepath}: {e2}")
             return False
@@ -409,12 +409,14 @@ def cleanup_orphaned_temp_files(prefix: str = "whisper_hud", temp_dir: Optional[
     cleaned = 0
     for filepath in orphaned_files:
         try:
-            # Check if file is old (more than 1 hour)
+            if os.path.islink(filepath):
+                continue
+            # Check if file is old (more than 5 minutes)
             mtime = os.path.getmtime(filepath)
             import time
 
             age_seconds = time.time() - mtime
-            if age_seconds > 3600:  # 1 hour
+            if age_seconds > 300:  # 5 minutes
                 if secure_delete(filepath):
                     cleaned += 1
                     logger.debug(f"Cleaned up orphaned temp file: {filepath}")

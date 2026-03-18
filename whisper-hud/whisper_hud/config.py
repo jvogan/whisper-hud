@@ -7,6 +7,7 @@ API keys are stored separately via the configured credential storage mode (see k
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
@@ -219,8 +220,17 @@ class Config:
         """Save config to disk."""
         try:
             _ensure_config_permissions()
-            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(asdict(self), f, indent=2)
+            fd, tmp_path = tempfile.mkstemp(dir=str(CONFIG_FILE.parent), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(asdict(self), f, indent=2)
+                os.replace(tmp_path, str(CONFIG_FILE))
+            except BaseException:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
             _ensure_config_permissions()
             return True
         except Exception as e:
@@ -382,6 +392,13 @@ class Config:
     def disable_private_mode(self) -> None:
         """Disable private mode."""
         self.private_mode = False
+        self.save()
+
+    def enable_history(self, encrypted: bool = True) -> None:
+        """Enable history with encryption on by default."""
+        self.history_enabled = True
+        if encrypted:
+            self.history_encrypted = True
         self.save()
 
     def enable_history_encryption(self) -> bool:
@@ -615,9 +632,30 @@ class Config:
             export_data["settings"].pop("history", None)
             export_data["settings"].pop("total_transcriptions", None)
             export_data["settings"].pop("total_cost", None)
+            # Remove fields that leak local app/session names and filesystem paths
+            export_data["settings"].pop("paste_target_identifier", None)
+            export_data["settings"].pop("paste_target_recent", None)
+            # Strip custom icon filesystem paths from widget_appearance
+            widget = export_data["settings"].get("widget_appearance", {})
+            custom_icon = widget.get("custom_icon", {})
+            if custom_icon:
+                custom_icon.pop("path", None)
+                icons = custom_icon.get("icons", {})
+                for state in list(icons.keys()):
+                    icons[state] = ""
 
-            with open(filepath, "w") as f:
-                json.dump(export_data, f, indent=2)
+            export_path = Path(filepath)
+            fd, tmp_path = tempfile.mkstemp(dir=str(export_path.parent), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(export_data, f, indent=2)
+                os.replace(tmp_path, filepath)
+            except BaseException:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
             try:
                 os.chmod(filepath, 0o600)
             except Exception:
@@ -653,6 +691,17 @@ class Config:
             settings.pop("history", None)
             settings.pop("total_transcriptions", None)
             settings.pop("total_cost", None)
+            # Drop fields that leak local app/session names and filesystem paths
+            settings.pop("paste_target_identifier", None)
+            settings.pop("paste_target_recent", None)
+            # Strip custom icon filesystem paths from widget_appearance
+            widget = settings.get("widget_appearance", {})
+            custom_icon = widget.get("custom_icon", {})
+            if custom_icon:
+                custom_icon.pop("path", None)
+                icons = custom_icon.get("icons", {})
+                for state in list(icons.keys()):
+                    icons[state] = ""
 
             # Create config from imported settings
             valid_fields = {k: v for k, v in settings.items() if k in cls.__dataclass_fields__}

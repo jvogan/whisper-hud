@@ -2862,7 +2862,7 @@ class WhisperHUDApp(rumps.App):
         key = self._applescript_input_dialog(
             f"Enter {provider_name} API Key",
             message,
-            default=existing_key,
+            default="",
         )
 
         if not key:
@@ -3790,7 +3790,7 @@ class WhisperHUDApp(rumps.App):
             text = item.get("text", "")
             if text:
                 pyperclip.copy(text)
-                self._notify("WhisperHUD", "Copied to Clipboard", text[:50] + "..." if len(text) > 50 else text)
+                self._notify("WhisperHUD", "Copied to Clipboard", "Text copied successfully")
 
     def _clear_history(self, sender):
         """Clear all transcription history."""

@@ -346,12 +346,16 @@ class TranslationManager:
         """Install Ollama via Homebrew."""
         return OllamaTranslateProvider.install_ollama(progress_callback)
 
-    @staticmethod
-    def start_ollama_server() -> tuple[bool, Optional[int]]:
+    def start_ollama_server(self) -> tuple[bool, Optional[int]]:
         """Start the Ollama server in background."""
-        return OllamaTranslateProvider.start_ollama_server()
+        provider = self.get_provider("ollama")
+        if provider is None:
+            return False, None
+        return provider.start_ollama_server()
 
-    @staticmethod
-    def stop_ollama_server() -> bool:
+    def stop_ollama_server(self) -> bool:
         """Stop the Ollama server."""
-        return OllamaTranslateProvider.stop_ollama_server()
+        provider = self.get_provider("ollama")
+        if provider is None:
+            return False
+        return provider.stop_ollama_server()

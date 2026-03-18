@@ -54,7 +54,11 @@ def setup_logging(level: int = logging.INFO, log_file: bool = False, log_dir: Pa
         log_dir.mkdir(parents=True, exist_ok=True)
         _tighten_permissions(log_dir, 0o700)
 
-        file_handler = logging.FileHandler(log_dir / "whisper-hud.log", encoding="utf-8")
+        log_file = log_dir / "whisper-hud.log"
+        if not log_file.exists():
+            fd = os.open(str(log_file), os.O_CREAT | os.O_WRONLY, 0o600)
+            os.close(fd)
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
 
         file_format = logging.Formatter(
@@ -62,7 +66,7 @@ def setup_logging(level: int = logging.INFO, log_file: bool = False, log_dir: Pa
         )
         file_handler.setFormatter(file_format)
         logger.addHandler(file_handler)
-        _tighten_permissions(log_dir / "whisper-hud.log", 0o600)
+        _tighten_permissions(log_file, 0o600)
 
     return logger
 

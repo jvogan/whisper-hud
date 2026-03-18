@@ -2086,7 +2086,7 @@ class SetupWizard:
             self._progress_indicator.startAnimation_(None)
 
         def do_start():
-            success, pid = TranslationManager.start_ollama_server()
+            success, pid = TranslationManager().start_ollama_server()
 
             def update_ui():
                 if self._progress_indicator:

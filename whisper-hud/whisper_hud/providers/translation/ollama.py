@@ -11,6 +11,7 @@ Models (January 2026):
 """
 
 import os
+import signal
 import subprocess
 import requests
 from typing import Optional, Callable
@@ -129,6 +130,7 @@ class OllamaTranslateProvider(TranslationProvider):
             model = "translategemma-4b"
         self.model = model
         self.model_config = self.MODELS[model]
+        self._ollama_process: Optional[subprocess.Popen] = None
 
     def translate(self, text: str, source_lang: str, target_lang: str) -> TranslationResult:
         """
@@ -489,8 +491,7 @@ class OllamaTranslateProvider(TranslationProvider):
                 progress_callback(f"Error: {e}")
             return False
 
-    @staticmethod
-    def start_ollama_server() -> tuple[bool, Optional[int]]:
+    def start_ollama_server(self) -> tuple[bool, Optional[int]]:
         """
         Start the Ollama server in the background.
 
@@ -514,6 +515,9 @@ class OllamaTranslateProvider(TranslationProvider):
                 start_new_session=True,  # Detach from parent process
             )
 
+            # Store the process so we can terminate it precisely later
+            self._ollama_process = process
+
             # Wait a moment for server to start
             import time
 
@@ -533,18 +537,40 @@ class OllamaTranslateProvider(TranslationProvider):
         except Exception:
             return False, None
 
-    @staticmethod
-    def stop_ollama_server() -> bool:
+    def stop_ollama_server(self) -> bool:
         """
-        Stop the Ollama server.
+        Stop the Ollama server process that was started by this instance.
+
+        Only terminates the process if it was started by this application
+        (i.e., self._ollama_process is set). Does not use broad pattern-matching
+        process killing (e.g., pkill -f) that could affect unrelated processes.
 
         Returns:
-            True if successfully stopped
+            True if successfully stopped (or no managed process was running)
         """
-        try:
-            # Use pkill to stop ollama
-            subprocess.run(["pkill", "-f", "ollama serve"], capture_output=True, timeout=5)
+        if self._ollama_process is None:
+            # No process was started by this instance; nothing to stop
             return True
+
+        process = self._ollama_process
+        self._ollama_process = None
+
+        try:
+            # Check if the process is still running
+            if process.poll() is not None:
+                # Process has already exited
+                return True
+
+            # Send SIGTERM and wait up to 5 seconds for a clean shutdown
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+                return True
+            except subprocess.TimeoutExpired:
+                # Process did not exit cleanly; escalate to SIGKILL
+                process.kill()
+                process.wait()
+                return True
         except Exception:
             return False
 
