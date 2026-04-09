@@ -101,9 +101,11 @@ def test_successful_transcription_returns_correct_text(monkeypatch, sample_audio
     """Successful transcriptions should normalize text and return metadata."""
     calls, _module = fake_parakeet_module
     deleted_paths = []
+    temp_path = "/tmp/whisper_hud_parakeet.wav"
 
     monkeypatch.setattr(ParakeetProvider, "_is_apple_silicon", lambda self: True)
     monkeypatch.setattr(ParakeetProvider, "_check_availability", lambda self: True)
+    monkeypatch.setattr("whisper_hud.encryption.create_private_temp_file", lambda _data: temp_path)
     monkeypatch.setattr("whisper_hud.encryption.secure_delete", lambda path: deleted_paths.append(path))
 
     provider = ParakeetProvider()
@@ -125,6 +127,7 @@ def test_transcription_error_propagates_correctly(monkeypatch, sample_audio_byte
     """Transcription failures should keep the provider error prefix."""
     _calls, module = fake_parakeet_module
     deleted_paths = []
+    temp_path = "/tmp/whisper_hud_parakeet_error.wav"
 
     def broken_transcribe(_path, **_kwargs):
         raise Exception("decoder exploded")
@@ -132,6 +135,7 @@ def test_transcription_error_propagates_correctly(monkeypatch, sample_audio_byte
     module.transcribe = broken_transcribe
     monkeypatch.setattr(ParakeetProvider, "_is_apple_silicon", lambda self: True)
     monkeypatch.setattr(ParakeetProvider, "_check_availability", lambda self: True)
+    monkeypatch.setattr("whisper_hud.encryption.create_private_temp_file", lambda _data: temp_path)
     monkeypatch.setattr("whisper_hud.encryption.secure_delete", lambda path: deleted_paths.append(path))
 
     with pytest.raises(RuntimeError, match="Parakeet transcription failed: decoder exploded"):
@@ -322,6 +326,7 @@ def test_transcribe_streaming_emits_word_chunks_and_final_text(
     _calls, module = fake_parakeet_module
     seen_chunks = []
     deleted_paths = []
+    temp_path = "/tmp/whisper_hud_parakeet_stream.wav"
 
     def streaming_transcribe(path, **kwargs):
         assert kwargs["word_timestamps"] is True
@@ -332,6 +337,7 @@ def test_transcribe_streaming_emits_word_chunks_and_final_text(
 
     module.transcribe = streaming_transcribe
     monkeypatch.setattr(ParakeetProvider, "_is_apple_silicon", lambda self: True)
+    monkeypatch.setattr("whisper_hud.encryption.create_private_temp_file", lambda _data: temp_path)
     monkeypatch.setattr("whisper_hud.encryption.secure_delete", lambda path: deleted_paths.append(path))
 
     result = ParakeetProvider().transcribe_streaming(sample_audio_bytes, seen_chunks.append)
@@ -349,8 +355,10 @@ def test_transcribe_streaming_handles_plain_text_and_errors(
 ):
     """Streaming mode should support non-dict results and wrap provider errors."""
     _calls, module = fake_parakeet_module
+    temp_path = "/tmp/whisper_hud_parakeet_stream_error.wav"
 
     monkeypatch.setattr(ParakeetProvider, "_is_apple_silicon", lambda self: True)
+    monkeypatch.setattr("whisper_hud.encryption.create_private_temp_file", lambda _data: temp_path)
     monkeypatch.setattr("whisper_hud.encryption.secure_delete", lambda _path: None)
 
     class RawResult:

@@ -88,7 +88,7 @@ def test_transcribe_returns_empty_result_for_empty_audio():
     assert result.duration_seconds == 0
     assert result.cost_estimate == 0
     assert result.provider == "openai"
-    assert result.model == "gpt-4o-transcribe"
+    assert result.model == "gpt-4o-mini-transcribe"
 
 
 def test_transcribe_returns_text_on_success(monkeypatch, sample_audio_bytes):
@@ -101,18 +101,18 @@ def test_transcribe_returns_text_on_success(monkeypatch, sample_audio_bytes):
         staticmethod(lambda: lambda **_: fake_client),
     )
 
-    provider = OpenAITranscribeProvider(model="gpt-4o-transcribe")
+    provider = OpenAITranscribeProvider(model="gpt-4o-mini-transcribe")
     result = provider.transcribe(sample_audio_bytes)
 
     assert result.text == "Hello from OpenAI"
     assert result.provider == "openai"
-    assert result.model == "gpt-4o-transcribe"
+    assert result.model == "gpt-4o-mini-transcribe"
     assert result.duration_seconds == pytest.approx(len(sample_audio_bytes) / 32000)
-    assert result.cost_estimate == pytest.approx((result.duration_seconds / 60) * 0.006)
+    assert result.cost_estimate == pytest.approx((result.duration_seconds / 60) * 0.003)
     assert result.language is None
     assert fake_client.calls == [
         {
-            "model": "gpt-4o-transcribe",
+            "model": "gpt-4o-mini-transcribe",
             "file": ANY,
             "response_format": "json",
         }
@@ -215,3 +215,8 @@ def test_set_model_updates_known_models_and_resets_cached_client():
 
     assert provider.get_current_model() == "whisper-1"
     assert provider._client is sentinel
+
+
+def test_normalize_model_id_maps_realtime_latest_alias():
+    """Batch transcription should coerce realtime-only alias slugs to supported batch models."""
+    assert OpenAITranscribeProvider.normalize_model_id("gpt-4o-transcribe-latest") == "gpt-4o-transcribe"

@@ -20,36 +20,39 @@ class OpenAITranslateProvider(TranslationProvider):
     name = "openai"
     display_name = "OpenAI (Cloud)"
 
-    DEFAULT_MODEL = "gpt-5-mini"
+    DEFAULT_MODEL = "gpt-5.4-mini"
     CLIENT_TIMEOUT_SECONDS = 30.0
     CLIENT_MAX_RETRIES = 0
 
-    # Available models (February 2026)
+    # Available models (April 2026)
     MODELS = {
-        "gpt-5.2": {
-            "name": "GPT-5.2",
-            "description": "Best quality, smartest",
+        "gpt-5.4": {
+            "name": "GPT-5.4",
+            "description": "Strongest quality for nuanced translation",
             "category": "quality",
+        },
+        "gpt-5.4-mini": {
+            "name": "GPT-5.4 Mini",
+            "description": "Recommended for new low-latency, high-volume workloads",
+            "category": "balanced",
             "recommended": True,
         },
-        "gpt-5-mini": {
-            "name": "GPT-5 Mini",
-            "description": "Fast, cost-effective",
-            "category": "balanced",
-        },
-        "gpt-5-nano": {
-            "name": "GPT-5 Nano",
-            "description": "Fastest, most affordable",
+        "gpt-5.4-nano": {
+            "name": "GPT-5.4 Nano",
+            "description": "Fastest and most cost-efficient",
             "category": "speed",
         },
     }
 
     MODEL_ALIASES = {
-        # Historical/general aliases -> tuned translation defaults
-        "gpt-5": "gpt-5.2",
-        "gpt-5.1": "gpt-5.2",
-        "gpt-5.2-chat-latest": "gpt-5.2",
-        "gpt-5.2-pro": "gpt-5.2",
+        # Historical/general aliases -> current GPT-5.4 family
+        "gpt-5": "gpt-5.4",
+        "gpt-5.1": "gpt-5.4",
+        "gpt-5.2": "gpt-5.4",
+        "gpt-5.2-chat-latest": "gpt-5.4",
+        "gpt-5.2-pro": "gpt-5.4",
+        "gpt-5-mini": "gpt-5.4-mini",
+        "gpt-5-nano": "gpt-5.4-nano",
     }
 
     SUPPORTED_LANGUAGES = {
@@ -178,20 +181,19 @@ class OpenAITranslateProvider(TranslationProvider):
             "instructions": self._build_instructions(source_lang, target_lang),
             "input": text,
             "max_output_tokens": 4096,
+            "store": False,
         }
         if stream:
             kwargs["stream"] = True
 
-        # GPT-5.2 supports temperature only with reasoning effort set to none.
-        if self._supports_temperature():
-            kwargs["temperature"] = 0.1
+        if self._supports_reasoning_effort():
             kwargs["reasoning"] = {"effort": "none"}
 
         return kwargs
 
-    def _supports_temperature(self) -> bool:
-        """Temperature support is restricted to GPT-5.2 compatibility mode."""
-        return self.model.startswith("gpt-5.2")
+    def _supports_reasoning_effort(self) -> bool:
+        """Use the lowest-latency reasoning mode for GPT-5.4 translation workloads."""
+        return self.model.startswith("gpt-5.4")
 
     def _safe_get(self, obj: Any, key: str, default: Any = None) -> Any:
         if isinstance(obj, dict):
@@ -362,8 +364,16 @@ class OpenAITranslateProvider(TranslationProvider):
 
     def set_model(self, model_id: str) -> None:
         """Change the active model."""
-        self.model = self.normalize_model_id(model_id)
-        self._client = None
+        if model_id in self.MODELS:
+            normalized_model = model_id
+        else:
+            normalized_model = self.MODEL_ALIASES.get(model_id)
+            if normalized_model not in self.MODELS:
+                return
+
+        if normalized_model != self.model:
+            self.model = normalized_model
+            self._client = None
 
     def get_current_model(self) -> str:
         """Get the current model ID."""

@@ -366,6 +366,9 @@ class OpenAIRealtimeProvider(TranscriptionProvider):
     name = "openai_realtime"
     display_name = "OpenAI Realtime"
     DEFAULT_MODEL = "gpt-4o-mini-transcribe"
+    MODEL_ALIASES = {
+        "gpt-4o-transcribe-latest": "gpt-4o-transcribe",
+    }
 
     MODELS = [
         {
@@ -453,6 +456,9 @@ class OpenAIRealtimeProvider(TranscriptionProvider):
         """Normalize the configured model to a supported Realtime model."""
         if any(model["id"] == model_id for model in cls.MODELS):
             return model_id
+        mapped = cls.MODEL_ALIASES.get(model_id)
+        if mapped and any(model["id"] == mapped for model in cls.MODELS):
+            return mapped
         return cls.DEFAULT_MODEL
 
     @classmethod

@@ -124,7 +124,6 @@ class AppleSpeechProvider(TranscriptionProvider):
             TranscriptionResult with transcribed text
         """
         import os
-        import tempfile
         import time
 
         start_time = time.time()
@@ -137,13 +136,10 @@ class AppleSpeechProvider(TranscriptionProvider):
 
         try:
             from Foundation import NSURL
+            from ..encryption import create_private_temp_file, secure_delete
 
-            # Write audio to a unique temp file (Speech framework needs a file URL)
-            # Use restrictive permissions (owner-only) and consistent prefix for cleanup
-            with tempfile.NamedTemporaryFile(prefix="whisper_hud_", suffix=".wav", delete=False) as temp_fp:
-                os.chmod(temp_fp.name, 0o600)
-                temp_fp.write(audio_bytes)
-                temp_file = temp_fp.name
+            # The Speech framework requires a file URL, so use a private scratch file.
+            temp_file = create_private_temp_file(audio_bytes)
 
             # Create file URL
             file_url = NSURL.fileURLWithPath_(temp_file)
@@ -211,8 +207,6 @@ class AppleSpeechProvider(TranscriptionProvider):
             # Always clean up temp audio files, even on early failures.
             if temp_file and os.path.exists(temp_file):
                 try:
-                    from ..encryption import secure_delete
-
                     secure_delete(temp_file)
                 except Exception:
                     try:

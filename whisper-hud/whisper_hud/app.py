@@ -94,6 +94,7 @@ class ActiveTranscriptionTurn:
     stop_reason: str = ""
     batch_fallback_started: bool = False
     result_processing_started: bool = False
+    batch_thread: Optional[threading.Thread] = None
 
 
 class WhisperHUDApp(rumps.App):
@@ -2387,7 +2388,9 @@ class WhisperHUDApp(rumps.App):
             except Exception as e:
                 self._handle_transcription_error(turn_id, e, use_streaming)
 
-        threading.Thread(target=do_transcribe, daemon=True).start()
+        batch_thread = threading.Thread(target=do_transcribe)
+        turn.batch_thread = batch_thread
+        batch_thread.start()
 
     def _process_turn_result(
         self,
@@ -3087,7 +3090,7 @@ class WhisperHUDApp(rumps.App):
                 message=(
                     "Private Mode keeps WhisperHUD from saving transcription history:\n\n"
                     "• WhisperHUD will not retain transcription history or stats\n"
-                    "• Temporary provider scratch files are cleaned up after use when possible\n"
+                    "• Local scratch audio stays in a private app folder and is deleted after use\n"
                     "• A 🔒 icon shows when active\n\n"
                     "You can still copy/paste transcriptions normally, "
                     "they just won't be kept in WhisperHUD."
@@ -4436,7 +4439,7 @@ class WhisperHUDApp(rumps.App):
         try:
             from .encryption import cleanup_orphaned_temp_files
 
-            cleaned = cleanup_orphaned_temp_files(prefix="whisper_hud")
+            cleaned = cleanup_orphaned_temp_files()
             if cleaned > 0:
                 logger.info(f"Cleaned up {cleaned} orphaned temp file(s) from previous session")
         except Exception as e:
@@ -4444,6 +4447,11 @@ class WhisperHUDApp(rumps.App):
 
     def _quit(self, _):
         """Clean shutdown."""
+        turn = self._active_turn
+        if turn and turn.batch_thread and turn.batch_thread.is_alive():
+            logger.info("Waiting briefly for active transcription cleanup before quitting")
+            turn.batch_thread.join(timeout=2.0)
+
         lock_passphrase_store()
         lock_history_encryption()
         self.hotkey_listener.stop()

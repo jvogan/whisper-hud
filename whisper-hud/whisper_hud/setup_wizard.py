@@ -130,9 +130,9 @@ class SetupWizard:
         self._translation_models = {
             "apple": "system",
             "ollama": "translategemma-4b",
-            "gemini": "gemini-3-flash-preview",
-            "openai": "gpt-5-mini",
-            "anthropic": "claude-sonnet-4-5",
+            "gemini": "gemini-2.5-flash",
+            "openai": "gpt-5.4-mini",
+            "anthropic": "claude-sonnet-4-6",
         }
         self._ollama_installed = False
         self._ollama_running = False

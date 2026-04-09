@@ -167,6 +167,7 @@ def test_provider_normalizes_models_and_uses_batch_fallback_for_supported_model(
     """The realtime provider should stay within the v1 two-model scope and batch fallback should mirror it."""
     default_provider = OpenAIRealtimeProvider(model="unsupported")
     assert default_provider.get_current_model() == "gpt-4o-mini-transcribe"
+    assert OpenAIRealtimeProvider(model="gpt-4o-transcribe-latest").get_current_model() == "gpt-4o-transcribe"
 
     model_ids = [model["id"] for model in default_provider.get_models()]
     assert model_ids == ["gpt-4o-mini-transcribe", "gpt-4o-transcribe"]

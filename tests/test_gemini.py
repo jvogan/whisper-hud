@@ -50,7 +50,7 @@ def test_provider_initialization_and_model_helpers():
     """GeminiProvider should expose the expected default interface."""
     provider = GeminiProvider()
 
-    assert provider.get_current_model() == "gemini-3-flash-preview"
+    assert provider.get_current_model() == "gemini-2.5-flash"
     assert provider.supports_streaming() is True
     assert provider.get_models() == provider.MODELS
 
@@ -59,6 +59,7 @@ def test_provider_initialization_and_model_helpers():
 
     provider.set_model("not-a-real-model")
     assert provider.get_current_model() == "gemini-2.5-flash"
+    assert GeminiProvider.normalize_model_id("gemini-3-pro-preview") == "gemini-2.5-pro"
 
 
 def test_provider_reports_unavailable_when_api_key_is_not_set(monkeypatch):
@@ -98,11 +99,11 @@ def test_get_client_raises_value_error_when_api_key_is_missing(monkeypatch, fake
 
 def test_transcribe_returns_result_on_success(monkeypatch, sample_audio_bytes, fake_gemini_sdk):
     """Successful transcriptions should return normalized text and metadata."""
-    provider = GeminiProvider(model="gemini-3-flash-preview")
+    provider = GeminiProvider(model="gemini-2.5-flash")
 
     class FakeModels:
         def generate_content(self, *, model, contents):
-            assert model == "gemini-3-flash-preview"
+            assert model == "gemini-2.5-flash"
             assert contents[0].startswith("Transcribe this audio exactly as spoken.")
             assert contents[1]["data"] == sample_audio_bytes
             assert contents[1]["mime_type"] == "audio/wav"
@@ -114,7 +115,7 @@ def test_transcribe_returns_result_on_success(monkeypatch, sample_audio_bytes, f
 
     assert result.text == "Hello from Gemini"
     assert result.provider == "gemini"
-    assert result.model == "gemini-3-flash-preview"
+    assert result.model == "gemini-2.5-flash"
     assert result.duration_seconds == pytest.approx(len(sample_audio_bytes) / 32000)
     assert result.cost_estimate == pytest.approx((result.duration_seconds / 60) * 0.001)
     assert result.language is None

@@ -91,15 +91,15 @@ def test_provider_prompt_explicit_source(provider_cls):
 
 def test_openai_responses_request_builder():
     """OpenAI provider should build Responses-compatible request params."""
-    provider = OpenAITranslateProvider(model="gpt-5.2")
+    provider = OpenAITranslateProvider(model="gpt-5.4-mini")
     kwargs = provider._build_request_kwargs("Hello", "auto", "es", stream=True)
 
-    assert kwargs["model"] == "gpt-5.2"
+    assert kwargs["model"] == "gpt-5.4-mini"
     assert kwargs["input"] == "Hello"
     assert kwargs["stream"] is True
     assert kwargs["max_output_tokens"] == 4096
+    assert kwargs["store"] is False
     assert "Detect the source language" in kwargs["instructions"]
-    assert kwargs["temperature"] == 0.1
     assert kwargs["reasoning"] == {"effort": "none"}
 
 
@@ -145,6 +145,7 @@ def test_anthropic_model_normalization_handles_stale_ids():
     """Anthropic provider should map historical model IDs to current aliases."""
     assert AnthropicTranslateProvider.normalize_model_id("claude-opus-4-5") == "claude-opus-4-6"
     assert AnthropicTranslateProvider.normalize_model_id("claude-opus-4-1") == "claude-opus-4-6"
+    assert AnthropicTranslateProvider.normalize_model_id("claude-sonnet-4-5") == "claude-sonnet-4-6"
     assert AnthropicTranslateProvider.normalize_model_id("unknown-id") == AnthropicTranslateProvider.DEFAULT_MODEL
 
 
@@ -170,7 +171,7 @@ def test_anthropic_client_pins_base_url_and_disables_env_routing(monkeypatch):
 
 def test_anthropic_translate_returns_result_on_success(monkeypatch):
     """Anthropic translate should return TranslationResult on the success path."""
-    provider = AnthropicTranslateProvider(model="claude-sonnet-4-5")
+    provider = AnthropicTranslateProvider(model="claude-sonnet-4-6")
 
     monkeypatch.setattr(provider, "_build_messages", lambda text, source, target: ("system", text))
     monkeypatch.setattr(provider, "_translate_once", lambda model, system, user: "Hola mundo")
@@ -179,12 +180,12 @@ def test_anthropic_translate_returns_result_on_success(monkeypatch):
 
     assert result.text == "Hola mundo"
     assert result.provider == "anthropic"
-    assert result.model == "claude-sonnet-4-5"
+    assert result.model == "claude-sonnet-4-6"
 
 
 def test_anthropic_streaming_returns_result_on_success(monkeypatch):
     """Anthropic streaming translate should return TranslationResult on success."""
-    provider = AnthropicTranslateProvider(model="claude-sonnet-4-5")
+    provider = AnthropicTranslateProvider(model="claude-sonnet-4-6")
 
     monkeypatch.setattr(provider, "_build_messages", lambda text, source, target: ("system", text))
 
@@ -200,7 +201,7 @@ def test_anthropic_streaming_returns_result_on_success(monkeypatch):
 
     assert result.text == "Hola mundo"
     assert result.provider == "anthropic"
-    assert result.model == "claude-sonnet-4-5"
+    assert result.model == "claude-sonnet-4-6"
     assert chunks == ["Ho", "Hola"]
 
 
@@ -264,7 +265,7 @@ def test_openai_streaming_translation_sanitizes_provider_errors(monkeypatch):
         def stream(self, **_kwargs):
             raise FakeRateLimitError("Quota exceeded")
 
-    provider = OpenAITranslateProvider(model="gpt-5-mini")
+    provider = OpenAITranslateProvider(model="gpt-5.4-mini")
     monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(responses=FakeResponsesAPI()))
 
     with pytest.raises(RuntimeError, match="OpenAI translation failed: rate limited"):
@@ -282,7 +283,7 @@ def test_anthropic_streaming_translation_sanitizes_provider_errors(monkeypatch):
     def raise_rate_limit(*args, **kwargs):
         raise FakeRateLimitError("Quota exceeded")
 
-    provider = AnthropicTranslateProvider(model="claude-sonnet-4-5")
+    provider = AnthropicTranslateProvider(model="claude-sonnet-4-6")
     monkeypatch.setattr(provider, "_build_messages", lambda text, source, target: ("system", text))
     monkeypatch.setattr(provider, "_translate_stream_once", raise_rate_limit)
 

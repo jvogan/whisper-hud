@@ -60,6 +60,37 @@ def _ensure_config_permissions() -> None:
             logger.warning(f"Could not set config file permissions: {e}")
 
 
+def _normalize_model_config_values(data: dict) -> None:
+    """Migrate stale/removed provider model IDs to the nearest supported values."""
+    try:
+        from .providers.gemini import GeminiProvider
+        from .providers.openai_realtime import OpenAIRealtimeProvider
+        from .providers.openai_whisper import OpenAITranscribeProvider
+        from .providers.translation.anthropic_translate import AnthropicTranslateProvider
+        from .providers.translation.gemini_translate import GeminiTranslateProvider
+        from .providers.translation.openai_translate import OpenAITranslateProvider
+    except Exception:
+        return
+
+    normalizers = {
+        "openai_model": OpenAITranscribeProvider.normalize_model_id,
+        "openai_realtime_model": OpenAIRealtimeProvider._normalize_model,
+        "gemini_model": GeminiProvider.normalize_model_id,
+        "openai_translate_model": OpenAITranslateProvider.normalize_model_id,
+        "gemini_translate_model": GeminiTranslateProvider.normalize_model_id,
+        "anthropic_translate_model": AnthropicTranslateProvider.normalize_model_id,
+    }
+
+    for field_name, normalize in normalizers.items():
+        current_value = data.get(field_name)
+        if not isinstance(current_value, str) or not current_value:
+            continue
+        normalized_value = normalize(current_value)
+        if normalized_value != current_value:
+            logger.info("Migrating %s from %s to %s", field_name, current_value, normalized_value)
+            data[field_name] = normalized_value
+
+
 @dataclass
 class Config:
     """Application configuration."""
@@ -69,9 +100,9 @@ class Config:
     default_provider: str = "apple"
 
     # Default model for each transcription provider
-    openai_model: str = "gpt-4o-transcribe"
+    openai_model: str = "gpt-4o-mini-transcribe"
     openai_realtime_model: str = "gpt-4o-mini-transcribe"
-    gemini_model: str = "gemini-3-flash-preview"
+    gemini_model: str = "gemini-2.5-flash"
     apple_model: str = "en-US"
     whisper_local_model: str = "large-v3-turbo"
     parakeet_model: str = "parakeet-tdt-0.6b-v3"
@@ -106,9 +137,9 @@ class Config:
     translation_enabled: bool = False
     translation_provider: str = "apple"  # apple, ollama, gemini, openai
     translation_model: str = "translategemma-4b"  # Ollama model: 4b, 12b, 27b
-    gemini_translate_model: str = "gemini-3-flash-preview"  # Gemini translation model
-    openai_translate_model: str = "gpt-5-mini"  # OpenAI translation model
-    anthropic_translate_model: str = "claude-sonnet-4-5"  # Anthropic translation model
+    gemini_translate_model: str = "gemini-2.5-flash"  # Gemini translation model
+    openai_translate_model: str = "gpt-5.4-mini"  # OpenAI translation model
+    anthropic_translate_model: str = "claude-sonnet-4-6"  # Anthropic translation model
     target_language: str = "en"  # Default: English (neutral first-run choice)
     source_language: str = "auto"  # "auto" or specific ISO 639-1 code
 
@@ -193,6 +224,8 @@ class Config:
                 # Fresh installs use passphrase mode by default.
                 if "credential_storage_mode" not in data:
                     data["credential_storage_mode"] = "keychain"
+
+                _normalize_model_config_values(data)
 
                 # Handle missing fields gracefully
                 return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})

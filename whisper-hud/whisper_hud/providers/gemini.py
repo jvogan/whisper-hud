@@ -4,9 +4,9 @@ Google Gemini API provider for audio transcription.
 Gemini models can process audio natively and provide transcription.
 Supports speaker diarization through prompting.
 
-Models (February 2026):
-- gemini-3-pro-preview: Highest quality, supports audio input
-- gemini-3-flash-preview: Fast, strong quality, supports audio input
+Models (April 2026):
+- gemini-2.5-pro: Strongest stable quality
+- gemini-3-flash-preview: Frontier preview model
 - gemini-2.5-flash: Stable, supports audio input
 - gemini-2.5-flash-lite: Lowest latency/cost, supports audio input
 """
@@ -25,26 +25,27 @@ class GeminiProvider(TranscriptionProvider):
     display_name = "Google Gemini"
     CLIENT_TIMEOUT_MS = 30000
 
+    DEFAULT_MODEL = "gemini-2.5-flash"
+    MODEL_ALIASES = {
+        "gemini-3-pro-preview": "gemini-2.5-pro",
+        "gemini-3-pro": "gemini-2.5-pro",
+        "gemini-2.5-flash-preview": "gemini-2.5-flash",
+    }
+
     # Available models with approximate costs
     MODELS = [
         {
-            "id": "gemini-3-pro-preview",
-            "name": "Gemini 3 Pro (Preview)",
-            "description": "Highest quality, supports audio input",
+            "id": "gemini-2.5-pro",
+            "name": "Gemini 2.5 Pro",
+            "description": "Strongest stable quality for complex audio tasks",
             "cost_per_minute": 0.001,
-        },
-        {
-            "id": "gemini-3-flash-preview",
-            "name": "Gemini 3 Flash",
-            "description": "Latest, fastest, frontier intelligence",
-            "cost_per_minute": 0.001,
-            "recommended": True,
         },
         {
             "id": "gemini-2.5-flash",
             "name": "Gemini 2.5 Flash",
-            "description": "Stable, fast, supports audio input",
+            "description": "Current stable default for low-latency, high-volume transcription",
             "cost_per_minute": 0.001,
+            "recommended": True,
         },
         {
             "id": "gemini-2.5-flash-lite",
@@ -52,11 +53,27 @@ class GeminiProvider(TranscriptionProvider):
             "description": "Lowest latency/cost, supports audio input",
             "cost_per_minute": 0.001,
         },
+        {
+            "id": "gemini-3-flash-preview",
+            "name": "Gemini 3 Flash (Preview)",
+            "description": "Frontier preview model for latest Gemini 3 audio support",
+            "cost_per_minute": 0.001,
+        },
     ]
 
-    def __init__(self, model: str = "gemini-3-flash-preview"):
-        self.model = model
+    def __init__(self, model: str = DEFAULT_MODEL):
+        self.model = self.normalize_model_id(model)
         self._client = None
+
+    @classmethod
+    def normalize_model_id(cls, model_id: str) -> str:
+        """Normalize configured IDs to current Gemini transcription models."""
+        if any(model["id"] == model_id for model in cls.MODELS):
+            return model_id
+        mapped = cls.MODEL_ALIASES.get(model_id)
+        if mapped and any(model["id"] == mapped for model in cls.MODELS):
+            return mapped
+        return cls.DEFAULT_MODEL
 
     def _get_client(self):
         """Get or create the Gemini client."""
@@ -139,8 +156,15 @@ Preserve natural punctuation."""
 
     def set_model(self, model_id: str) -> None:
         """Set the active model."""
-        if any(m["id"] == model_id for m in self.MODELS):
-            self.model = model_id
+        if any(model["id"] == model_id for model in self.MODELS):
+            normalized_model = model_id
+        else:
+            normalized_model = self.MODEL_ALIASES.get(model_id)
+            if not normalized_model or not any(model["id"] == normalized_model for model in self.MODELS):
+                return
+
+        if normalized_model != self.model:
+            self.model = normalized_model
             self._client = None
 
     def get_current_model(self) -> str:

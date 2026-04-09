@@ -1,10 +1,10 @@
 """
 OpenAI Transcription API provider.
 
-Models (February 2026):
-- gpt-4o-transcribe: Best accuracy, improved WER over Whisper
+Models (April 2026):
+- gpt-4o-mini-transcribe: OpenAI currently recommends this over gpt-4o-transcribe
+- gpt-4o-transcribe: Higher-cost batch transcription
 - gpt-4o-transcribe-diarize: Speaker-aware transcripts (diarization)
-- gpt-4o-mini-transcribe: Faster, more affordable
 - whisper-1: Classic Whisper v2, still available
 
 API endpoint: POST https://api.openai.com/v1/audio/transcriptions
@@ -30,8 +30,17 @@ class OpenAITranscribeProvider(TranscriptionProvider):
     CLIENT_TIMEOUT_SECONDS = 30.0
     CLIENT_MAX_RETRIES = 0
 
+    DEFAULT_MODEL = "gpt-4o-mini-transcribe"
+
     # Available models with pricing (per minute)
     MODELS = [
+        {
+            "id": "gpt-4o-mini-transcribe",
+            "name": "GPT-4o Mini Transcribe",
+            "description": "Recommended by OpenAI for most new transcription workloads",
+            "cost_per_minute": 0.003,
+            "recommended": True,
+        },
         {
             "id": "gpt-4o-transcribe",
             "name": "GPT-4o Transcribe",
@@ -45,12 +54,6 @@ class OpenAITranscribeProvider(TranscriptionProvider):
             "cost_per_minute": 0.006,
         },
         {
-            "id": "gpt-4o-mini-transcribe",
-            "name": "GPT-4o Mini Transcribe",
-            "description": "Fast and affordable, good for clear audio",
-            "cost_per_minute": 0.003,
-        },
-        {
             "id": "whisper-1",
             "name": "Whisper v2",
             "description": "Classic Whisper model, reliable",
@@ -58,9 +61,23 @@ class OpenAITranscribeProvider(TranscriptionProvider):
         },
     ]
 
-    def __init__(self, model: str = "gpt-4o-transcribe"):
-        self.model = model
+    MODEL_ALIASES = {
+        "gpt-4o-transcribe-latest": "gpt-4o-transcribe",
+    }
+
+    def __init__(self, model: str = DEFAULT_MODEL):
+        self.model = self.normalize_model_id(model)
         self._client = None
+
+    @classmethod
+    def normalize_model_id(cls, model_id: str) -> str:
+        """Normalize configured model IDs to supported OpenAI transcription models."""
+        if any(model["id"] == model_id for model in cls.MODELS):
+            return model_id
+        mapped = cls.MODEL_ALIASES.get(model_id)
+        if mapped and any(model["id"] == mapped for model in cls.MODELS):
+            return mapped
+        return cls.DEFAULT_MODEL
 
     @property
     def client(self) -> "OpenAI":
@@ -164,8 +181,15 @@ class OpenAITranscribeProvider(TranscriptionProvider):
 
     def set_model(self, model_id: str) -> None:
         """Set the active model."""
-        if any(m["id"] == model_id for m in self.MODELS):
-            self.model = model_id
+        if any(model["id"] == model_id for model in self.MODELS):
+            normalized_model = model_id
+        else:
+            normalized_model = self.MODEL_ALIASES.get(model_id)
+            if not normalized_model or not any(model["id"] == normalized_model for model in self.MODELS):
+                return
+
+        if normalized_model != self.model:
+            self.model = normalized_model
             self._client = None  # Reset client
 
     def get_current_model(self) -> str:

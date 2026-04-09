@@ -19,19 +19,19 @@ class AnthropicTranslateProvider(TranslationProvider):
     name = "anthropic"
     display_name = "Anthropic Claude"
 
-    DEFAULT_MODEL = "claude-sonnet-4-5"
+    DEFAULT_MODEL = "claude-sonnet-4-6"
     CLIENT_TIMEOUT_SECONDS = 30.0
     CLIENT_MAX_RETRIES = 0
 
-    # Available model aliases from Anthropic docs (February 2026)
+    # Available model aliases from Anthropic docs (April 2026)
     MODELS = {
         "claude-opus-4-6": {
             "name": "Claude Opus 4.6",
             "description": "Highest quality, deeper reasoning",
             "category": "quality",
         },
-        "claude-sonnet-4-5": {
-            "name": "Claude Sonnet 4.5",
+        "claude-sonnet-4-6": {
+            "name": "Claude Sonnet 4.6",
             "description": "Best all-around balance of quality and speed",
             "category": "balanced",
             "recommended": True,
@@ -48,7 +48,8 @@ class AnthropicTranslateProvider(TranslationProvider):
         "claude-opus-4-1": "claude-opus-4-6",
         "claude-opus-4-5": "claude-opus-4-6",
         "claude-opus-4": "claude-opus-4-6",
-        "claude-sonnet-4": "claude-sonnet-4-5",
+        "claude-sonnet-4-5": "claude-sonnet-4-6",
+        "claude-sonnet-4": "claude-sonnet-4-6",
         "claude-haiku-4": "claude-haiku-4-5",
     }
 
@@ -352,8 +353,16 @@ Rules:
 
     def set_model(self, model_id: str) -> None:
         """Change the active model."""
-        self.model = self.normalize_model_id(model_id)
-        self._client = None
+        if model_id in self.MODELS:
+            normalized_model = model_id
+        else:
+            normalized_model = self.MODEL_ALIASES.get(model_id)
+            if normalized_model not in self.MODELS:
+                return
+
+        if normalized_model != self.model:
+            self.model = normalized_model
+            self._client = None
 
     def get_current_model(self) -> str:
         """Get the current model ID."""

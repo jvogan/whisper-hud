@@ -206,8 +206,10 @@ def test_transcribe_returns_text_and_metadata(monkeypatch, sample_audio_bytes):
     provider = WhisperLocalProvider(model="small")
     fake_model = FakeWhisperModel("small", "cpu", "float16", str(CACHE_DIR))
     deleted_paths = []
+    temp_path = "/tmp/whisper_hud_test.wav"
 
     monkeypatch.setattr(provider, "_load_model", lambda: fake_model)
+    monkeypatch.setattr("whisper_hud.encryption.create_private_temp_file", lambda _data: temp_path)
     monkeypatch.setattr("whisper_hud.encryption.secure_delete", deleted_paths.append)
     monkeypatch.setattr(whisper_local_module.time, "time", lambda: 100.0 if not deleted_paths else 101.5)
 
@@ -231,12 +233,14 @@ def test_transcribe_returns_text_and_metadata(monkeypatch, sample_audio_bytes):
 def test_transcribe_wraps_transcription_errors(monkeypatch, sample_audio_bytes):
     provider = WhisperLocalProvider()
     deleted_paths = []
+    temp_path = "/tmp/whisper_hud_error.wav"
 
     class BrokenModel:
         def transcribe(self, *args, **kwargs):
             raise ValueError("decode failed")
 
     monkeypatch.setattr(provider, "_load_model", lambda: BrokenModel())
+    monkeypatch.setattr("whisper_hud.encryption.create_private_temp_file", lambda _data: temp_path)
     monkeypatch.setattr("whisper_hud.encryption.secure_delete", deleted_paths.append)
 
     with pytest.raises(RuntimeError, match="Whisper transcription failed: decode failed"):
@@ -299,9 +303,11 @@ def test_transcribe_streaming_emits_chunks_and_returns_final_result(monkeypatch,
     provider = WhisperLocalProvider(model="base")
     chunks = []
     deleted_paths = []
+    temp_path = "/tmp/whisper_hud_stream.wav"
     fake_model = FakeWhisperModel("base", "cpu", "float16", str(CACHE_DIR))
 
     monkeypatch.setattr(provider, "_load_model", lambda: fake_model)
+    monkeypatch.setattr("whisper_hud.encryption.create_private_temp_file", lambda _data: temp_path)
     monkeypatch.setattr("whisper_hud.encryption.secure_delete", deleted_paths.append)
     monkeypatch.setattr(whisper_local_module.time, "time", lambda: 200.0 if not chunks else 201.0)
 
@@ -316,12 +322,14 @@ def test_transcribe_streaming_emits_chunks_and_returns_final_result(monkeypatch,
 
 def test_transcribe_streaming_wraps_errors(monkeypatch, sample_audio_bytes):
     provider = WhisperLocalProvider()
+    temp_path = "/tmp/whisper_hud_stream_error.wav"
 
     class BrokenModel:
         def transcribe(self, *args, **kwargs):
             raise ValueError("stream failed")
 
     monkeypatch.setattr(provider, "_load_model", lambda: BrokenModel())
+    monkeypatch.setattr("whisper_hud.encryption.create_private_temp_file", lambda _data: temp_path)
     monkeypatch.setattr("whisper_hud.encryption.secure_delete", lambda path: None)
 
     with pytest.raises(RuntimeError, match="Whisper streaming transcription failed: stream failed"):

@@ -21,37 +21,38 @@ class GeminiTranslateProvider(TranslationProvider):
     name = "gemini"
     display_name = "Gemini (Cloud)"
 
-    DEFAULT_MODEL = "gemini-3-flash-preview"
+    DEFAULT_MODEL = "gemini-2.5-flash"
     STABLE_FALLBACK_MODEL = "gemini-2.5-flash"
     CLIENT_TIMEOUT_MS = 30000
 
-    # Available models (February 2026)
+    # Available models (April 2026)
     MODELS = {
-        "gemini-3-pro-preview": {
-            "name": "Gemini 3 Pro (Preview)",
-            "description": "Highest quality, best for nuanced translation",
+        "gemini-2.5-pro": {
+            "name": "Gemini 2.5 Pro",
+            "description": "Highest stable quality for nuanced translation",
             "category": "quality",
-        },
-        "gemini-3-flash-preview": {
-            "name": "Gemini 3 Flash",
-            "description": "Fast and strong quality",
-            "category": "balanced",
-            "recommended": True,
         },
         "gemini-2.5-flash": {
             "name": "Gemini 2.5 Flash",
-            "description": "Stable, fast, cost-effective",
+            "description": "Current stable default for fast, high-volume translation",
             "category": "balanced",
+            "recommended": True,
         },
         "gemini-2.5-flash-lite": {
             "name": "Gemini 2.5 Flash Lite",
             "description": "Lowest latency/cost",
             "category": "speed",
         },
+        "gemini-3-flash-preview": {
+            "name": "Gemini 3 Flash (Preview)",
+            "description": "Frontier preview model for the latest Gemini 3 quality",
+            "category": "balanced",
+        },
     }
 
     MODEL_ALIASES = {
-        "gemini-3-pro": "gemini-3-pro-preview",
+        "gemini-3-pro-preview": "gemini-2.5-pro",
+        "gemini-3-pro": "gemini-2.5-pro",
         "gemini-3-flash": "gemini-3-flash-preview",
         "gemini-2.5-flash-preview": "gemini-2.5-flash",
     }
@@ -411,8 +412,16 @@ Text to translate:
 
     def set_model(self, model_id: str) -> None:
         """Change the active model."""
-        self.model = self.normalize_model_id(model_id)
-        self._client = None  # Reset client to use new model
+        if model_id in self.MODELS:
+            normalized_model = model_id
+        else:
+            normalized_model = self.MODEL_ALIASES.get(model_id)
+            if normalized_model not in self.MODELS:
+                return
+
+        if normalized_model != self.model:
+            self.model = normalized_model
+            self._client = None  # Reset client to use new model
 
     def get_current_model(self) -> str:
         """Get the current model ID."""

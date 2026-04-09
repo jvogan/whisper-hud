@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import stat
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -22,6 +23,7 @@ from .logging_config import get_logger
 logger = get_logger("encryption")
 
 HISTORY_KEY_FILE = "history_encryption.key"
+SCRATCH_DIR_NAME = "scratch"
 SCRYPT_PARAMS = {"n": 2**17, "r": 8, "p": 1, "length": 32}
 _session_history_key: Optional[bytes] = None
 
@@ -30,6 +32,49 @@ def _history_key_file() -> Path:
     from .config import CONFIG_DIR
 
     return CONFIG_DIR / HISTORY_KEY_FILE
+
+
+def get_private_scratch_dir() -> Path:
+    """Return the app-owned scratch directory for transient audio files."""
+    from .config import CONFIG_DIR
+
+    scratch_dir = CONFIG_DIR / SCRATCH_DIR_NAME
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        os.chmod(scratch_dir, 0o700)
+    except Exception:
+        pass
+
+    return scratch_dir
+
+
+def create_private_temp_file(data: bytes, *, prefix: str = "whisper_hud_", suffix: str = ".wav") -> str:
+    """Write bytes to a private temp file inside the app-owned scratch directory."""
+    scratch_dir = get_private_scratch_dir()
+    fd, temp_path = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=str(scratch_dir))
+    try:
+        try:
+            os.fchmod(fd, 0o600)
+        except Exception:
+            pass
+
+        with os.fdopen(fd, "wb") as temp_file:
+            temp_file.write(data)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+
+        return temp_path
+    except BaseException:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+        try:
+            os.unlink(temp_path)
+        except Exception:
+            pass
+        raise
 
 
 def _ensure_history_key_permissions(path: Path) -> None:
@@ -363,16 +408,27 @@ def secure_delete(filepath: str) -> bool:
         return True  # Nothing to delete
 
     try:
-        # Get file size
-        size = os.path.getsize(filepath)
+        flags = os.O_RDWR
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
 
-        # Overwrite with zeros
-        with open(filepath, "wb") as f:
-            f.write(b"\x00" * size)
-            f.flush()
-            os.fsync(f.fileno())
+        fd = os.open(filepath, flags)
+        try:
+            file_stat = os.fstat(fd)
+            if not stat.S_ISREG(file_stat.st_mode):
+                raise OSError("secure_delete only supports regular files")
 
-        # Now unlink
+            remaining = file_stat.st_size
+            overwrite_chunk = b"\x00" * min(max(remaining, 1), 1024 * 1024)
+            while remaining > 0:
+                chunk_size = min(len(overwrite_chunk), remaining)
+                os.write(fd, overwrite_chunk[:chunk_size])
+                remaining -= chunk_size
+
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
         os.unlink(filepath)
         return True
     except Exception as e:
@@ -392,7 +448,7 @@ def cleanup_orphaned_temp_files(prefix: str = "whisper_hud", temp_dir: Optional[
 
     Args:
         prefix: File name prefix to match
-        temp_dir: Directory to scan (defaults to system temp)
+        temp_dir: Directory to scan (defaults to the app-owned scratch directory)
 
     Returns:
         Number of files cleaned up
@@ -400,7 +456,7 @@ def cleanup_orphaned_temp_files(prefix: str = "whisper_hud", temp_dir: Optional[
     import glob
 
     if temp_dir is None:
-        temp_dir = tempfile.gettempdir()
+        temp_dir = str(get_private_scratch_dir())
 
     # Find matching temp files
     pattern = os.path.join(temp_dir, f"{prefix}*.wav")
@@ -409,17 +465,15 @@ def cleanup_orphaned_temp_files(prefix: str = "whisper_hud", temp_dir: Optional[
     cleaned = 0
     for filepath in orphaned_files:
         try:
-            if os.path.islink(filepath):
+            file_stat = os.lstat(filepath)
+            if stat.S_ISLNK(file_stat.st_mode) or not stat.S_ISREG(file_stat.st_mode):
                 continue
-            # Check if file is old (more than 5 minutes)
-            mtime = os.path.getmtime(filepath)
-            import time
-
-            age_seconds = time.time() - mtime
-            if age_seconds > 300:  # 5 minutes
-                if secure_delete(filepath):
-                    cleaned += 1
-                    logger.debug(f"Cleaned up orphaned temp file: {filepath}")
+            if file_stat.st_nlink != 1:
+                continue
+            deleted_securely = secure_delete(filepath)
+            if deleted_securely or not os.path.exists(filepath):
+                cleaned += 1
+                logger.debug(f"Cleaned up orphaned temp file: {filepath}")
         except Exception as e:
             logger.debug(f"Failed to check/clean temp file {filepath}: {e}")
 

@@ -18,11 +18,16 @@ class TestConfig:
             config = Config()
 
             assert config.default_provider == "apple"
+            assert config.openai_model == "gpt-4o-mini-transcribe"
             assert config.openai_realtime_model == "gpt-4o-mini-transcribe"
+            assert config.gemini_model == "gemini-2.5-flash"
             assert config.hotkey_mode == "push_to_talk"
             assert config.auto_paste is True
             assert config.show_hud is True
             assert config.translation_enabled is False
+            assert config.gemini_translate_model == "gemini-2.5-flash"
+            assert config.openai_translate_model == "gpt-5.4-mini"
+            assert config.anthropic_translate_model == "claude-sonnet-4-6"
             assert config.source_language == "auto"
             assert config.target_language == "en"
             assert config.setup_completed is False
@@ -252,11 +257,37 @@ class TestConfig:
 
             config = Config()
 
-            assert config.get_provider_model("openai") == "gpt-4o-transcribe"
+            assert config.get_provider_model("openai") == "gpt-4o-mini-transcribe"
             assert config.get_provider_model("openai_realtime") == "gpt-4o-mini-transcribe"
-            assert config.get_provider_model("gemini") == "gemini-3-flash-preview"
+            assert config.get_provider_model("gemini") == "gemini-2.5-flash"
             assert config.get_provider_model("apple") == "en-US"
             assert config.get_provider_model("unknown") == ""
+
+    def test_load_migrates_stale_model_ids(self):
+        """Known removed or outdated model IDs should normalize during config load."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            config_file = config_dir / "config.json"
+            config_file.write_text(
+                json.dumps(
+                    {
+                        "openai_translate_model": "gpt-5-mini",
+                        "anthropic_translate_model": "claude-sonnet-4-5",
+                        "gemini_model": "gemini-3-pro-preview",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("whisper_hud.config.CONFIG_DIR", config_dir):
+                with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                    from whisper_hud.config import Config
+
+                    loaded = Config.load()
+
+            assert loaded.openai_translate_model == "gpt-5.4-mini"
+            assert loaded.anthropic_translate_model == "claude-sonnet-4-6"
+            assert loaded.gemini_model == "gemini-2.5-pro"
 
     def test_set_provider_model_supports_openai_realtime(self):
         """Realtime provider model selection should persist like other providers."""

@@ -163,18 +163,9 @@ class ParakeetProvider(TranscriptionProvider):
 
         try:
             from parakeet_mlx import transcribe
+            from ..encryption import create_private_temp_file, secure_delete
 
-            # Write audio to temp file
-            # Prefix enables orphan cleanup if app crashes
-            import tempfile
-
-            with tempfile.NamedTemporaryFile(prefix="whisper_hud_", suffix=".wav", delete=False) as f:
-                f.write(audio_bytes)
-                temp_path = f.name
-            try:
-                os.chmod(temp_path, 0o600)
-            except Exception:
-                pass
+            temp_path = create_private_temp_file(audio_bytes)
 
             try:
                 # Transcribe
@@ -193,8 +184,6 @@ class ParakeetProvider(TranscriptionProvider):
 
             finally:
                 # Securely delete temp file (overwrite before unlink)
-                from ..encryption import secure_delete
-
                 secure_delete(temp_path)
 
             duration = time.time() - start_time
@@ -334,18 +323,9 @@ class ParakeetProvider(TranscriptionProvider):
 
         try:
             from parakeet_mlx import transcribe
+            from ..encryption import create_private_temp_file, secure_delete
 
-            # Write audio to temp file
-            # Prefix enables orphan cleanup if app crashes
-            import tempfile
-
-            with tempfile.NamedTemporaryFile(prefix="whisper_hud_", suffix=".wav", delete=False) as f:
-                f.write(audio_bytes)
-                temp_path = f.name
-            try:
-                os.chmod(temp_path, 0o600)
-            except Exception:
-                pass
+            temp_path = create_private_temp_file(audio_bytes)
 
             try:
                 # Transcribe with word timestamps
@@ -374,8 +354,6 @@ class ParakeetProvider(TranscriptionProvider):
 
             finally:
                 # Securely delete temp file
-                from ..encryption import secure_delete
-
                 secure_delete(temp_path)
 
             duration = time.time() - start_time

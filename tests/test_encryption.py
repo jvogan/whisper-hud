@@ -44,6 +44,19 @@ class TestSecureDelete:
         result = secure_delete(None)
         assert result is True
 
+    def test_create_private_temp_file_uses_app_owned_scratch_dir(self, temp_config_dir):
+        """Transient audio should live under the config-owned scratch directory."""
+        with patch("whisper_hud.config.CONFIG_DIR", temp_config_dir):
+            from whisper_hud.encryption import create_private_temp_file, get_private_scratch_dir
+
+            temp_path = create_private_temp_file(b"audio-bytes")
+            scratch_dir = get_private_scratch_dir()
+
+        assert Path(temp_path).parent == scratch_dir
+        assert oct(scratch_dir.stat().st_mode & 0o777) == "0o700"
+        assert oct(Path(temp_path).stat().st_mode & 0o777) == "0o600"
+        assert Path(temp_path).read_bytes() == b"audio-bytes"
+
 
 class TestEncryption:
     """Tests for encryption/decryption functions."""
@@ -170,43 +183,36 @@ class TestCryptographyCheck:
 class TestOrphanedTempCleanup:
     """Tests for orphaned temp file cleanup."""
 
-    def test_cleanup_old_temp_files(self):
-        """Test cleanup of old temp files."""
+    def test_cleanup_temp_files(self):
+        """All orphaned scratch files in the private directory should be cleaned immediately."""
         from whisper_hud.encryption import cleanup_orphaned_temp_files
-        import time
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Create an "old" file (we'll mock the time check)
             temp_file = os.path.join(tmpdir, "whisper_hud_test.wav")
             with open(temp_file, "w") as f:
                 f.write("test audio data")
 
-            # Make file appear old by setting mtime to 2 hours ago
-            old_time = time.time() - 7200  # 2 hours ago
-            os.utime(temp_file, (old_time, old_time))
-
-            # Run cleanup
             cleaned = cleanup_orphaned_temp_files(prefix="whisper_hud", temp_dir=tmpdir)
 
-            # Should have cleaned up the file
             assert cleaned == 1
             assert not os.path.exists(temp_file)
 
-    def test_cleanup_skips_recent_files(self):
-        """Test that recent files are not cleaned up."""
+    def test_cleanup_skips_non_regular_or_multi_link_files(self):
+        """Cleanup should refuse to zero linked scratch files."""
         from whisper_hud.encryption import cleanup_orphaned_temp_files
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Create a recent file
-            temp_file = os.path.join(tmpdir, "whisper_hud_recent.wav")
-            with open(temp_file, "w") as f:
+            source_file = os.path.join(tmpdir, "source.wav")
+            with open(source_file, "w") as f:
                 f.write("test audio data")
+            linked_temp_file = os.path.join(tmpdir, "whisper_hud_recent.wav")
+            os.link(source_file, linked_temp_file)
 
-            # Run cleanup (file is recent, should be skipped)
             cleaned = cleanup_orphaned_temp_files(prefix="whisper_hud", temp_dir=tmpdir)
 
             assert cleaned == 0
-            assert os.path.exists(temp_file)
+            assert os.path.exists(linked_temp_file)
+            assert os.path.exists(source_file)
 
 
 class TestPrivacyConfig:
