@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional
 
 from .base import TranslationProvider, TranslationResult
 from ..error_utils import build_provider_error_message
+from ..http_client_utils import OPENAI_API_BASE_URL, build_hardened_http_client
 
 
 class OpenAITranslateProvider(TranslationProvider):
@@ -136,8 +137,10 @@ class OpenAITranslateProvider(TranslationProvider):
 
             self._client = OpenAI(
                 api_key=api_key,
+                base_url=OPENAI_API_BASE_URL,
                 timeout=self.CLIENT_TIMEOUT_SECONDS,
                 max_retries=self.CLIENT_MAX_RETRIES,
+                http_client=build_hardened_http_client(self.CLIENT_TIMEOUT_SECONDS),
             )
 
         return self._client

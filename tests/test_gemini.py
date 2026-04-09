@@ -252,3 +252,26 @@ def test_transcribe_streaming_handles_empty_audio_gracefully():
     assert result.text == ""
     assert result.duration_seconds == 0
     assert result.cost_estimate == 0
+
+
+def test_transcribe_streaming_raises_runtime_error_on_api_error(
+    monkeypatch,
+    sample_audio_bytes,
+    fake_gemini_sdk,
+):
+    """Streaming transcription should sanitize backend failures the same way as batch."""
+    provider = GeminiProvider()
+
+    class FakeAPIError(Exception):
+        def __init__(self, message):
+            super().__init__(message)
+            self.status_code = 429
+
+    class FakeModels:
+        def generate_content_stream(self, *, model, contents):
+            raise FakeAPIError("Quota exceeded")
+
+    monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(models=FakeModels()))
+
+    with pytest.raises(RuntimeError, match="Gemini transcription failed: rate limited"):
+        provider.transcribe_streaming(sample_audio_bytes, lambda _chunk: None)

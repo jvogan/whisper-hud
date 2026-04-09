@@ -16,7 +16,7 @@ import rumps
 import threading
 import time
 import weakref
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Optional
 
@@ -3034,9 +3034,21 @@ class WhisperHUDApp(rumps.App):
 
         self.config.history_enabled = not self.config.history_enabled
         if not self.config.history_enabled:
-            self.config.clear_history()
+            if not self.config.clear_history():
+                self.config.history_enabled = True
+                rumps.alert(
+                    title="History Update Failed",
+                    message="WhisperHUD could not persist the history setting. Your existing history was kept.",
+                )
+                return
         else:
-            self.config.save()
+            if not self.config.save():
+                self.config.history_enabled = False
+                rumps.alert(
+                    title="History Update Failed",
+                    message="WhisperHUD could not persist the history setting.",
+                )
+                return
         self._schedule_menu_rebuild()
 
     def _toggle_private_mode(self, sender):
@@ -3055,7 +3067,12 @@ class WhisperHUDApp(rumps.App):
             )
 
             if response == 1:
-                self.config.disable_private_mode()
+                if not self.config.disable_private_mode():
+                    rumps.alert(
+                        title="Private Mode Update Failed",
+                        message="WhisperHUD could not persist the Private Mode change.",
+                    )
+                    return
                 self._notify("WhisperHUD", "Private Mode Off", "You can now save transcription history if desired.")
                 self._schedule_menu_rebuild()
         else:
@@ -3081,7 +3098,12 @@ class WhisperHUDApp(rumps.App):
             )
 
             if response == 1:
-                self.config.enable_private_mode()
+                if not self.config.enable_private_mode():
+                    rumps.alert(
+                        title="Private Mode Update Failed",
+                        message="WhisperHUD could not persist the Private Mode change.",
+                    )
+                    return
                 self._notify("WhisperHUD", "🔒 Private Mode On", "WhisperHUD will not keep transcription history.")
                 self._schedule_menu_rebuild()
 
@@ -3276,10 +3298,17 @@ class WhisperHUDApp(rumps.App):
                     )
 
                     if response == 1:
+                        previous_config = Config(**asdict(self.config))
                         imported_config = self.config.merge_imported_config(imported_config)
 
                         self.config.update_from(imported_config)
-                        self.config.save()
+                        if not self.config.save():
+                            self.config.update_from(previous_config)
+                            rumps.alert(
+                                title="Import Failed",
+                                message="WhisperHUD could not persist the imported settings. Your existing settings were restored.",
+                            )
+                            return
 
                         # Reload components
                         self.transcriber.reload_config()
@@ -3808,7 +3837,12 @@ class WhisperHUDApp(rumps.App):
             cancel="Cancel",
         )
         if response == 1:
-            self.config.clear_history()
+            if not self.config.clear_history():
+                rumps.alert(
+                    title="Clear History Failed",
+                    message="WhisperHUD could not persist the history change.",
+                )
+                return
             self._schedule_menu_rebuild()
             self._notify("WhisperHUD", "History Cleared", "All transcription history has been cleared.")
 
@@ -3827,7 +3861,12 @@ class WhisperHUDApp(rumps.App):
             cancel="Cancel",
         )
         if response == 1:
-            self.config.reset_stats()
+            if not self.config.reset_stats():
+                rumps.alert(
+                    title="Reset Statistics Failed",
+                    message="WhisperHUD could not persist the statistics reset.",
+                )
+                return
             self._schedule_menu_rebuild()
             self._notify("WhisperHUD", "Statistics Reset", "Transcription statistics have been reset.")
 

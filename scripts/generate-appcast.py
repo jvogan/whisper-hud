@@ -38,6 +38,7 @@ GITHUB_REPO = "jvogan/whisper-hud"
 GITHUB_RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases"
 DOWNLOAD_BASE_URL = f"https://github.com/{GITHUB_REPO}/releases/download"
 APPCAST_FILENAME = "appcast.xml"
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def get_file_size(path: Path) -> int:
@@ -54,6 +55,17 @@ def get_file_sha256(path: Path) -> str:
     return sha256.hexdigest()
 
 
+def _default_private_key_locations() -> List[Path]:
+    """Return trusted default locations for the Sparkle private key."""
+    locations: List[Path] = []
+    env_key = os.environ.get("SPARKLE_PRIVATE_KEY_PATH")
+    if env_key:
+        locations.append(Path(env_key).expanduser())
+    locations.append(Path.home() / ".sparkle" / "eddsa_private.key")
+    locations.append(SCRIPT_DIR.parent / "keys" / "eddsa_private.key")
+    return locations
+
+
 def sign_file_eddsa(path: Path, private_key_path: Optional[Path] = None) -> Optional[str]:
     """
     Sign a file with EdDSA for Sparkle 2.x.
@@ -61,12 +73,8 @@ def sign_file_eddsa(path: Path, private_key_path: Optional[Path] = None) -> Opti
     Returns the base64-encoded signature or None if signing fails.
     """
     if private_key_path is None:
-        # Look for key in standard locations
-        for key_loc in [
-            Path.home() / ".sparkle" / "eddsa_private.key",
-            Path("eddsa_private.key"),
-            Path("keys/eddsa_private.key"),
-        ]:
+        # Look for key in trusted locations.
+        for key_loc in _default_private_key_locations():
             if key_loc.exists():
                 private_key_path = key_loc
                 break

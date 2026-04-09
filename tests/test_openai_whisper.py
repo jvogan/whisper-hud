@@ -55,6 +55,31 @@ def test_provider_reports_available_when_key_present_and_package_installed(monke
     assert provider.is_configured() is True
 
 
+def test_client_pins_openai_base_url_and_disables_env_routing(monkeypatch):
+    """The OpenAI client should ignore ambient base-url and proxy environment state."""
+    captured_kwargs = {}
+    fake_client = _FakeClient(response=SimpleNamespace(text="ok"))
+
+    def fake_openai_client(**kwargs):
+        captured_kwargs.update(kwargs)
+        return fake_client
+
+    monkeypatch.setattr("whisper_hud.providers.openai_whisper.get_api_key", lambda _: "sk-test")
+    monkeypatch.setattr(
+        OpenAITranscribeProvider,
+        "_get_openai_client_class",
+        staticmethod(lambda: fake_openai_client),
+    )
+
+    provider = OpenAITranscribeProvider()
+
+    assert provider.client is fake_client
+    assert captured_kwargs["base_url"] == "https://api.openai.com/v1"
+    assert captured_kwargs["http_client"].trust_env is False
+    assert captured_kwargs["http_client"].follow_redirects is False
+    captured_kwargs["http_client"].close()
+
+
 def test_transcribe_returns_empty_result_for_empty_audio():
     """Empty audio should short-circuit without touching the API."""
     result = OpenAITranscribeProvider().transcribe(b"")

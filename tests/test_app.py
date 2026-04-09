@@ -118,6 +118,104 @@ def _build_recording_app():
     return app
 
 
+def test_import_settings_restores_previous_config_when_save_fails(monkeypatch):
+    """Settings import should fail closed when the new config cannot be persisted."""
+
+    class FakeURL:
+        def path(self):
+            return "/tmp/settings.json"
+
+    class FakePanel:
+        def setTitle_(self, _title):
+            return None
+
+        def setAllowedFileTypes_(self, _types):
+            return None
+
+        def setCanChooseFiles_(self, _value):
+            return None
+
+        def setCanChooseDirectories_(self, _value):
+            return None
+
+        def runModal(self):
+            return 1
+
+        def URL(self):
+            return FakeURL()
+
+    class FakeOpenPanel:
+        @staticmethod
+        def openPanel():
+            return FakePanel()
+
+    fake_rumps = types.SimpleNamespace(alert=MagicMock(side_effect=[1, None]))
+    monkeypatch.setattr("whisper_hud.app.rumps", fake_rumps)
+    monkeypatch.setitem(sys.modules, "AppKit", types.SimpleNamespace(NSOpenPanel=FakeOpenPanel))
+
+    imported_config = Config()
+    imported_config.default_provider = "gemini"
+
+    monkeypatch.setattr(
+        Config,
+        "import_settings",
+        classmethod(lambda cls, filepath: (True, "Imported", imported_config)),
+    )
+
+    app = AppHarness.__new__(AppHarness)
+    app.config = Config()
+    app.config.default_provider = "openai"
+    app.config.history = [{"text": "keep"}]
+    app.config.save = MagicMock(return_value=False)
+    app.transcriber = MagicMock()
+    app.translator = MagicMock()
+    app.recorder = MagicMock()
+    app._restart_hotkey_listener = MagicMock()
+    app._apply_appearance_to_components = MagicMock()
+    app._schedule_menu_rebuild = MagicMock()
+    app._notify = MagicMock()
+
+    app._import_settings(None)
+
+    assert app.config.default_provider == "openai"
+    assert app.config.history == [{"text": "keep"}]
+    app.config.save.assert_called_once_with()
+    app.transcriber.reload_config.assert_not_called()
+    app.translator.reload_config.assert_not_called()
+    app._notify.assert_not_called()
+    assert fake_rumps.alert.call_args_list[1].kwargs["title"] == "Import Failed"
+
+
+def test_clear_history_shows_failure_alert_when_persist_fails(monkeypatch):
+    """Clear-history UI should not claim success when config persistence fails."""
+    fake_rumps = types.SimpleNamespace(alert=MagicMock(side_effect=[1, None]))
+    monkeypatch.setattr("whisper_hud.app.rumps", fake_rumps)
+
+    app = _build_recording_app()
+    app.config.clear_history = MagicMock(return_value=False)
+
+    app._clear_history(None)
+
+    app._schedule_menu_rebuild.assert_not_called()
+    app._notify.assert_not_called()
+    assert fake_rumps.alert.call_args_list[1].kwargs["title"] == "Clear History Failed"
+
+
+def test_enable_private_mode_shows_failure_alert_when_persist_fails(monkeypatch):
+    """Private Mode UI should fail closed if the config update cannot be saved."""
+    fake_rumps = types.SimpleNamespace(alert=MagicMock(side_effect=[1, None]))
+    monkeypatch.setattr("whisper_hud.app.rumps", fake_rumps)
+
+    app = _build_recording_app()
+    app.config.enable_private_mode = MagicMock(return_value=False)
+
+    app._toggle_private_mode(None)
+
+    app._schedule_menu_rebuild.assert_not_called()
+    app._notify.assert_not_called()
+    assert fake_rumps.alert.call_args_list[1].kwargs["title"] == "Private Mode Update Failed"
+
+
 def _build_menu_app(monkeypatch):
     """Construct a partial app instance for _build_menu assertions."""
     fake_rumps = types.SimpleNamespace(MenuItem=FakeMenuItem, separator=object())

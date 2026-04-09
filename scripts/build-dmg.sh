@@ -23,6 +23,14 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+applescript_escape() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//$'\n'/ }"
+    printf '%s' "$value"
+}
+
 # Project paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -188,6 +196,10 @@ hdiutil create -srcfolder "$APP_PATH" \
 # Mount the DMG
 echo -e "${CYAN}Mounting DMG...${NC}"
 MOUNT_DIR=$(hdiutil attach -readwrite -noverify "$DMG_TEMP" | grep "/Volumes" | sed 's/.*\(\/Volumes\/.*\)/\1/')
+if [ -z "$MOUNT_DIR" ]; then
+    echo -e "${RED}Error: Failed to determine DMG mount point${NC}"
+    exit 1
+fi
 echo -e "  Mounted at: $MOUNT_DIR"
 
 # Create Applications symlink
@@ -207,9 +219,11 @@ else
 fi
 
 # Apply styling with AppleScript
+APPLE_SCRIPT_VOLUME_NAME="$(applescript_escape "$VOLUME_NAME")"
+APPLE_SCRIPT_APP_NAME="$(applescript_escape "$APP_NAME.app")"
 osascript << EOF
 tell application "Finder"
-    tell disk "$VOLUME_NAME"
+    tell disk "$APPLE_SCRIPT_VOLUME_NAME"
         open
         set current view of container window to icon view
         set toolbar visible of container window to false
@@ -225,7 +239,7 @@ tell application "Finder"
         fi)
 
         -- Position icons
-        set position of item "$APP_NAME.app" to {$APP_X, $APP_Y}
+        set position of item "$APPLE_SCRIPT_APP_NAME" to {$APP_X, $APP_Y}
         set position of item "Applications" to {$APPLICATIONS_X, $APPLICATIONS_Y}
 
         update without registering applications

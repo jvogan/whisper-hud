@@ -11,12 +11,14 @@
 #
 # Environment variables:
 #   DEVELOPER_ID       - Apple Developer ID certificate name
-#   APPLE_ID           - Apple ID email for notarization
-#   APPLE_PASSWORD     - App-specific password for notarization
-#   APPLE_TEAM_ID      - Apple Developer Team ID
+#   APPLE_NOTARY_PROFILE - notarytool keychain profile for notarization
 #
 # For local testing without a certificate:
 #   The script will use ad-hoc signing if no certificate is available.
+#
+# To set up a notarytool keychain profile once:
+#   xcrun notarytool store-credentials whisperhud-notary \
+#       --apple-id "<apple-id>" --team-id "<team-id>" --password "<app-specific-password>"
 #
 
 set -e
@@ -64,6 +66,7 @@ verify_embedded_sparkle() {
 # Default options
 IDENTITY=""
 NOTARIZE=false
+APPLE_NOTARY_PROFILE="${APPLE_NOTARY_PROFILE:-}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -190,8 +193,11 @@ if [ "$NOTARIZE" = true ]; then
     echo -e "${CYAN}Submitting for notarization...${NC}"
 
     # Check required environment variables
-    if [ -z "$APPLE_ID" ] || [ -z "$APPLE_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
-        echo -e "${RED}Error: Notarization requires APPLE_ID, APPLE_PASSWORD, and APPLE_TEAM_ID${NC}"
+    if [ -z "$APPLE_NOTARY_PROFILE" ]; then
+        echo -e "${RED}Error: Notarization requires APPLE_NOTARY_PROFILE${NC}"
+        echo -e "${YELLOW}Store credentials once with:${NC}"
+        echo -e "  ${CYAN}xcrun notarytool store-credentials whisperhud-notary --apple-id \"<apple-id>\" --team-id \"<team-id>\" --password \"<app-specific-password>\"${NC}"
+        echo -e "${YELLOW}Then rerun with:${NC} ${CYAN}APPLE_NOTARY_PROFILE=whisperhud-notary ./scripts/sign-app.sh --notarize${NC}"
         exit 1
     fi
 
@@ -203,9 +209,7 @@ if [ "$NOTARIZE" = true ]; then
     # Submit for notarization
     echo -e "  Submitting to Apple..."
     xcrun notarytool submit "$NOTARIZE_ZIP" \
-        --apple-id "$APPLE_ID" \
-        --password "$APPLE_PASSWORD" \
-        --team-id "$APPLE_TEAM_ID" \
+        --keychain-profile "$APPLE_NOTARY_PROFILE" \
         --wait
 
     # Staple the ticket

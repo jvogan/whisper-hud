@@ -501,20 +501,39 @@ def import_api_keys(
     """
     target_mode = _normalize_mode(mode or get_storage_mode())
 
+    existing_keys: dict[str, str] = {}
     if replace:
-        ok, msg = clear_api_keys(target_mode)
+        ok, existing_keys, msg = export_api_keys(mode=target_mode)
         if not ok:
             return False, msg
 
     if target_mode == "passphrase" and not is_passphrase_unlocked():
         return False, "Passphrase store is locked"
 
+    normalized_keys: dict[str, str] = {}
     for provider, key in keys.items():
         if provider not in PROVIDERS or not key:
             continue
-        normalized_key = _normalize_and_validate_api_key(provider, key)
+        normalized_keys[provider] = _normalize_and_validate_api_key(provider, key)
+
+    if replace:
+        ok, msg = clear_api_keys(target_mode)
+        if not ok:
+            return False, msg
+
+    stored_providers: list[str] = []
+    for provider, normalized_key in normalized_keys.items():
         if not _set_api_key_for_mode(provider, normalized_key, target_mode):
+            if replace:
+                clear_api_keys(target_mode)
+                restore_ok, restore_msg = import_api_keys(existing_keys, mode=target_mode, replace=False)
+                if not restore_ok:
+                    return (
+                        False,
+                        f"Failed to store key for {provider}; original keys could not be restored: {restore_msg}",
+                    )
             return False, f"Failed to store key for {provider}"
+        stored_providers.append(provider)
 
     return True, ""
 

@@ -148,6 +148,103 @@ class TestConfig:
             config.clear_history()
             assert len(config.history) == 0
 
+    def test_add_to_history_rolls_back_when_save_fails(self):
+        """History writes should not remain in memory if persistence fails."""
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
+            from whisper_hud.config import Config
+
+            config = Config()
+            config.history_enabled = True
+            config.history = [{"text": "saved", "timestamp": 1, "provider": "openai", "translated": False}]
+            original_history = [item.copy() for item in config.history]
+
+            with patch.object(Config, "save", return_value=False):
+                assert config.add_to_history("new item", provider="gemini") is False
+
+            assert config.history == original_history
+
+    def test_clear_history_rolls_back_when_save_fails(self):
+        """Clearing history should fail closed when the config cannot be written."""
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
+            from whisper_hud.config import Config
+
+            config = Config()
+            config.history = [{"text": "saved", "timestamp": 1, "provider": "openai", "translated": False}]
+            original_history = [item.copy() for item in config.history]
+
+            with patch.object(Config, "save", return_value=False):
+                assert config.clear_history() is False
+
+            assert config.history == original_history
+
+    def test_private_mode_resets_history_and_stats(self):
+        """Enabling private mode should clear retained history and stats."""
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
+            from whisper_hud.config import Config
+
+            config = Config()
+            config.history_enabled = True
+            config.history = [{"text": "saved", "timestamp": 1}]
+            config.total_transcriptions = 12
+            config.total_cost = 4.5
+
+            assert config.enable_private_mode() is True
+
+            assert config.private_mode is True
+            assert config.history_enabled is False
+            assert config.history == []
+            assert config.total_transcriptions == 0
+            assert config.total_cost == 0.0
+
+    def test_enable_private_mode_rolls_back_when_save_fails(self):
+        """Private mode should not partially clear retained data when save fails."""
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
+            from whisper_hud.config import Config
+
+            config = Config()
+            config.private_mode = False
+            config.history_enabled = True
+            config.history = [{"text": "saved", "timestamp": 1}]
+            config.total_transcriptions = 12
+            config.total_cost = 4.5
+
+            with patch.object(Config, "save", return_value=False):
+                assert config.enable_private_mode() is False
+
+            assert config.private_mode is False
+            assert config.history_enabled is True
+            assert config.history == [{"text": "saved", "timestamp": 1}]
+            assert config.total_transcriptions == 12
+            assert config.total_cost == 4.5
+
+    def test_disable_private_mode_rolls_back_when_save_fails(self):
+        """Failed private-mode exits should keep the privacy boundary active."""
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
+            from whisper_hud.config import Config
+
+            config = Config()
+            config.private_mode = True
+
+            with patch.object(Config, "save", return_value=False):
+                assert config.disable_private_mode() is False
+
+            assert config.private_mode is True
+
+    def test_add_transcription_stats_skips_private_mode(self):
+        """Private mode should not retain new transcription activity stats."""
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
+            from whisper_hud.config import Config
+
+            config = Config()
+            config.private_mode = True
+            config.total_transcriptions = 5
+            config.total_cost = 1.5
+
+            assert config.add_transcription_stats(0.25) is False
+
+            assert config.total_transcriptions == 5
+            assert config.total_cost == 1.5
+
     def test_provider_model_mapping(self):
         """Test provider to model mapping."""
         with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):

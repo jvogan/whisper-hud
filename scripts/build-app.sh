@@ -11,7 +11,8 @@
 #
 # Requirements:
 #   - Python 3.11+
-#   - py2app (pip install py2app)
+#   - py2app already installed in the selected interpreter
+#   - app dependencies already installed in the selected interpreter
 #   - Sparkle.framework (optional, for auto-updates)
 #
 
@@ -129,22 +130,19 @@ echo -e "${GREEN}✓ Python $PYTHON_VERSION (${PYTHON_BIN})${NC}"
 # Check py2app
 echo -e "${CYAN}Checking py2app...${NC}"
 if ! "$PYTHON_BIN" -c "import py2app" 2>/dev/null; then
-    echo -e "${YELLOW}Installing py2app...${NC}"
-    if ! "$PYTHON_BIN" -m pip install py2app --quiet; then
-        echo -e "${RED}Error: Could not install py2app with ${PYTHON_BIN}${NC}"
-        echo -e "${YELLOW}Tip:${NC} Use the project virtualenv Python or set PYTHON_BIN explicitly."
-        echo -e "  ${CYAN}cd \"$PROJECT_ROOT/whisper-hud\" && python3.11 -m venv venv && source venv/bin/activate && pip install -r requirements.txt${NC}"
-        echo -e "  ${CYAN}PYTHON_BIN=\"$PROJECT_ROOT/whisper-hud/venv/bin/python\" ./scripts/build-app.sh --clean${NC}"
-        exit 1
-    fi
+    echo -e "${RED}Error: py2app is not installed for ${PYTHON_BIN}${NC}"
+    echo -e "${YELLOW}Refusing to auto-install release dependencies during the build.${NC}"
+    echo -e "${YELLOW}Tip:${NC} Use the project virtualenv Python or set PYTHON_BIN explicitly."
+    echo -e "  ${CYAN}cd \"$PROJECT_ROOT/whisper-hud\" && python3.11 -m venv venv && source venv/bin/activate && pip install -r requirements.txt${NC}"
+    echo -e "  ${CYAN}PYTHON_BIN=\"$PROJECT_ROOT/whisper-hud/venv/bin/python\" ./scripts/build-app.sh --clean${NC}"
+    exit 1
 fi
 echo -e "${GREEN}✓ py2app available${NC}"
 
 # Check runtime dependencies used by the app bundle
 echo -e "${CYAN}Checking app dependencies...${NC}"
-if ! "$PYTHON_BIN" - <<'PY'
+if ! MISSING_MODULES="$("$PYTHON_BIN" - <<'PY'
 import importlib
-import sys
 
 required = [
     "rumps",
@@ -169,9 +167,15 @@ if missing:
     print(",".join(missing))
     raise SystemExit(1)
 PY
-then
-    echo -e "${YELLOW}Installing missing app dependencies...${NC}"
-    "$PYTHON_BIN" -m pip install -r "$PROJECT_ROOT/whisper-hud/requirements.txt"
+)"; then
+    echo -e "${RED}Error: Missing app dependencies for ${PYTHON_BIN}${NC}"
+    if [ -n "$MISSING_MODULES" ]; then
+        echo -e "  Missing modules: ${YELLOW}$MISSING_MODULES${NC}"
+    fi
+    echo -e "${YELLOW}Refusing to auto-install release dependencies during the build.${NC}"
+    echo -e "${YELLOW}Tip:${NC} Install the pinned project requirements first."
+    echo -e "  ${CYAN}cd \"$PROJECT_ROOT/whisper-hud\" && source venv/bin/activate && pip install -r requirements.txt${NC}"
+    exit 1
 fi
 echo -e "${GREEN}✓ App dependencies available${NC}"
 

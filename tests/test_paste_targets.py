@@ -98,3 +98,26 @@ class TestPasteTargets:
 
         assert manager.paste_to_terminal("secret text") is True
         assert mock_copy.call_args_list == [call("secret text"), call("")]
+
+    @patch("subprocess.run")
+    def test_paste_to_tmux_uses_tmux_paste_buffer_for_multiline_text(self, mock_run):
+        """tmux routing should use bracketed paste instead of send-keys for untrusted text."""
+        from whisper_hud.paste_targets import PasteTargetManager
+
+        manager = PasteTargetManager()
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stderr=b""),
+            MagicMock(returncode=0, stderr=b""),
+            MagicMock(returncode=0, stderr=b""),
+        ]
+
+        with patch.object(manager, "get_tmux_sessions", return_value=["dev"]):
+            assert manager.paste_to_tmux("line 1\nline 2", "dev") is True
+
+        load_call, paste_call, delete_call = mock_run.call_args_list
+        buffer_name = load_call.args[0][3]
+        assert load_call.args[0] == ["tmux", "load-buffer", "-b", buffer_name, "-"]
+        assert load_call.kwargs["input"] == b"line 1\nline 2"
+        assert paste_call.args[0] == ["tmux", "paste-buffer", "-p", "-t", "dev", "-b", buffer_name]
+        assert delete_call.args[0] == ["tmux", "delete-buffer", "-b", buffer_name]
+        assert buffer_name.startswith("whisperhud-paste-")

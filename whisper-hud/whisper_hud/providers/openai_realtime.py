@@ -19,6 +19,7 @@ from scipy.signal import resample_poly
 
 from .base import LiveTranscriptionSession, TranscriptionProvider, TranscriptionResult
 from .error_utils import build_provider_error_message
+from .http_client_utils import OPENAI_API_BASE_URL, OPENAI_WEBSOCKET_BASE_URL, build_hardened_http_client
 from .openai_whisper import OpenAITranscribeProvider
 from ..keychain import get_api_key
 from ..logging_config import get_logger
@@ -52,8 +53,11 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
     ):
         self._client = OpenAI(
             api_key=api_key,
+            base_url=OPENAI_API_BASE_URL,
+            websocket_base_url=OPENAI_WEBSOCKET_BASE_URL,
             timeout=self.CLIENT_TIMEOUT_SECONDS,
             max_retries=self.CLIENT_MAX_RETRIES,
+            http_client=build_hardened_http_client(self.CLIENT_TIMEOUT_SECONDS),
         )
         self._model = model
         self._provider_name = provider_name

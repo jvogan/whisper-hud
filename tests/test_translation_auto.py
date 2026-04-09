@@ -121,11 +121,51 @@ def test_openai_streaming_delta_parser():
     assert provider._extract_text_from_response(response) == "Hola mundo"
 
 
+def test_openai_client_pins_base_url_and_disables_env_routing(monkeypatch):
+    """OpenAI translation should pin the vendor endpoint and ignore ambient proxies."""
+    captured_kwargs = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+
+    monkeypatch.setattr("whisper_hud.keychain.get_api_key", lambda _provider: "sk-test")
+    monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
+
+    provider = OpenAITranslateProvider()
+    provider._get_client()
+
+    assert captured_kwargs["base_url"] == "https://api.openai.com/v1"
+    assert captured_kwargs["http_client"].trust_env is False
+    assert captured_kwargs["http_client"].follow_redirects is False
+    captured_kwargs["http_client"].close()
+
+
 def test_anthropic_model_normalization_handles_stale_ids():
     """Anthropic provider should map historical model IDs to current aliases."""
     assert AnthropicTranslateProvider.normalize_model_id("claude-opus-4-5") == "claude-opus-4-6"
     assert AnthropicTranslateProvider.normalize_model_id("claude-opus-4-1") == "claude-opus-4-6"
     assert AnthropicTranslateProvider.normalize_model_id("unknown-id") == AnthropicTranslateProvider.DEFAULT_MODEL
+
+
+def test_anthropic_client_pins_base_url_and_disables_env_routing(monkeypatch):
+    """Anthropic translation should pin the vendor endpoint and ignore ambient proxies."""
+    captured_kwargs = {}
+
+    class FakeAnthropic:
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+
+    monkeypatch.setattr("whisper_hud.keychain.get_api_key", lambda _provider: "anthropic-key")
+    monkeypatch.setattr("anthropic.Anthropic", FakeAnthropic)
+
+    provider = AnthropicTranslateProvider()
+    provider._get_client()
+
+    assert captured_kwargs["base_url"] == "https://api.anthropic.com"
+    assert captured_kwargs["http_client"].trust_env is False
+    assert captured_kwargs["http_client"].follow_redirects is False
+    captured_kwargs["http_client"].close()
 
 
 def test_anthropic_translate_returns_result_on_success(monkeypatch):

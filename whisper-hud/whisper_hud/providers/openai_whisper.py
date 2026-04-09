@@ -15,6 +15,7 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 from .base import TranscriptionProvider, TranscriptionResult
 from .error_utils import build_provider_error_message
+from .http_client_utils import OPENAI_API_BASE_URL, build_hardened_http_client
 from ..keychain import get_api_key
 
 if TYPE_CHECKING:
@@ -71,8 +72,10 @@ class OpenAITranscribeProvider(TranscriptionProvider):
                 raise ValueError("OpenAI API key not configured")
             self._client = openai_cls(
                 api_key=api_key,
+                base_url=OPENAI_API_BASE_URL,
                 timeout=self.CLIENT_TIMEOUT_SECONDS,
                 max_retries=self.CLIENT_MAX_RETRIES,
+                http_client=build_hardened_http_client(self.CLIENT_TIMEOUT_SECONDS),
             )
         return self._client
 

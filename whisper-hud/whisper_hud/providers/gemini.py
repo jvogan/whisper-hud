@@ -193,20 +193,22 @@ Output ONLY the transcription text, nothing else.
 Do not add any commentary, labels, or formatting.
 Preserve natural punctuation."""
 
-        # Generate with streaming
-        response = client.models.generate_content_stream(
-            model=self.model,
-            contents=[
-                prompt,
-                types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
-            ],
-        )
-
         cumulative_text = ""
-        for chunk in response:
-            if chunk.text:
-                cumulative_text += chunk.text
-                on_chunk(cumulative_text.strip())
+        try:
+            response = client.models.generate_content_stream(
+                model=self.model,
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
+                ],
+            )
+
+            for chunk in response:
+                if chunk.text:
+                    cumulative_text += chunk.text
+                    on_chunk(cumulative_text.strip())
+        except Exception as e:
+            raise RuntimeError(self._build_transcribe_error_message(e)) from e
 
         # Get final text
         final_text = cumulative_text.strip()

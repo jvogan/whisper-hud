@@ -3,6 +3,8 @@
 import builtins
 from unittest.mock import Mock, patch
 
+import pytest
+
 
 class TestKeychainMode:
     """Tests for keychain storage mode."""
@@ -160,6 +162,20 @@ class TestSessionOnlyMode:
             assert get_api_key("openai") == valid_openai_key
             assert delete_api_key("openai")
             assert get_api_key("openai") is None
+
+    def test_import_api_keys_replace_does_not_clear_existing_keys_before_validation(self):
+        """Replacement imports should validate first so bad input cannot wipe working keys."""
+        from whisper_hud.keychain import clear_api_keys, get_api_key, import_api_keys, set_api_key
+
+        with patch("whisper_hud.keychain.get_storage_mode", return_value="none"):
+            clear_api_keys(mode="none")
+            existing_key = "sk-" + ("z" * 40)
+            assert set_api_key("openai", existing_key)
+
+            with pytest.raises(ValueError, match="OpenAI API keys must start with 'sk-'"):
+                import_api_keys({"openai": "bad-key"}, mode="none", replace=True)
+
+            assert get_api_key("openai") == existing_key
 
 
 class TestPassphraseMode:

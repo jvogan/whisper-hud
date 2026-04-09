@@ -213,3 +213,26 @@ def test_provider_create_live_session_uses_openai_key_and_selected_model():
     assert kwargs["cost_per_minute"] == pytest.approx(0.006)
     assert kwargs["language"] == "en"
     assert kwargs["prompt"] == "Use punctuation."
+
+
+def test_realtime_session_pins_openai_endpoints_and_disables_env_routing():
+    """Realtime sessions should pin the official HTTP and websocket endpoints."""
+    with patch("whisper_hud.providers.openai_realtime.OpenAI") as openai_cls:
+        openai_cls.return_value = MagicMock()
+
+        OpenAIRealtimeSession(
+            api_key="sk-test",
+            model="gpt-4o-mini-transcribe",
+            provider_name="openai_realtime",
+            cost_per_minute=0.003,
+            on_partial=lambda _text: None,
+            on_final=lambda _result: None,
+            on_error=lambda _exc: None,
+        )
+
+    kwargs = openai_cls.call_args.kwargs
+    assert kwargs["base_url"] == "https://api.openai.com/v1"
+    assert kwargs["websocket_base_url"] == "wss://api.openai.com/v1"
+    assert kwargs["http_client"].trust_env is False
+    assert kwargs["http_client"].follow_redirects is False
+    kwargs["http_client"].close()

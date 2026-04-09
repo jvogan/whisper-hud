@@ -265,19 +265,37 @@ class Config:
             self.parakeet_model = model
         self.save()
 
-    def add_transcription_stats(self, cost: float) -> None:
-        """Update transcription statistics."""
+    def add_transcription_stats(self, cost: float) -> bool:
+        """Update transcription statistics unless private mode is active."""
+        if self.private_mode:
+            return False
+
+        original_total_transcriptions = self.total_transcriptions
+        original_total_cost = self.total_cost
+
         self.total_transcriptions += 1
         self.total_cost += cost
-        self.save()
+        if self.save():
+            return True
 
-    def reset_stats(self) -> None:
+        self.total_transcriptions = original_total_transcriptions
+        self.total_cost = original_total_cost
+        return False
+
+    def reset_stats(self) -> bool:
         """Reset transcription statistics."""
+        original_total_transcriptions = self.total_transcriptions
+        original_total_cost = self.total_cost
         self.total_transcriptions = 0
         self.total_cost = 0.0
-        self.save()
+        if self.save():
+            return True
 
-    def add_to_history(self, text: str, provider: str = "", translated: bool = False, original_text: str = "") -> None:
+        self.total_transcriptions = original_total_transcriptions
+        self.total_cost = original_total_cost
+        return False
+
+    def add_to_history(self, text: str, provider: str = "", translated: bool = False, original_text: str = "") -> bool:
         """
         Add a transcription to history.
 
@@ -289,10 +307,10 @@ class Config:
         """
         # Private mode: never store any transcription data
         if self.private_mode:
-            return
+            return False
 
         if not self.history_enabled or not text:
-            return
+            return False
 
         import time
 
@@ -307,14 +325,14 @@ class Config:
             encrypted = encrypt_text(text)
             if not encrypted:
                 logger.warning("History encryption enabled but failed; skipping history entry")
-                return
+                return False
             store_text = encrypted
             encrypted_ok = True
             if translated and original_text:
                 encrypted_original = encrypt_text(original_text)
                 if not encrypted_original:
                     logger.warning("History encryption enabled but failed on original text; skipping history entry")
-                    return
+                    return False
                 store_original = encrypted_original
 
         entry = {
@@ -327,14 +345,17 @@ class Config:
         if translated and store_original:
             entry["original_text"] = store_original
 
-        # Add to front of list
-        self.history.insert(0, entry)
+        original_history = [item.copy() if isinstance(item, dict) else item for item in self.history]
+        new_history = [entry] + original_history
+        if len(new_history) > self.history_max_items:
+            new_history = new_history[: self.history_max_items]
 
-        # Trim to max size
-        if len(self.history) > self.history_max_items:
-            self.history = self.history[: self.history_max_items]
+        self.history = new_history
+        if self.save():
+            return True
 
-        self.save()
+        self.history = original_history
+        return False
 
     def get_history(self, limit: int = 10) -> List[dict]:
         """
@@ -372,27 +393,55 @@ class Config:
 
         return result
 
-    def clear_history(self) -> None:
+    def clear_history(self) -> bool:
         """Clear all history."""
+        original_history = [item.copy() if isinstance(item, dict) else item for item in self.history]
         self.history = []
-        self.save()
+        if self.save():
+            return True
 
-    def enable_private_mode(self) -> None:
+        self.history = original_history
+        return False
+
+    def enable_private_mode(self) -> bool:
         """
         Enable private mode (no transcription storage).
 
         When enabled:
         - History is cleared and disabled
+        - Stored statistics are reset
         - New transcriptions are never saved to disk
         """
+        original_private_mode = self.private_mode
+        original_history_enabled = self.history_enabled
+        original_history = [item.copy() if isinstance(item, dict) else item for item in self.history]
+        original_total_transcriptions = self.total_transcriptions
+        original_total_cost = self.total_cost
+
         self.private_mode = True
         self.history_enabled = False
-        self.clear_history()  # Also saves
+        self.history = []
+        self.total_transcriptions = 0
+        self.total_cost = 0.0
+        if self.save():
+            return True
 
-    def disable_private_mode(self) -> None:
+        self.private_mode = original_private_mode
+        self.history_enabled = original_history_enabled
+        self.history = original_history
+        self.total_transcriptions = original_total_transcriptions
+        self.total_cost = original_total_cost
+        return False
+
+    def disable_private_mode(self) -> bool:
         """Disable private mode."""
+        original_private_mode = self.private_mode
         self.private_mode = False
-        self.save()
+        if self.save():
+            return True
+
+        self.private_mode = original_private_mode
+        return False
 
     def enable_history(self, encrypted: bool = True) -> None:
         """Enable history with encryption on by default."""

@@ -9,6 +9,7 @@ even when that app isn't focused. Supports:
 - Terminal.app
 """
 
+import os
 import re
 import subprocess
 import time
@@ -285,7 +286,10 @@ class PasteTargetManager:
 
     def paste_to_tmux(self, text: str, session: str) -> bool:
         """
-        Send text directly to tmux session (no focus change).
+        Paste text into tmux using tmux's bracketed-paste path.
+
+        Literal `send-keys -l` will still execute newline-delimited shell input
+        in the target pane, so route through a tmux paste buffer instead.
 
         Args:
             text: Text to send
@@ -303,13 +307,25 @@ class PasteTargetManager:
             logger.warning("tmux session name contains unsafe characters, rejecting")
             return False
 
+        buffer_name = f"whisperhud-paste-{os.getpid()}-{time.time_ns()}"
         try:
-            # Use send-keys with -l flag for literal text
-            # This prevents interpretation of special characters
-            result = subprocess.run(["tmux", "send-keys", "-t", session, "-l", text], capture_output=True, timeout=5)
+            load_result = subprocess.run(
+                ["tmux", "load-buffer", "-b", buffer_name, "-"],
+                input=text.encode("utf-8"),
+                capture_output=True,
+                timeout=5,
+            )
+            if load_result.returncode != 0:
+                logger.error(f"tmux load-buffer failed: {load_result.stderr.decode()}")
+                return False
 
-            if result.returncode != 0:
-                logger.error(f"tmux send-keys failed: {result.stderr.decode()}")
+            paste_result = subprocess.run(
+                ["tmux", "paste-buffer", "-p", "-t", session, "-b", buffer_name],
+                capture_output=True,
+                timeout=5,
+            )
+            if paste_result.returncode != 0:
+                logger.error(f"tmux paste-buffer failed: {paste_result.stderr.decode()}")
                 return False
 
             return True
@@ -320,6 +336,15 @@ class PasteTargetManager:
         except Exception as e:
             logger.error(f"Error sending to tmux session '{session}': {e}")
             return False
+        finally:
+            try:
+                subprocess.run(
+                    ["tmux", "delete-buffer", "-b", buffer_name],
+                    capture_output=True,
+                    timeout=5,
+                )
+            except Exception:
+                logger.debug("Failed to clean up tmux paste buffer", exc_info=True)
 
     def paste_to_iterm2(self, text: str) -> bool:
         """
