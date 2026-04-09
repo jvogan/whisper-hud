@@ -164,13 +164,13 @@ def test_encode_audio_chunk_resamples_stereo_audio_to_24khz_pcm16():
 
 
 def test_provider_normalizes_models_and_uses_batch_fallback_for_supported_model():
-    """The realtime provider should stay within the v1 two-model scope and batch fallback should mirror it."""
+    """The realtime provider should expose the current documented model slugs and map latest-only aliases for batch fallback."""
     default_provider = OpenAIRealtimeProvider(model="unsupported")
     assert default_provider.get_current_model() == "gpt-4o-mini-transcribe"
-    assert OpenAIRealtimeProvider(model="gpt-4o-transcribe-latest").get_current_model() == "gpt-4o-transcribe"
+    assert OpenAIRealtimeProvider(model="gpt-4o-transcribe-latest").get_current_model() == "gpt-4o-transcribe-latest"
 
     model_ids = [model["id"] for model in default_provider.get_models()]
-    assert model_ids == ["gpt-4o-mini-transcribe", "gpt-4o-transcribe"]
+    assert model_ids == ["gpt-4o-mini-transcribe", "gpt-4o-transcribe-latest", "gpt-4o-transcribe"]
 
     with patch("whisper_hud.providers.openai_realtime.OpenAITranscribeProvider") as batch_cls:
         batch_cls.return_value.transcribe.return_value = SimpleNamespace(
@@ -180,7 +180,7 @@ def test_provider_normalizes_models_and_uses_batch_fallback_for_supported_model(
             model="gpt-4o-transcribe",
             language="en",
         )
-        provider = OpenAIRealtimeProvider(model="gpt-4o-transcribe")
+        provider = OpenAIRealtimeProvider(model="gpt-4o-transcribe-latest")
         result = provider.transcribe(b"wav")
 
     batch_cls.assert_called_once_with(model="gpt-4o-transcribe")

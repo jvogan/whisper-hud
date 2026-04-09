@@ -274,6 +274,7 @@ class TestConfig:
                         "openai_translate_model": "gpt-5-mini",
                         "anthropic_translate_model": "claude-sonnet-4-5",
                         "gemini_model": "gemini-3-pro-preview",
+                        "gemini_translate_model": "gemini-3-pro-preview",
                     }
                 ),
                 encoding="utf-8",
@@ -287,7 +288,8 @@ class TestConfig:
 
             assert loaded.openai_translate_model == "gpt-5.4-mini"
             assert loaded.anthropic_translate_model == "claude-sonnet-4-6"
-            assert loaded.gemini_model == "gemini-2.5-pro"
+            assert loaded.gemini_model == "gemini-3.1-pro-preview"
+            assert loaded.gemini_translate_model == "gemini-3.1-pro-preview"
 
     def test_set_provider_model_supports_openai_realtime(self):
         """Realtime provider model selection should persist like other providers."""

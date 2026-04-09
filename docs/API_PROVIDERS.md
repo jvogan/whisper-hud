@@ -20,9 +20,9 @@ WhisperHUD supports multiple transcription providers, each with different trade-
 ### OpenAI (Batch)
 
 **Models available:**
-- `gpt-4o-transcribe` - Best quality, faster (recommended)
+- `gpt-4o-mini-transcribe` - OpenAI's currently recommended general transcription model
+- `gpt-4o-transcribe` - Higher-cost batch transcription
 - `gpt-4o-transcribe-diarize` - Adds speaker diarization
-- `gpt-4o-mini-transcribe` - Good quality, cheapest
 - `whisper-1` - Original Whisper model
 
 **Setup:**
@@ -49,6 +49,7 @@ Uses OpenAI's Realtime WebSocket transcription flow for low-latency dictation.
 
 **Models available:**
 - `gpt-4o-mini-transcribe` - Fastest live dictation option (default)
+- `gpt-4o-transcribe-latest` - Rolling alias for the latest non-mini Realtime snapshot
 - `gpt-4o-transcribe` - Higher accuracy live dictation
 
 **Setup:**
@@ -74,10 +75,12 @@ Uses OpenAI's Realtime WebSocket transcription flow for low-latency dictation.
 ### Google Gemini
 
 **Models available:**
-- `gemini-3-flash-preview` - Fast and strong quality
-- `gemini-3-pro-preview` - Highest quality (preview)
 - `gemini-2.5-flash` - Stable, fast, cost-effective
+- `gemini-2.5-pro` - Strongest stable quality
 - `gemini-2.5-flash-lite` - Lowest latency/cost
+- `gemini-3.1-pro-preview` - Latest preview quality model
+- `gemini-3-flash-preview` - Newer preview balanced model
+- `gemini-3.1-flash-lite-preview` - Latest preview speed/cost model for translation/transcription at scale
 
 **Setup:**
 1. Get API key from [aistudio.google.com](https://aistudio.google.com/apikey)
@@ -232,28 +235,31 @@ Cloud translation uses API keys and model-specific defaults with compatibility f
 
 - API: **Responses API** (not Chat Completions)
 - Models:
-  - `gpt-5.2` (quality)
-  - `gpt-5-mini` (balanced, default)
-  - `gpt-5-nano` (speed)
+  - `gpt-5.4-pro` (highest quality)
+  - `gpt-5.4` (quality)
+  - `gpt-5.4-mini` (balanced, default)
+  - `gpt-5.4-nano` (speed)
 - Notes:
-  - Older aliases are normalized to supported defaults.
+  - Older aliases and dated snapshots are normalized to current GPT-5.4 slugs.
   - If unavailable, WhisperHUD falls back to the configured default model.
 
 #### Gemini Translation
 
 - Models:
-  - `gemini-3-flash-preview` (balanced, preview-first default)
-  - `gemini-3-pro-preview` (quality)
-  - `gemini-2.5-flash` (stable fallback)
-  - `gemini-2.5-flash-lite` (speed)
+  - `gemini-2.5-flash` (balanced, stable default)
+  - `gemini-2.5-pro` (stable quality)
+  - `gemini-2.5-flash-lite` (stable speed)
+  - `gemini-3.1-pro-preview` (latest preview quality)
+  - `gemini-3-flash-preview` (newer preview balanced)
+  - `gemini-3.1-flash-lite-preview` (latest preview speed/cost)
 - Notes:
-  - Preview model IDs are tried first.
+  - Older Gemini 3 preview aliases are normalized to current Gemini 3.1 preview IDs where possible.
   - If a preview ID is unavailable, WhisperHUD automatically retries with `gemini-2.5-flash`.
 
 #### Anthropic Translation
 
 - Models:
-  - `claude-sonnet-4-5` (balanced, default)
+  - `claude-sonnet-4-6` (balanced, default)
   - `claude-haiku-4-5` (speed)
   - `claude-opus-4-6` (quality)
 - Notes:

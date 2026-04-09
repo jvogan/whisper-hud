@@ -5,9 +5,11 @@ Gemini models can process audio natively and provide transcription.
 Supports speaker diarization through prompting.
 
 Models (April 2026):
-- gemini-2.5-pro: Strongest stable quality
-- gemini-3-flash-preview: Frontier preview model
 - gemini-2.5-flash: Stable, supports audio input
+- gemini-3.1-pro-preview: Latest preview quality model
+- gemini-3-flash-preview: Frontier preview balanced model
+- gemini-3.1-flash-lite-preview: Latest preview speed/cost model
+- gemini-2.5-pro: Strongest stable quality
 - gemini-2.5-flash-lite: Lowest latency/cost, supports audio input
 """
 
@@ -26,10 +28,15 @@ class GeminiProvider(TranscriptionProvider):
     CLIENT_TIMEOUT_MS = 30000
 
     DEFAULT_MODEL = "gemini-2.5-flash"
+    STABLE_FALLBACK_MODEL = "gemini-2.5-flash"
     MODEL_ALIASES = {
-        "gemini-3-pro-preview": "gemini-2.5-pro",
-        "gemini-3-pro": "gemini-2.5-pro",
+        "gemini-3-pro-preview": "gemini-3.1-pro-preview",
+        "gemini-3-pro": "gemini-3.1-pro-preview",
+        "gemini-3.1-pro": "gemini-3.1-pro-preview",
+        "gemini-3-flash": "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite": "gemini-3.1-flash-lite-preview",
         "gemini-2.5-flash-preview": "gemini-2.5-flash",
+        "gemini-2.5-flash-lite-preview-09-2025": "gemini-2.5-flash-lite",
     }
 
     # Available models with approximate costs
@@ -54,9 +61,21 @@ class GeminiProvider(TranscriptionProvider):
             "cost_per_minute": 0.001,
         },
         {
+            "id": "gemini-3.1-pro-preview",
+            "name": "Gemini 3.1 Pro (Preview)",
+            "description": "Latest preview quality model with improved reasoning and reliability",
+            "cost_per_minute": 0.001,
+        },
+        {
             "id": "gemini-3-flash-preview",
             "name": "Gemini 3 Flash (Preview)",
-            "description": "Frontier preview model for latest Gemini 3 audio support",
+            "description": "Frontier preview balanced model for newer Gemini 3 multimodal support",
+            "cost_per_minute": 0.001,
+        },
+        {
+            "id": "gemini-3.1-flash-lite-preview",
+            "name": "Gemini 3.1 Flash-Lite (Preview)",
+            "description": "Latest preview speed/cost option, explicitly recommended by Google for translation and transcription at scale",
             "cost_per_minute": 0.001,
         },
     ]
@@ -94,6 +113,14 @@ class GeminiProvider(TranscriptionProvider):
 
         return self._client
 
+    @staticmethod
+    def _is_model_not_found_error(error: Exception) -> bool:
+        """Return True when Gemini rejects the selected model ID."""
+        message = str(error).lower()
+        if "model" not in message:
+            return False
+        return any(token in message for token in ("not found", "invalid", "unsupported", "unknown"))
+
     def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
         """Transcribe audio using Gemini."""
         if not audio_bytes:
@@ -111,19 +138,36 @@ Output ONLY the transcription text, nothing else.
 Do not add any commentary, labels, or formatting.
 Preserve natural punctuation."""
 
-        try:
-            response = client.models.generate_content(
-                model=self.model,
-                contents=[
-                    prompt,
-                    types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
-                ],
-            )
-        except Exception as e:
-            raise RuntimeError(self._build_transcribe_error_message(e)) from e
+        audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
+        attempt_models = [self.model]
+        if self.STABLE_FALLBACK_MODEL not in attempt_models:
+            attempt_models.append(self.STABLE_FALLBACK_MODEL)
+
+        response = None
+        used_model = self.model
+        last_error: Exception | None = None
+        for model_id in attempt_models:
+            try:
+                response = client.models.generate_content(
+                    model=model_id,
+                    contents=[prompt, audio_part],
+                )
+                used_model = model_id
+                break
+            except Exception as e:
+                last_error = e
+                if model_id != self.STABLE_FALLBACK_MODEL and self._is_model_not_found_error(e):
+                    continue
+                raise RuntimeError(self._build_transcribe_error_message(e)) from e
+
+        if response is None:
+            raise RuntimeError(self._build_transcribe_error_message(last_error or RuntimeError("unknown error")))
+
+        if used_model != self.model:
+            self.model = used_model
 
         # Get the model config for cost calculation
-        model_config = next((m for m in self.MODELS if m["id"] == self.model), self.MODELS[0])
+        model_config = next((m for m in self.MODELS if m["id"] == used_model), self.MODELS[0])
 
         # Estimate duration from audio bytes (16kHz, 16-bit mono = 32KB/sec)
         duration_seconds = len(audio_bytes) / 32000
@@ -142,7 +186,7 @@ Preserve natural punctuation."""
             duration_seconds=duration_seconds,
             cost_estimate=cost,
             provider=self.name,
-            model=self.model,
+            model=used_model,
             language=None,
         )
 
@@ -217,28 +261,45 @@ Output ONLY the transcription text, nothing else.
 Do not add any commentary, labels, or formatting.
 Preserve natural punctuation."""
 
-        cumulative_text = ""
-        try:
-            response = client.models.generate_content_stream(
-                model=self.model,
-                contents=[
-                    prompt,
-                    types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav"),
-                ],
-            )
+        audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
+        attempt_models = [self.model]
+        if self.STABLE_FALLBACK_MODEL not in attempt_models:
+            attempt_models.append(self.STABLE_FALLBACK_MODEL)
 
-            for chunk in response:
-                if chunk.text:
-                    cumulative_text += chunk.text
-                    on_chunk(cumulative_text.strip())
-        except Exception as e:
-            raise RuntimeError(self._build_transcribe_error_message(e)) from e
+        cumulative_text = ""
+        used_model = self.model
+        last_error: Exception | None = None
+        for model_id in attempt_models:
+            cumulative_text = ""
+            try:
+                response = client.models.generate_content_stream(
+                    model=model_id,
+                    contents=[prompt, audio_part],
+                )
+
+                for chunk in response:
+                    if chunk.text:
+                        cumulative_text += chunk.text
+                        on_chunk(cumulative_text.strip())
+
+                used_model = model_id
+                break
+            except Exception as e:
+                last_error = e
+                if model_id != self.STABLE_FALLBACK_MODEL and self._is_model_not_found_error(e):
+                    continue
+                raise RuntimeError(self._build_transcribe_error_message(e)) from e
+        else:
+            raise RuntimeError(self._build_transcribe_error_message(last_error or RuntimeError("unknown error")))
+
+        if used_model != self.model:
+            self.model = used_model
 
         # Get final text
         final_text = cumulative_text.strip()
 
         # Get the model config for cost calculation
-        model_config = next((m for m in self.MODELS if m["id"] == self.model), self.MODELS[0])
+        model_config = next((m for m in self.MODELS if m["id"] == used_model), self.MODELS[0])
 
         # Estimate duration from audio bytes (16kHz, 16-bit mono = 32KB/sec)
         duration_seconds = len(audio_bytes) / 32000
@@ -251,6 +312,6 @@ Preserve natural punctuation."""
             duration_seconds=duration_seconds,
             cost_estimate=cost,
             provider=self.name,
-            model=self.model,
+            model=used_model,
             language=None,
         )

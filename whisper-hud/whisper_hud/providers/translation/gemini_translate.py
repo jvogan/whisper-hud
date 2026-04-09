@@ -27,6 +27,11 @@ class GeminiTranslateProvider(TranslationProvider):
 
     # Available models (April 2026)
     MODELS = {
+        "gemini-3.1-pro-preview": {
+            "name": "Gemini 3.1 Pro (Preview)",
+            "description": "Latest preview quality model with improved reasoning and reliability",
+            "category": "quality",
+        },
         "gemini-2.5-pro": {
             "name": "Gemini 2.5 Pro",
             "description": "Highest stable quality for nuanced translation",
@@ -48,13 +53,21 @@ class GeminiTranslateProvider(TranslationProvider):
             "description": "Frontier preview model for the latest Gemini 3 quality",
             "category": "balanced",
         },
+        "gemini-3.1-flash-lite-preview": {
+            "name": "Gemini 3.1 Flash-Lite (Preview)",
+            "description": "Latest preview speed/cost option, explicitly recommended for translation at scale",
+            "category": "speed",
+        },
     }
 
     MODEL_ALIASES = {
-        "gemini-3-pro-preview": "gemini-2.5-pro",
-        "gemini-3-pro": "gemini-2.5-pro",
+        "gemini-3-pro-preview": "gemini-3.1-pro-preview",
+        "gemini-3-pro": "gemini-3.1-pro-preview",
+        "gemini-3.1-pro": "gemini-3.1-pro-preview",
         "gemini-3-flash": "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite": "gemini-3.1-flash-lite-preview",
         "gemini-2.5-flash-preview": "gemini-2.5-flash",
+        "gemini-2.5-flash-lite-preview-09-2025": "gemini-2.5-flash-lite",
     }
 
     # Supported languages (100+)

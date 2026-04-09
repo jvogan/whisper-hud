@@ -26,10 +26,15 @@ class OpenAITranslateProvider(TranslationProvider):
 
     # Available models (April 2026)
     MODELS = {
+        "gpt-5.4-pro": {
+            "name": "GPT-5.4 Pro",
+            "description": "Most capable option for harder translation problems",
+            "category": "quality",
+        },
         "gpt-5.4": {
             "name": "GPT-5.4",
-            "description": "Strongest quality for nuanced translation",
-            "category": "quality",
+            "description": "Strong quality for nuanced translation",
+            "category": "balanced",
         },
         "gpt-5.4-mini": {
             "name": "GPT-5.4 Mini",
@@ -47,12 +52,17 @@ class OpenAITranslateProvider(TranslationProvider):
     MODEL_ALIASES = {
         # Historical/general aliases -> current GPT-5.4 family
         "gpt-5": "gpt-5.4",
+        "gpt-5-pro": "gpt-5.4-pro",
         "gpt-5.1": "gpt-5.4",
         "gpt-5.2": "gpt-5.4",
         "gpt-5.2-chat-latest": "gpt-5.4",
-        "gpt-5.2-pro": "gpt-5.4",
+        "gpt-5.2-pro": "gpt-5.4-pro",
         "gpt-5-mini": "gpt-5.4-mini",
         "gpt-5-nano": "gpt-5.4-nano",
+        "gpt-5.4-pro-2026-03-05": "gpt-5.4-pro",
+        "gpt-5.4-2026-03-05": "gpt-5.4",
+        "gpt-5.4-mini-2026-03-17": "gpt-5.4-mini",
+        "gpt-5.4-nano-2026-03-17": "gpt-5.4-nano",
     }
 
     SUPPORTED_LANGUAGES = {

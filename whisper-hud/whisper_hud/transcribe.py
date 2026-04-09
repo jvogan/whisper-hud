@@ -209,6 +209,20 @@ class TranscriptionManager:
             self.config.set_provider_model(provider_id, model_id)
             self._invalidate_available_providers_cache()
 
+    def _sync_provider_model_to_config(self, provider_id: str, provider: TranscriptionProvider) -> None:
+        """Persist runtime model fallbacks so rejected preview IDs are not retried forever."""
+        try:
+            current_model = provider.get_current_model()
+        except Exception:
+            return
+
+        if not isinstance(current_model, str) or not current_model:
+            return
+
+        if self.config.get_provider_model(provider_id) != current_model:
+            self.config.set_provider_model(provider_id, current_model)
+            self._invalidate_available_providers_cache()
+
     def transcribe(self, audio_bytes: bytes, provider_id: Optional[str] = None) -> TranscriptionResult:
         """
         Transcribe audio using specified or default provider.
@@ -241,6 +255,7 @@ class TranscriptionManager:
                 )
 
         result = provider.transcribe(audio_bytes)
+        self._sync_provider_model_to_config(provider_id, provider)
 
         # Update stats
         self.config.add_transcription_stats(result.cost_estimate)
@@ -338,6 +353,8 @@ class TranscriptionManager:
             result = provider.transcribe(audio_bytes)
             if result.text:
                 on_chunk(result.text)
+
+        self._sync_provider_model_to_config(provider_id, provider)
 
         # Update stats
         self.config.add_transcription_stats(result.cost_estimate)

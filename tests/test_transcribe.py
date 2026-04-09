@@ -206,6 +206,23 @@ class ParakeetFallbackProvider(StubProvider):
     transcribed_text = "parakeet result"
 
 
+class RuntimeFallbackModelProvider(StubProvider):
+    """Provider that simulates a successful runtime fallback to another model."""
+
+    name = "gemini"
+    display_name = "Gemini"
+
+    def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
+        self.model = "stable-model"
+        return TranscriptionResult(
+            text="fallback result",
+            duration_seconds=1.25,
+            cost_estimate=self.cost_estimate,
+            provider=self.name,
+            model=self.model,
+        )
+
+
 def reset_provider_classes(*provider_classes: type[StubProvider]) -> None:
     """Reset per-class counters so assertions stay isolated."""
     for provider_class in provider_classes:
@@ -225,6 +242,7 @@ def test_manager_lists_openai_realtime_with_openai_credentials(mock_config):
     assert manager.is_cloud_provider("openai_realtime") is True
     assert [model["id"] for model in provider_map["openai_realtime"]["models"]] == [
         "gpt-4o-mini-transcribe",
+        "gpt-4o-transcribe-latest",
         "gpt-4o-transcribe",
     ]
 
@@ -416,3 +434,16 @@ def test_transcribe_raises_when_no_providers_are_available(mock_config, monkeypa
     assert mock_config.total_cost == 0.0
 
     SecondaryProvider.configured = True
+
+
+def test_transcription_manager_persists_runtime_model_fallback(mock_config, monkeypatch, sample_audio_bytes):
+    """Successful provider-side model fallback should update the saved transcription model."""
+    monkeypatch.setattr(TranscriptionManager, "PROVIDER_CLASSES", {"gemini": RuntimeFallbackModelProvider})
+    mock_config.default_provider = "gemini"
+    mock_config.gemini_model = "preview-model"
+
+    manager = TranscriptionManager(mock_config)
+    result = manager.transcribe(sample_audio_bytes)
+
+    assert result.model == "stable-model"
+    assert mock_config.gemini_model == "stable-model"

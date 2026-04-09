@@ -59,7 +59,8 @@ def test_provider_initialization_and_model_helpers():
 
     provider.set_model("not-a-real-model")
     assert provider.get_current_model() == "gemini-2.5-flash"
-    assert GeminiProvider.normalize_model_id("gemini-3-pro-preview") == "gemini-2.5-pro"
+    assert GeminiProvider.normalize_model_id("gemini-3-pro-preview") == "gemini-3.1-pro-preview"
+    assert GeminiProvider.normalize_model_id("gemini-3.1-flash-lite") == "gemini-3.1-flash-lite-preview"
 
 
 def test_provider_reports_unavailable_when_api_key_is_not_set(monkeypatch):
@@ -120,6 +121,31 @@ def test_transcribe_returns_result_on_success(monkeypatch, sample_audio_bytes, f
     assert result.cost_estimate == pytest.approx((result.duration_seconds / 60) * 0.001)
     assert result.language is None
     assert fake_gemini_sdk["parts"] == [{"data": sample_audio_bytes, "mime_type": "audio/wav"}]
+
+
+def test_transcribe_preview_model_falls_back_to_stable_when_rejected(monkeypatch, sample_audio_bytes, fake_gemini_sdk):
+    """Preview Gemini transcription IDs should fail over to the stable default when the API rejects them."""
+    provider = GeminiProvider(model="gemini-3.1-flash-lite-preview")
+
+    class FakeModels:
+        def __init__(self):
+            self.calls = []
+
+        def generate_content(self, *, model, contents):
+            self.calls.append(model)
+            if model == "gemini-3.1-flash-lite-preview":
+                raise RuntimeError("Model not found: gemini-3.1-flash-lite-preview")
+            return {"text": "  Hello from stable Gemini  "}
+
+    fake_models = FakeModels()
+    monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(models=fake_models))
+
+    result = provider.transcribe(sample_audio_bytes)
+
+    assert fake_models.calls == ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"]
+    assert result.text == "Hello from stable Gemini"
+    assert result.model == "gemini-2.5-flash"
+    assert provider.get_current_model() == "gemini-2.5-flash"
 
 
 def test_transcribe_raises_runtime_error_on_network_error(

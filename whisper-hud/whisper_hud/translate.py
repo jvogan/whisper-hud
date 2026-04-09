@@ -82,6 +82,24 @@ class TranslationManager:
         if changed:
             self.config.save()
 
+    def _sync_provider_model_to_config(self, provider_id: str, provider: TranslationProvider) -> None:
+        """Persist runtime model fallbacks so stale preview IDs do not get retried on the next launch."""
+        field_name = self.MODEL_CONFIG_FIELDS.get(provider_id)
+        if field_name is None:
+            return
+
+        try:
+            current_model = provider.get_current_model()
+        except Exception:
+            return
+
+        if not isinstance(current_model, str) or not current_model:
+            return
+
+        if getattr(self.config, field_name, "") != current_model:
+            setattr(self.config, field_name, current_model)
+            self.config.save()
+
     def get_provider(self, provider_id: str) -> Optional[TranslationProvider]:
         """Get or create a provider instance."""
         if provider_id not in self._providers:
@@ -175,6 +193,7 @@ class TranslationManager:
         source = source_lang or self.config.source_language
         target = target_lang or self.config.target_language
 
+        provider_id = getattr(self.config, "translation_provider", "apple")
         provider = self.provider
         if not provider.is_available():
             raise ConnectionError(
@@ -182,7 +201,9 @@ class TranslationManager:
                 "Please check configuration or select another provider."
             )
 
-        return provider.translate(text, source, target)
+        result = provider.translate(text, source, target)
+        self._sync_provider_model_to_config(provider_id, provider)
+        return result
 
     def is_available(self) -> bool:
         """Check if translation is available with current provider."""
@@ -334,7 +355,11 @@ class TranslationManager:
         source = source_lang or self.config.source_language
         target = target_lang or self.config.target_language
 
-        return self.provider.translate_streaming(text, source, target, on_chunk)
+        provider_id = getattr(self.config, "translation_provider", "apple")
+        provider = self.provider
+        result = provider.translate_streaming(text, source, target, on_chunk)
+        self._sync_provider_model_to_config(provider_id, provider)
+        return result
 
     @staticmethod
     def is_homebrew_installed() -> bool:

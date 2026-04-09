@@ -366,9 +366,7 @@ class OpenAIRealtimeProvider(TranscriptionProvider):
     name = "openai_realtime"
     display_name = "OpenAI Realtime"
     DEFAULT_MODEL = "gpt-4o-mini-transcribe"
-    MODEL_ALIASES = {
-        "gpt-4o-transcribe-latest": "gpt-4o-transcribe",
-    }
+    MODEL_ALIASES = {}
 
     MODELS = [
         {
@@ -377,6 +375,12 @@ class OpenAIRealtimeProvider(TranscriptionProvider):
             "description": "True live dictation with the fastest OpenAI transcription model",
             "cost_per_minute": 0.003,
             "recommended": True,
+        },
+        {
+            "id": "gpt-4o-transcribe-latest",
+            "name": "GPT-4o Transcribe Latest",
+            "description": "Rolling alias for the latest non-mini Realtime transcription snapshot",
+            "cost_per_minute": 0.006,
         },
         {
             "id": "gpt-4o-transcribe",
@@ -391,7 +395,8 @@ class OpenAIRealtimeProvider(TranscriptionProvider):
 
     def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
         """Fallback one-shot transcription if the app calls this provider synchronously."""
-        batch_provider = OpenAITranscribeProvider(model=self.model)
+        batch_model = "gpt-4o-transcribe" if self.model == "gpt-4o-transcribe-latest" else self.model
+        batch_provider = OpenAITranscribeProvider(model=batch_model)
         result = batch_provider.transcribe(audio_bytes)
         return TranscriptionResult(
             text=result.text,

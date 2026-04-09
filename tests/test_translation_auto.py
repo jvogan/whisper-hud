@@ -38,6 +38,56 @@ class DummyProvider(TranslationProvider):
         return True
 
 
+class FallbackSyncProvider(TranslationProvider):
+    """Provider that simulates a successful runtime fallback to another model."""
+
+    name = "fallback"
+    display_name = "Fallback"
+    DEFAULT_MODEL = "preview-model"
+
+    def __init__(self, model: str = DEFAULT_MODEL):
+        self.model = model
+
+    def translate(self, text: str, source_lang: str, target_lang: str) -> TranslationResult:
+        self.model = "stable-model"
+        return TranslationResult(
+            text="ok",
+            source_lang=source_lang,
+            target_lang=target_lang,
+            provider=self.name,
+            model=self.model,
+        )
+
+    def translate_streaming(self, text: str, source_lang: str, target_lang: str, on_chunk) -> TranslationResult:
+        self.model = "stable-model"
+        on_chunk("ok")
+        return TranslationResult(
+            text="ok",
+            source_lang=source_lang,
+            target_lang=target_lang,
+            provider=self.name,
+            model=self.model,
+        )
+
+    def is_available(self) -> bool:
+        return True
+
+    def get_model_status(self) -> dict:
+        return {}
+
+    def download_model(self, progress_callback=None) -> bool:
+        return True
+
+    def get_models(self) -> list[dict]:
+        return [{"id": "preview-model", "name": "Preview"}, {"id": "stable-model", "name": "Stable"}]
+
+    def set_model(self, model_id: str) -> None:
+        self.model = model_id
+
+    def get_current_model(self) -> str:
+        return self.model
+
+
 def test_translate_manager_passes_auto_source(mock_config, monkeypatch):
     """Ensure TranslationManager doesn't coerce 'auto' to English."""
     monkeypatch.setattr(TranslationManager, "PROVIDER_CLASSES", {"dummy": DummyProvider})
@@ -101,6 +151,14 @@ def test_openai_responses_request_builder():
     assert kwargs["store"] is False
     assert "Detect the source language" in kwargs["instructions"]
     assert kwargs["reasoning"] == {"effort": "none"}
+
+
+def test_openai_model_normalization_handles_pro_and_snapshot_ids():
+    """OpenAI translation should preserve the current pro tier and normalize dated snapshots."""
+    assert OpenAITranslateProvider.normalize_model_id("gpt-5-pro") == "gpt-5.4-pro"
+    assert OpenAITranslateProvider.normalize_model_id("gpt-5.2-pro") == "gpt-5.4-pro"
+    assert OpenAITranslateProvider.normalize_model_id("gpt-5.4-pro-2026-03-05") == "gpt-5.4-pro"
+    assert OpenAITranslateProvider.normalize_model_id("gpt-5.4-mini-2026-03-17") == "gpt-5.4-mini"
 
 
 def test_openai_streaming_delta_parser():
@@ -234,6 +292,12 @@ def test_gemini_model_not_found_falls_back_to_stable(monkeypatch):
     assert provider.get_current_model() == "gemini-2.5-flash"
 
 
+def test_gemini_model_normalization_tracks_current_preview_successors():
+    """Gemini translation should map stale Gemini 3 IDs to the current preview lineage."""
+    assert GeminiTranslateProvider.normalize_model_id("gemini-3-pro-preview") == "gemini-3.1-pro-preview"
+    assert GeminiTranslateProvider.normalize_model_id("gemini-3.1-flash-lite") == "gemini-3.1-flash-lite-preview"
+
+
 def test_gemini_translation_sanitizes_provider_errors(monkeypatch):
     """Gemini translation should not surface raw backend error payloads."""
 
@@ -303,12 +367,40 @@ def test_ollama_uses_loopback_without_env_proxies():
 
 def test_translation_manager_normalizes_provider_models(mock_config):
     """TranslationManager should normalize invalid/stale configured model IDs."""
-    mock_config.openai_translate_model = "invalid-openai-model"
-    mock_config.gemini_translate_model = "invalid-gemini-model"
+    mock_config.openai_translate_model = "gpt-5.2-pro"
+    mock_config.gemini_translate_model = "gemini-3-pro-preview"
     mock_config.anthropic_translate_model = "claude-opus-4-5"
 
     TranslationManager(mock_config)
 
-    assert mock_config.openai_translate_model == OpenAITranslateProvider.DEFAULT_MODEL
-    assert mock_config.gemini_translate_model == GeminiTranslateProvider.DEFAULT_MODEL
+    assert mock_config.openai_translate_model == "gpt-5.4-pro"
+    assert mock_config.gemini_translate_model == "gemini-3.1-pro-preview"
     assert mock_config.anthropic_translate_model == "claude-opus-4-6"
+
+
+def test_translation_manager_persists_runtime_model_fallback(mock_config, monkeypatch):
+    """Successful provider-side fallback should update the saved configured model."""
+    monkeypatch.setattr(TranslationManager, "PROVIDER_CLASSES", {"fallback": FallbackSyncProvider})
+    mock_config.translation_provider = "fallback"
+    manager = TranslationManager(mock_config)
+    manager.MODEL_CONFIG_FIELDS = {"fallback": "openai_translate_model"}
+    mock_config.openai_translate_model = "preview-model"
+
+    manager.translate("hello", source_lang="en", target_lang="es")
+
+    assert mock_config.openai_translate_model == "stable-model"
+
+
+def test_translation_manager_persists_runtime_model_fallback_for_streaming(mock_config, monkeypatch):
+    """Streaming translation should also persist provider-side model fallbacks."""
+    monkeypatch.setattr(TranslationManager, "PROVIDER_CLASSES", {"fallback": FallbackSyncProvider})
+    mock_config.translation_provider = "fallback"
+    manager = TranslationManager(mock_config)
+    manager.MODEL_CONFIG_FIELDS = {"fallback": "openai_translate_model"}
+    mock_config.openai_translate_model = "preview-model"
+
+    chunks = []
+    manager.translate_streaming("hello", chunks.append, source_lang="en", target_lang="es")
+
+    assert chunks == ["ok"]
+    assert mock_config.openai_translate_model == "stable-model"
