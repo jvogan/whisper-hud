@@ -33,6 +33,14 @@ class TestLogging:
         result = setup_logging(level=logging.DEBUG)
         assert result is not None
 
+    def test_setup_logging_disables_root_propagation(self):
+        """App logs should stay within the WhisperHUD logger tree."""
+        from whisper_hud.logging_config import setup_logging
+
+        result = setup_logging(level=logging.INFO)
+
+        assert result.propagate is False
+
     def test_log_levels(self):
         """Test that different log levels work."""
         from whisper_hud.logging_config import get_logger

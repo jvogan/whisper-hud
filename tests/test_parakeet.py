@@ -255,7 +255,8 @@ def test_download_model_reports_success(monkeypatch, fake_hf_module):
 
     monkeypatch.setattr(ParakeetProvider, "_is_apple_silicon", lambda self: True)
 
-    callback = lambda message, percent: progress.append((message, percent))
+    def callback(message, percent):
+        progress.append((message, percent))
 
     assert ParakeetProvider().download_model(callback) is True
     assert calls["download"][0][0] == "nvidia/parakeet-tdt-0.6b-v3"
@@ -270,7 +271,8 @@ def test_download_model_handles_platform_and_dependency_failures(monkeypatch, fa
     progress = []
     provider = ParakeetProvider()
 
-    callback = lambda message, percent: progress.append((message, percent))
+    def callback(message, percent):
+        progress.append((message, percent))
 
     monkeypatch.setattr(provider, "_is_apple_silicon", lambda: False)
     assert provider.download_model(callback) is False
@@ -301,7 +303,8 @@ def test_download_model_reports_runtime_failure(monkeypatch, fake_hf_module):
     module.snapshot_download = broken_download
     monkeypatch.setattr(ParakeetProvider, "_is_apple_silicon", lambda self: True)
 
-    callback = lambda message, percent: progress.append((message, percent))
+    def callback(message, percent):
+        progress.append((message, percent))
 
     assert ParakeetProvider().download_model(callback) is False
     assert progress == [

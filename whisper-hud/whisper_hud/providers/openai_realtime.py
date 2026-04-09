@@ -18,6 +18,7 @@ from openai import OpenAI
 from scipy.signal import resample_poly
 
 from .base import LiveTranscriptionSession, TranscriptionProvider, TranscriptionResult
+from .error_utils import build_provider_error_message
 from .openai_whisper import OpenAITranscribeProvider
 from ..keychain import get_api_key
 from ..logging_config import get_logger
@@ -30,6 +31,8 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
 
     TARGET_SAMPLE_RATE = 24000
     PRECONNECT_BUFFER_SECONDS = 2.0
+    CLIENT_TIMEOUT_SECONDS = 30.0
+    CLIENT_MAX_RETRIES = 0
     INPUT_AUDIO_FORMAT = {"type": "audio/pcm", "rate": TARGET_SAMPLE_RATE}
     NOISE_REDUCTION = {"type": "near_field"}
 
@@ -47,7 +50,11 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
         language: Optional[str] = None,
         prompt: Optional[str] = None,
     ):
-        self._client = OpenAI(api_key=api_key)
+        self._client = OpenAI(
+            api_key=api_key,
+            timeout=self.CLIENT_TIMEOUT_SECONDS,
+            max_retries=self.CLIENT_MAX_RETRIES,
+        )
         self._model = model
         self._provider_name = provider_name
         self._cost_per_minute = cost_per_minute
@@ -139,7 +146,7 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
                         break
         except Exception as e:
             if not self._closed.is_set():
-                self._notify_error(RuntimeError(f"OpenAI Realtime session failed: {e}"))
+                self._notify_error(RuntimeError(build_provider_error_message("OpenAI Realtime", "session", e)))
         finally:
             self.close()
 
@@ -231,14 +238,18 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
                 return
 
             error = getattr(event, "error", None)
-            message = getattr(error, "message", None) or "OpenAI Realtime transcription failed"
-            self._notify_error(RuntimeError(message))
+            message = getattr(error, "message", None) or "request failed"
+            self._notify_error(
+                RuntimeError(build_provider_error_message("OpenAI Realtime", "transcription", RuntimeError(message)))
+            )
             return
 
         if event_type == "error":
             error = getattr(event, "error", None)
-            message = getattr(error, "message", None) or "OpenAI Realtime websocket error"
-            self._notify_error(RuntimeError(message))
+            message = getattr(error, "message", None) or "request failed"
+            self._notify_error(
+                RuntimeError(build_provider_error_message("OpenAI Realtime", "session", RuntimeError(message)))
+            )
 
     def _flush_pending_audio(self) -> None:
         """Send any audio collected while the socket was connecting."""
@@ -263,7 +274,7 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
                 self._connection.input_audio_buffer.append(audio=encoded_audio)
             self._sent_audio_seconds += duration_seconds
         except Exception as e:
-            self._notify_error(RuntimeError(f"OpenAI Realtime audio append failed: {e}"))
+            self._notify_error(RuntimeError(build_provider_error_message("OpenAI Realtime", "audio append", e)))
 
     def _commit_audio(self) -> None:
         """Commit the current input buffer once."""
@@ -278,7 +289,7 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
                     return
                 self._connection.input_audio_buffer.commit()
         except Exception as e:
-            self._notify_error(RuntimeError(f"OpenAI Realtime audio commit failed: {e}"))
+            self._notify_error(RuntimeError(build_provider_error_message("OpenAI Realtime", "audio commit", e)))
 
     def _notify_error(self, error: Exception) -> None:
         """Emit the first terminal error to the app."""

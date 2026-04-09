@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from whisper_hud.setup_wizard import SetupWizard, WizardStep
 import whisper_hud.setup_wizard as setup_wizard
@@ -256,11 +257,6 @@ def test_apply_wrapped_button_title_keeps_single_line_height(monkeypatch):
     )
 
     assert button.frame.size.height == 32
-
-
-from unittest.mock import MagicMock, patch
-
-from whisper_hud.setup_wizard import SetupWizard, WizardStep
 
 
 class _FakeTimer:

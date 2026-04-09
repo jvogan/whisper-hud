@@ -37,6 +37,7 @@ def setup_logging(level: int = logging.INFO, log_file: bool = False, log_dir: Pa
         log_file = True
 
     logger.setLevel(level)
+    logger.propagate = False
 
     # Console handler with simple format
     console_handler = logging.StreamHandler()

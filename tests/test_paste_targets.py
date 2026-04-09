@@ -18,17 +18,21 @@ class TestPasteTargets:
         script = mock_run.call_args.args[0][2]
         assert 'tell application "Notes \\"Dev\\"\\\\Tab"' in script
 
-    @patch("subprocess.run")
-    def test_paste_to_iterm2_uses_shared_applescript_escaping(self, mock_run):
-        """iTerm2 writes should preserve escaped control characters."""
+    def test_paste_to_iterm2_uses_safe_clipboard_paste_path(self):
+        """iTerm2 routing should reuse the safe activate + paste flow."""
         from whisper_hud.paste_targets import PasteTargetManager
 
         manager = PasteTargetManager()
-        mock_run.return_value = MagicMock(returncode=0, stderr=b"")
 
-        assert manager.paste_to_iterm2('line 1\nline 2\t"quoted"\\path') is True
-        script = mock_run.call_args.args[0][2]
-        assert 'write text "line 1\\nline 2\\t\\"quoted\\"\\\\path" without newline' in script
+        with patch.object(manager, "paste_to_app", return_value=True) as mock_paste_to_app:
+            assert manager.paste_to_iterm2('line 1\nline 2\t"quoted"\\path') is True
+
+        mock_paste_to_app.assert_called_once_with(
+            'line 1\nline 2\t"quoted"\\path',
+            "iTerm2",
+            return_focus=True,
+            restore_clipboard=True,
+        )
 
     @patch("time.sleep", return_value=None)
     @patch("subprocess.run")
@@ -73,3 +77,24 @@ class TestPasteTargets:
 
         assert manager.paste_to_terminal("hello") is True
         assert mock_copy.call_args_list == [call("hello"), call("original")]
+
+    @patch("time.sleep", return_value=None)
+    @patch("subprocess.run")
+    @patch("pyperclip.copy")
+    @patch("pyperclip.paste")
+    def test_paste_to_terminal_clears_clipboard_when_snapshot_fails(
+        self,
+        mock_paste,
+        mock_copy,
+        mock_run,
+        _mock_sleep,
+    ):
+        """If the original clipboard cannot be snapshotted, temporary text should not be left behind."""
+        from whisper_hud.paste_targets import PasteTargetManager
+
+        manager = PasteTargetManager()
+        mock_run.return_value = MagicMock(returncode=0, stderr=b"")
+        mock_paste.side_effect = [RuntimeError("clipboard unavailable"), "secret text"]
+
+        assert manager.paste_to_terminal("secret text") is True
+        assert mock_copy.call_args_list == [call("secret text"), call("")]

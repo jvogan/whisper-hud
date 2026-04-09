@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from .base import TranslationProvider, TranslationResult
+from ..error_utils import build_provider_error_message
 
 
 class GeminiTranslateProvider(TranslationProvider):
@@ -22,6 +23,7 @@ class GeminiTranslateProvider(TranslationProvider):
 
     DEFAULT_MODEL = "gemini-3-flash-preview"
     STABLE_FALLBACK_MODEL = "gemini-2.5-flash"
+    CLIENT_TIMEOUT_MS = 30000
 
     # Available models (February 2026)
     MODELS = {
@@ -198,6 +200,7 @@ class GeminiTranslateProvider(TranslationProvider):
 
             try:
                 from google import genai
+                from google.genai import types
             except ImportError:
                 raise RuntimeError("google-genai package not installed. Install with: pip install google-genai")
 
@@ -205,7 +208,10 @@ class GeminiTranslateProvider(TranslationProvider):
             if not api_key:
                 raise ValueError("Gemini API key not configured")
 
-            self._client = genai.Client(api_key=api_key)
+            self._client = genai.Client(
+                api_key=api_key,
+                http_options=types.HttpOptions(timeout=self.CLIENT_TIMEOUT_MS),
+            )
 
         return self._client
 
@@ -268,7 +274,7 @@ class GeminiTranslateProvider(TranslationProvider):
             )
 
         except Exception as e:
-            raise RuntimeError(f"Gemini translation failed: {e}")
+            raise RuntimeError(build_provider_error_message("Gemini", "translation", e)) from e
 
     def _build_prompt(self, text: str, source_lang: str, target_lang: str) -> str:
         """Build the translation prompt."""
@@ -401,7 +407,7 @@ Text to translate:
             )
 
         except Exception as e:
-            raise RuntimeError(f"Gemini streaming translation failed: {e}")
+            raise RuntimeError(build_provider_error_message("Gemini", "translation", e)) from e
 
     def set_model(self, model_id: str) -> None:
         """Change the active model."""

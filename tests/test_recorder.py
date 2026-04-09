@@ -99,6 +99,20 @@ class TestAudioRecorder:
 
             assert result == b""
 
+    def test_stop_clears_audio_buffers_when_wav_write_fails(self):
+        """Recorder should not retain raw microphone buffers after serialization errors."""
+        with patch("sounddevice.InputStream"):
+            from whisper_hud.recorder import AudioRecorder
+
+            recorder = AudioRecorder(sample_rate=16000)
+            recorder.audio_data = [np.zeros((16000, 1), dtype=np.float32)]
+
+            with patch("whisper_hud.recorder.wavfile.write", side_effect=RuntimeError("disk full")):
+                with pytest.raises(RuntimeError, match="disk full"):
+                    recorder.stop()
+
+            assert recorder.audio_data == []
+
     def test_start_keeps_recording_false_when_stream_start_raises(self):
         """Recorder should stay stopped if stream.start() fails."""
         stream = Mock()

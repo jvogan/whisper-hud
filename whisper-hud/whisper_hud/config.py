@@ -417,6 +417,9 @@ class Config:
             logger.warning("Cannot enable encryption: cryptography not installed")
             return False
 
+        original_history = [item.copy() if isinstance(item, dict) else item for item in self.history]
+        original_history_encrypted = self.history_encrypted
+
         # This will create the key if it doesn't exist
         try:
             get_or_create_key()
@@ -426,9 +429,15 @@ class Config:
                 return False
             self.history = migrated_history
             self.history_encrypted = True
-            self.save()
+            if not self.save():
+                self.history = original_history
+                self.history_encrypted = original_history_encrypted
+                logger.error("Failed to persist encrypted history configuration")
+                return False
             return True
         except Exception as e:
+            self.history = original_history
+            self.history_encrypted = original_history_encrypted
             logger.error(f"Failed to enable encryption: {e}")
             return False
 

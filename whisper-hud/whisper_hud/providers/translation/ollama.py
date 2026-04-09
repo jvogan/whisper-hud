@@ -11,11 +11,11 @@ Models (January 2026):
 """
 
 import os
-import signal
 import subprocess
 import requests
 from typing import Optional, Callable
 from .base import TranslationProvider, TranslationResult
+from ..error_utils import build_provider_error_message
 
 
 class OllamaTranslateProvider(TranslationProvider):
@@ -24,7 +24,9 @@ class OllamaTranslateProvider(TranslationProvider):
     name = "ollama"
     display_name = "Ollama (Local)"
 
-    OLLAMA_API = "http://localhost:11434"
+    OLLAMA_API = "http://127.0.0.1:11434"
+    REQUEST_TIMEOUT_SECONDS = 60
+    HEALTH_TIMEOUT_SECONDS = 2
 
     # Available TranslateGemma models
     MODELS = {
@@ -131,6 +133,40 @@ class OllamaTranslateProvider(TranslationProvider):
         self.model = model
         self.model_config = self.MODELS[model]
         self._ollama_process: Optional[subprocess.Popen] = None
+        self._http_session: Optional[requests.Session] = None
+
+    def _get_http_session(self) -> requests.Session:
+        """Use a local-only session that ignores proxy environment variables."""
+        if self._http_session is None:
+            session = requests.Session()
+            session.trust_env = False
+            self._http_session = session
+        return self._http_session
+
+    def _get_tags_response(self, timeout: float) -> requests.Response:
+        """Fetch the local Ollama tags endpoint without following redirects."""
+        return self._get_http_session().get(
+            f"{self.OLLAMA_API}/api/tags",
+            timeout=timeout,
+            allow_redirects=False,
+        )
+
+    def _generate(self, prompt: str, *, stream: bool) -> requests.Response:
+        """Post a translation request to the local Ollama daemon."""
+        return self._get_http_session().post(
+            f"{self.OLLAMA_API}/api/generate",
+            json={
+                "model": self.model_config["ollama_name"],
+                "prompt": prompt,
+                "stream": stream,
+                "options": {
+                    "temperature": 0.1,
+                },
+            },
+            stream=stream,
+            timeout=self.REQUEST_TIMEOUT_SECONDS,
+            allow_redirects=False,
+        )
 
     def translate(self, text: str, source_lang: str, target_lang: str) -> TranslationResult:
         """
@@ -153,18 +189,7 @@ class OllamaTranslateProvider(TranslationProvider):
         prompt = self._build_prompt(text, source_lang, target_lang)
 
         try:
-            response = requests.post(
-                f"{self.OLLAMA_API}/api/generate",
-                json={
-                    "model": self.model_config["ollama_name"],
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.1,  # Low temperature for more consistent translations
-                    },
-                },
-                timeout=60,
-            )
+            response = self._generate(prompt, stream=False)
             response.raise_for_status()
 
             result_text = response.json().get("response", "").strip()
@@ -181,7 +206,7 @@ class OllamaTranslateProvider(TranslationProvider):
         except requests.exceptions.Timeout:
             raise TimeoutError("Translation timed out")
         except Exception as e:
-            raise RuntimeError(f"Translation failed: {e}")
+            raise RuntimeError(build_provider_error_message("Ollama", "translation", e)) from e
 
     def _build_prompt(self, text: str, source_lang: str, target_lang: str) -> str:
         """Build the translation prompt for TranslateGemma."""
@@ -222,7 +247,7 @@ class OllamaTranslateProvider(TranslationProvider):
         """Check if Ollama is running and model is downloaded."""
         try:
             # Check if Ollama server is running
-            response = requests.get(f"{self.OLLAMA_API}/api/tags", timeout=2)
+            response = self._get_tags_response(self.HEALTH_TIMEOUT_SECONDS)
             if response.status_code != 200:
                 return False
 
@@ -234,7 +259,7 @@ class OllamaTranslateProvider(TranslationProvider):
     def _is_model_downloaded(self) -> bool:
         """Check if the current model is downloaded in Ollama."""
         try:
-            response = requests.get(f"{self.OLLAMA_API}/api/tags", timeout=5)
+            response = self._get_tags_response(5)
             if response.status_code != 200:
                 return False
 
@@ -275,7 +300,7 @@ class OllamaTranslateProvider(TranslationProvider):
     def _is_ollama_running(self) -> bool:
         """Check if Ollama server is running."""
         try:
-            response = requests.get(f"{self.OLLAMA_API}/api/tags", timeout=2)
+            response = self._get_tags_response(self.HEALTH_TIMEOUT_SECONDS)
             return response.status_code == 200
         except Exception:
             return False
@@ -393,19 +418,7 @@ class OllamaTranslateProvider(TranslationProvider):
         cumulative_text = ""
 
         try:
-            response = requests.post(
-                f"{self.OLLAMA_API}/api/generate",
-                json={
-                    "model": self.model_config["ollama_name"],
-                    "prompt": prompt,
-                    "stream": True,
-                    "options": {
-                        "temperature": 0.1,
-                    },
-                },
-                stream=True,
-                timeout=60,
-            )
+            response = self._generate(prompt, stream=True)
             response.raise_for_status()
 
             for line in response.iter_lines():
@@ -435,7 +448,7 @@ class OllamaTranslateProvider(TranslationProvider):
         except requests.exceptions.Timeout:
             raise TimeoutError("Translation timed out")
         except Exception as e:
-            raise RuntimeError(f"Translation failed: {e}")
+            raise RuntimeError(build_provider_error_message("Ollama", "translation", e)) from e
 
     @staticmethod
     def is_homebrew_installed() -> bool:
@@ -500,7 +513,7 @@ class OllamaTranslateProvider(TranslationProvider):
         """
         # Check if already running
         try:
-            response = requests.get("http://localhost:11434/api/tags", timeout=2)
+            response = self._get_tags_response(self.HEALTH_TIMEOUT_SECONDS)
             if response.status_code == 200:
                 return True, None  # Already running
         except Exception:
@@ -524,7 +537,7 @@ class OllamaTranslateProvider(TranslationProvider):
             for _ in range(10):  # Wait up to 5 seconds
                 time.sleep(0.5)
                 try:
-                    response = requests.get("http://localhost:11434/api/tags", timeout=2)
+                    response = self._get_tags_response(self.HEALTH_TIMEOUT_SECONDS)
                     if response.status_code == 200:
                         return True, process.pid
                 except Exception:

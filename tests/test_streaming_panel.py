@@ -1,6 +1,5 @@
 """Streaming panel behavior tests."""
 
-import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 

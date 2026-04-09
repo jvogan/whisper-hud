@@ -5,9 +5,7 @@ import threading
 import types
 from unittest.mock import MagicMock
 
-import pytest
-
-from whisper_hud.app import ActiveTranscriptionTurn, RecordingTurnPhase, WhisperHUDApp
+from whisper_hud.app import ActiveTranscriptionTurn, WhisperHUDApp
 from whisper_hud.config import Config
 from whisper_hud.providers.base import TranscriptionResult
 
@@ -345,6 +343,7 @@ def test_set_openai_key_does_not_prefill_existing_key(monkeypatch):
         "Enter OpenAI API Key",
         "Enter your OpenAI API key.\n\nGet your key at: platform.openai.com/api-keys\n\nA key is already saved. Enter a new key to replace it.",
         default="",
+        hidden=True,
     )
 
 

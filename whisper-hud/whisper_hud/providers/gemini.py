@@ -14,6 +14,7 @@ Models (February 2026):
 from types import SimpleNamespace
 from typing import Callable
 from .base import TranscriptionProvider, TranscriptionResult
+from .error_utils import build_provider_error_message
 from ..keychain import get_api_key
 
 
@@ -22,6 +23,7 @@ class GeminiProvider(TranscriptionProvider):
 
     name = "gemini"
     display_name = "Google Gemini"
+    CLIENT_TIMEOUT_MS = 30000
 
     # Available models with approximate costs
     MODELS = [
@@ -61,13 +63,17 @@ class GeminiProvider(TranscriptionProvider):
         if self._client is None:
             try:
                 from google import genai
+                from google.genai import types
             except ImportError:
                 raise RuntimeError("google-genai package not installed. Install with: pip install google-genai")
 
             api_key = get_api_key("gemini")
             if not api_key:
                 raise ValueError("Gemini API key not configured")
-            self._client = genai.Client(api_key=api_key)
+            self._client = genai.Client(
+                api_key=api_key,
+                http_options=types.HttpOptions(timeout=self.CLIENT_TIMEOUT_MS),
+            )
 
         return self._client
 
@@ -147,53 +153,8 @@ Preserve natural punctuation."""
 
     @staticmethod
     def _build_transcribe_error_message(error: Exception) -> str:
-        """Map Gemini request failures to user-readable RuntimeError messages."""
-        details = str(error).strip() or error.__class__.__name__
-        error_type = error.__class__.__name__.lower()
-        status_code = getattr(error, "status_code", None)
-        if status_code is None:
-            status_code = getattr(error, "code", None)
-        if status_code is None:
-            response = getattr(error, "response", None)
-            status_code = getattr(response, "status_code", None)
-
-        if GeminiProvider._is_network_error(error_type, details):
-            return f"Gemini transcription failed due to a network error: {details}"
-        if GeminiProvider._is_api_error(error_type, status_code):
-            return f"Gemini transcription failed due to an API error: {details}"
-        return f"Gemini transcription failed: {details}"
-
-    @staticmethod
-    def _is_network_error(error_type: str, details: str) -> bool:
-        """Best-effort classification for transport-layer failures."""
-        network_markers = (
-            "connection",
-            "connect",
-            "timeout",
-            "timed out",
-            "network",
-            "dns",
-            "socket",
-            "ssl",
-            "transport",
-            "unreachable",
-            "temporarily unavailable",
-        )
-        lowered_details = details.lower()
-        return "api" not in error_type and (
-            any(marker in error_type for marker in network_markers)
-            or any(marker in lowered_details for marker in network_markers)
-        )
-
-    @staticmethod
-    def _is_api_error(error_type: str, status_code) -> bool:
-        """Detect provider/API failures from SDK metadata when available."""
-        if status_code is not None:
-            try:
-                return int(status_code) >= 400
-            except (TypeError, ValueError):
-                return True
-        return "api" in error_type or "http" in error_type or "status" in error_type
+        """Map Gemini request failures to safe user-readable RuntimeError messages."""
+        return build_provider_error_message("Gemini", "transcription", error)
 
     @staticmethod
     def _extract_transcription_text(response) -> str | None:

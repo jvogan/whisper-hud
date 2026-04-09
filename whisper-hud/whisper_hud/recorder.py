@@ -309,11 +309,14 @@ class AudioRecorder:
                 finally:
                     self._stream = None
 
-            if not self.audio_data:
+            audio_chunks = self.audio_data
+            self.audio_data = []
+
+            if not audio_chunks:
                 return b""
 
             # Concatenate all recorded chunks
-            audio = np.concatenate(self.audio_data, axis=0)
+            audio = np.concatenate(audio_chunks, axis=0)
 
             # Trim silence from end if we auto-stopped
             if self._silence_triggered:
@@ -329,10 +332,7 @@ class AudioRecorder:
             buffer = io.BytesIO()
             wavfile.write(buffer, self.sample_rate, audio_int16)
             buffer.seek(0)
-            audio_bytes = buffer.read()
-            # Release accumulated audio chunks after we have the bytes
-            self.audio_data = []
-            return audio_bytes
+            return buffer.read()
 
     def get_duration(self) -> float:
         """Return current recording duration in seconds."""

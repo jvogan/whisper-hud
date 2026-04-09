@@ -14,6 +14,7 @@ import io
 from importlib import import_module
 from typing import TYPE_CHECKING
 from .base import TranscriptionProvider, TranscriptionResult
+from .error_utils import build_provider_error_message
 from ..keychain import get_api_key
 
 if TYPE_CHECKING:
@@ -25,6 +26,8 @@ class OpenAITranscribeProvider(TranscriptionProvider):
 
     name = "openai"
     display_name = "OpenAI"
+    CLIENT_TIMEOUT_SECONDS = 30.0
+    CLIENT_MAX_RETRIES = 0
 
     # Available models with pricing (per minute)
     MODELS = [
@@ -66,7 +69,11 @@ class OpenAITranscribeProvider(TranscriptionProvider):
             api_key = get_api_key("openai")
             if not api_key:
                 raise ValueError("OpenAI API key not configured")
-            self._client = openai_cls(api_key=api_key)
+            self._client = openai_cls(
+                api_key=api_key,
+                timeout=self.CLIENT_TIMEOUT_SECONDS,
+                max_retries=self.CLIENT_MAX_RETRIES,
+            )
         return self._client
 
     @staticmethod
@@ -129,7 +136,7 @@ class OpenAITranscribeProvider(TranscriptionProvider):
                 duration = len(audio_bytes) / 32000
                 language = None
         except Exception as e:
-            raise RuntimeError(f"OpenAI transcription failed: {e}") from e
+            raise RuntimeError(build_provider_error_message("OpenAI", "transcription", e)) from e
 
         # Calculate cost
         duration_minutes = duration / 60

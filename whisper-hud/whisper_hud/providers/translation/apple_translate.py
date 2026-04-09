@@ -17,6 +17,9 @@ from pathlib import Path
 from typing import Optional
 
 from .base import TranslationProvider, TranslationResult
+from ...logging_config import get_logger
+
+logger = get_logger("providers.translation.apple_translate")
 
 
 class AppleTranslateProvider(TranslationProvider):
@@ -60,11 +63,34 @@ class AppleTranslateProvider(TranslationProvider):
         self.model = model if model in self.MODELS else "system"
 
     @staticmethod
-    def _helper_path() -> Path:
-        override = os.environ.get("WHISPERHUD_APPLE_TRANSLATE_HELPER")
-        if override:
-            return Path(override).expanduser()
+    def _source_helper_path() -> Path:
+        """Return the expected helper location when running from source."""
+        pkg_root = Path(__file__).resolve().parents[3]
+        return pkg_root / "bin" / "whisperhud-apple-translate"
 
+    @classmethod
+    def _development_override_path(cls) -> Optional[Path]:
+        """Allow helper overrides only inside the repo-controlled bin directory."""
+        override = os.environ.get("WHISPERHUD_APPLE_TRANSLATE_HELPER")
+        if not override:
+            return None
+
+        candidate = Path(override).expanduser()
+        if not candidate.is_absolute():
+            candidate = candidate.resolve()
+        else:
+            candidate = candidate.resolve()
+
+        allowed_dir = cls._source_helper_path().parent.resolve()
+        try:
+            candidate.relative_to(allowed_dir)
+            return candidate
+        except ValueError:
+            logger.warning("Ignoring untrusted Apple Translation helper override outside %s", allowed_dir)
+            return None
+
+    @classmethod
+    def _helper_path(cls) -> Path:
         if getattr(sys, "frozen", False):
             try:
                 from Foundation import NSBundle
@@ -76,10 +102,12 @@ class AppleTranslateProvider(TranslationProvider):
                     return candidate
             except Exception:
                 pass
+        else:
+            override_path = cls._development_override_path()
+            if override_path is not None:
+                return override_path
 
-        # Project root (repo/whisper-hud) when running from source
-        pkg_root = Path(__file__).resolve().parents[3]
-        return pkg_root / "bin" / "whisperhud-apple-translate"
+        return cls._source_helper_path()
 
     @staticmethod
     def _is_supported_macos() -> bool:

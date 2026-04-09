@@ -37,6 +37,36 @@ is_python_311_plus() {
     "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1
 }
 
+read_plist_value() {
+    local plist_path="$1"
+    local key="$2"
+    /usr/libexec/PlistBuddy -c "Print :$key" "$plist_path" 2>/dev/null || true
+}
+
+verify_sparkle_framework() {
+    local candidate="$1"
+    local info_plist="$candidate/Resources/Info.plist"
+    local bundle_id=""
+
+    if [ ! -f "$info_plist" ]; then
+        echo -e "${YELLOW}Warning: Sparkle Info.plist missing at $info_plist${NC}"
+        return 1
+    fi
+
+    bundle_id="$(read_plist_value "$info_plist" "CFBundleIdentifier")"
+    if [ "$bundle_id" != "org.sparkle-project.Sparkle" ]; then
+        echo -e "${YELLOW}Warning: Refusing Sparkle.framework with unexpected bundle ID '$bundle_id'${NC}"
+        return 1
+    fi
+
+    if ! codesign --verify --deep --strict "$candidate" >/dev/null 2>&1; then
+        echo -e "${YELLOW}Warning: Refusing unsigned or invalid Sparkle.framework at $candidate${NC}"
+        return 1
+    fi
+
+    return 0
+}
+
 # Parse arguments
 CLEAN=false
 INCLUDE_SPARKLE=false
@@ -150,16 +180,15 @@ SPARKLE_PATH=""
 if [ "$INCLUDE_SPARKLE" = true ]; then
     echo -e "${CYAN}Checking for Sparkle.framework...${NC}"
 
-    # Common Sparkle locations
-    SPARKLE_LOCATIONS=(
-        "/Library/Frameworks/Sparkle.framework"
-        "$HOME/Library/Frameworks/Sparkle.framework"
-        "/usr/local/Frameworks/Sparkle.framework"
-        "$PROJECT_ROOT/Frameworks/Sparkle.framework"
-    )
+    SPARKLE_OVERRIDE="${WHISPERHUD_SPARKLE_PATH:-}"
+    SPARKLE_LOCATIONS=()
+    if [ -n "$SPARKLE_OVERRIDE" ]; then
+        SPARKLE_LOCATIONS+=("$SPARKLE_OVERRIDE")
+    fi
+    SPARKLE_LOCATIONS+=("$PROJECT_ROOT/Frameworks/Sparkle.framework")
 
     for loc in "${SPARKLE_LOCATIONS[@]}"; do
-        if [ -d "$loc" ]; then
+        if [ -d "$loc" ] && verify_sparkle_framework "$loc"; then
             SPARKLE_PATH="$loc"
             break
         fi
@@ -169,7 +198,7 @@ if [ "$INCLUDE_SPARKLE" = true ]; then
         echo -e "${GREEN}✓ Found Sparkle at $SPARKLE_PATH${NC}"
     else
         echo -e "${YELLOW}Warning: Sparkle.framework not found. Auto-updates will be disabled.${NC}"
-        echo -e "${YELLOW}To install: brew install --cask sparkle${NC}"
+        echo -e "${YELLOW}To include Sparkle, place it at $PROJECT_ROOT/Frameworks/Sparkle.framework or set WHISPERHUD_SPARKLE_PATH.${NC}"
     fi
 fi
 

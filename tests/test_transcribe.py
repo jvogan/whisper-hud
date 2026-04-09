@@ -335,12 +335,8 @@ def test_reload_config_invalidates_cache_and_updates_provider_models(mock_config
     assert CountingParakeetProvider.instances == 2
 
 
-def test_transcribe_falls_back_to_next_configured_provider(mock_config, monkeypatch, sample_audio_bytes):
-    """An unavailable cloud primary provider falls back using local-first order, then cloud.
-
-    openai (cloud, unconfigured) → tries apple, whisper_local, parakeet (all unconfigured)
-    → falls back to gemini (cloud, configured).
-    """
+def test_transcribe_does_not_fallback_across_cloud_providers(mock_config, monkeypatch, sample_audio_bytes):
+    """An unavailable cloud provider should fail instead of silently switching vendors."""
     provider_classes = {
         "openai": PrimaryProvider,
         "gemini": SecondaryProvider,
@@ -354,16 +350,44 @@ def test_transcribe_falls_back_to_next_configured_provider(mock_config, monkeypa
     mock_config.default_provider = "openai"
 
     manager = TranscriptionManager(mock_config)
+
+    with pytest.raises(ValueError, match="Provider 'openai' is not configured"):
+        manager.transcribe(sample_audio_bytes)
+
+    assert PrimaryProvider.transcribe_calls == 0
+    assert SecondaryProvider.transcribe_calls == 0
+    assert mock_config.total_transcriptions == 0
+    assert mock_config.total_cost == 0.0
+
+
+def test_transcribe_local_provider_can_fallback_to_other_local_provider(mock_config, monkeypatch, sample_audio_bytes):
+    """Local privacy-preserving providers may still fall back to other local providers."""
+    provider_classes = {
+        "apple": AppleFallbackProvider,
+        "whisper_local": WhisperFallbackProvider,
+        "parakeet": ParakeetFallbackProvider,
+        "openai": PrimaryProvider,
+        "gemini": SecondaryProvider,
+    }
+
+    reset_provider_classes(*provider_classes.values())
+    WhisperFallbackProvider.configured = True
+    monkeypatch.setattr(TranscriptionManager, "PROVIDER_CLASSES", provider_classes)
+    mock_config.default_provider = "apple"
+
+    manager = TranscriptionManager(mock_config)
     result = manager.transcribe(sample_audio_bytes)
 
-    assert result.text == "fallback result"
-    assert result.provider == "gemini"
-    assert result.model == mock_config.gemini_model
-    assert PrimaryProvider.transcribe_calls == 0
-    assert SecondaryProvider.transcribe_calls == 1
-    assert SecondaryProvider.last_audio_bytes == sample_audio_bytes
+    assert result.text == "whisper result"
+    assert result.provider == "whisper_local"
+    assert result.model == mock_config.whisper_local_model
+    assert AppleFallbackProvider.transcribe_calls == 0
+    assert WhisperFallbackProvider.transcribe_calls == 1
+    assert WhisperFallbackProvider.last_audio_bytes == sample_audio_bytes
     assert mock_config.total_transcriptions == 1
-    assert mock_config.total_cost == pytest.approx(0.42)
+    assert mock_config.total_cost == 0.0
+
+    WhisperFallbackProvider.configured = False
 
 
 def test_transcribe_raises_when_no_providers_are_available(mock_config, monkeypatch, sample_audio_bytes):

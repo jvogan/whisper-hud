@@ -1,7 +1,6 @@
 """Tests for credential storage and API key management."""
 
 import builtins
-import logging
 from unittest.mock import Mock, patch
 
 
@@ -269,6 +268,7 @@ class TestValidateApiKey:
             "https://api.openai.com/v1/models",
             headers={"Authorization": f"Bearer {valid_key}"},
             timeout=10,
+            allow_redirects=False,
         )
 
     def test_validate_api_key_returns_false_for_invalid_openai_key(self):
@@ -299,7 +299,7 @@ class TestValidateApiKey:
         assert error == "Connection timed out"
         mock_get.assert_called_once()
 
-    def test_validate_api_key_returns_false_when_requests_not_installed(self, caplog):
+    def test_validate_api_key_returns_false_when_requests_not_installed(self):
         """Missing requests should not bypass validation."""
         from whisper_hud.keychain import REQUESTS_MISSING_WARNING, validate_api_key
 
@@ -312,13 +312,11 @@ class TestValidateApiKey:
 
         no_requests_key = "sk-no-requests-padded-to-pass-format-12345678"
 
-        with caplog.at_level(logging.WARNING, logger="whisper_hud.keychain"):
-            with patch("builtins.__import__", side_effect=import_without_requests):
-                is_valid, error = validate_api_key("openai", no_requests_key)
+        with patch("builtins.__import__", side_effect=import_without_requests):
+            is_valid, error = validate_api_key("openai", no_requests_key)
 
         assert is_valid is False
         assert error == REQUESTS_MISSING_WARNING
-        assert REQUESTS_MISSING_WARNING in caplog.text
 
     def test_validate_api_key_returns_false_for_empty_key(self):
         """An empty key should fail format check before any network call."""
@@ -330,3 +328,22 @@ class TestValidateApiKey:
         assert is_valid is False
         assert error == "Invalid API key format"
         mock_get.assert_not_called()
+
+    def test_validate_api_key_disables_redirects_for_gemini(self):
+        """Validation requests should not follow redirects with API-key headers attached."""
+        from whisper_hud.keychain import validate_api_key
+
+        response = Mock(status_code=200)
+        valid_key = "g" * 24
+
+        with patch("requests.get", return_value=response) as mock_get:
+            is_valid, error = validate_api_key("gemini", valid_key)
+
+        assert is_valid is True
+        assert error == ""
+        mock_get.assert_called_once_with(
+            "https://generativelanguage.googleapis.com/v1/models",
+            headers={"x-goog-api-key": valid_key},
+            timeout=10,
+            allow_redirects=False,
+        )

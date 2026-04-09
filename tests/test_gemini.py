@@ -11,7 +11,7 @@ from whisper_hud.providers.gemini import GeminiProvider
 def fake_gemini_sdk(monkeypatch):
     """Install a minimal google.genai SDK surface for provider tests."""
 
-    calls = {"parts": [], "client_api_keys": []}
+    calls = {"parts": [], "client_api_keys": [], "client_http_timeouts": []}
 
     class FakePart:
         @staticmethod
@@ -20,9 +20,14 @@ def fake_gemini_sdk(monkeypatch):
             return {"data": data, "mime_type": mime_type}
 
     class FakeClient:
-        def __init__(self, *, api_key):
+        def __init__(self, *, api_key, http_options=None):
             calls["client_api_keys"].append(api_key)
+            calls["client_http_timeouts"].append(getattr(http_options, "timeout", None))
             self.models = SimpleNamespace()
+
+    class FakeHttpOptions:
+        def __init__(self, *, timeout=None, **_kwargs):
+            self.timeout = timeout
 
     google_module = ModuleType("google")
     genai_module = ModuleType("google.genai")
@@ -31,6 +36,7 @@ def fake_gemini_sdk(monkeypatch):
     genai_module.Client = FakeClient
     genai_module.types = types_module
     types_module.Part = FakePart
+    types_module.HttpOptions = FakeHttpOptions
     google_module.genai = genai_module
 
     monkeypatch.setitem(__import__("sys").modules, "google", google_module)
@@ -79,6 +85,7 @@ def test_get_client_builds_and_caches_sdk_client(monkeypatch, fake_gemini_sdk):
 
     assert first is second
     assert fake_gemini_sdk["client_api_keys"] == ["gemini-key"]
+    assert fake_gemini_sdk["client_http_timeouts"] == [30000]
 
 
 def test_get_client_raises_value_error_when_api_key_is_missing(monkeypatch, fake_gemini_sdk):
@@ -131,7 +138,7 @@ def test_transcribe_raises_runtime_error_on_network_error(
 
     monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(models=FakeModels()))
 
-    with pytest.raises(RuntimeError, match="network error: Connection timed out"):
+    with pytest.raises(RuntimeError, match="Gemini transcription failed: request timed out"):
         provider.transcribe(sample_audio_bytes)
 
 
@@ -154,7 +161,7 @@ def test_transcribe_raises_runtime_error_on_api_error(
 
     monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(models=FakeModels()))
 
-    with pytest.raises(RuntimeError, match="API error: Quota exceeded"):
+    with pytest.raises(RuntimeError, match="Gemini transcription failed: rate limited"):
         provider.transcribe(sample_audio_bytes)
 
 
@@ -172,7 +179,7 @@ def test_transcribe_raises_runtime_error_on_unclassified_error(
 
     monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(models=FakeModels()))
 
-    with pytest.raises(RuntimeError, match="Gemini transcription failed: Something odd happened"):
+    with pytest.raises(RuntimeError, match="Gemini transcription failed: unexpected error"):
         provider.transcribe(sample_audio_bytes)
 
 

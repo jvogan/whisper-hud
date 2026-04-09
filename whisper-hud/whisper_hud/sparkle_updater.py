@@ -64,19 +64,7 @@ def _load_sparkle():
             except Exception as e:
                 logger.debug(f"Could not load Sparkle from {sparkle_path}: {e}")
 
-        # Try system-wide Sparkle (for development)
-        try:
-            from objc import lookUpClass
-
-            _SUUpdater = lookUpClass("SUUpdater")
-            if _SUUpdater:
-                _sparkle_available = True
-                logger.info("Sparkle framework loaded from system")
-                return True
-        except Exception:
-            pass
-
-        logger.debug("Sparkle framework not available")
+        logger.debug("Bundled Sparkle framework not available")
         return False
 
     except ImportError as e:

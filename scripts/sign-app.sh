@@ -36,6 +36,31 @@ APP_NAME="WhisperHUD"
 APP_PATH="$DIST_DIR/$APP_NAME.app"
 ENTITLEMENTS="$PROJECT_ROOT/entitlements.plist"
 
+read_plist_value() {
+    local plist_path="$1"
+    local key="$2"
+    /usr/libexec/PlistBuddy -c "Print :$key" "$plist_path" 2>/dev/null || true
+}
+
+verify_embedded_sparkle() {
+    local framework_path="$1"
+    local info_plist="$framework_path/Resources/Info.plist"
+    local bundle_id=""
+
+    if [ ! -f "$info_plist" ]; then
+        echo -e "${RED}Error: Embedded Sparkle Info.plist missing at $info_plist${NC}"
+        return 1
+    fi
+
+    bundle_id="$(read_plist_value "$info_plist" "CFBundleIdentifier")"
+    if [ "$bundle_id" != "org.sparkle-project.Sparkle" ]; then
+        echo -e "${RED}Error: Embedded Sparkle.framework has unexpected bundle ID '$bundle_id'${NC}"
+        return 1
+    fi
+
+    return 0
+}
+
 # Default options
 IDENTITY=""
 NOTARIZE=false
@@ -125,6 +150,7 @@ fi
 
 # Sign Sparkle.framework if present
 if [ -d "$APP_PATH/Contents/Frameworks/Sparkle.framework" ]; then
+    verify_embedded_sparkle "$APP_PATH/Contents/Frameworks/Sparkle.framework"
     echo -e "  Signing Sparkle.framework..."
     codesign --force --deep --sign "$IDENTITY" \
         --options runtime \

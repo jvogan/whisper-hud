@@ -8,6 +8,7 @@ import os
 import plistlib
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from .logging_config import get_logger
@@ -17,6 +18,63 @@ logger = get_logger("launch_agent")
 BUNDLE_ID = "com.whisper-hud.app"
 LAUNCH_AGENT_DIR = Path.home() / "Library" / "LaunchAgents"
 LAUNCH_AGENT_PLIST = LAUNCH_AGENT_DIR / f"{BUNDLE_ID}.plist"
+LAUNCH_AGENT_LOG_DIR = Path.home() / "Library" / "Logs" / "WhisperHUD"
+STDOUT_LOG = LAUNCH_AGENT_LOG_DIR / "whisper-hud.log"
+STDERR_LOG = LAUNCH_AGENT_LOG_DIR / "whisper-hud.error.log"
+
+
+def _ensure_private_dir(path: Path, mode: int = 0o700) -> None:
+    """Create a directory if needed and tighten permissions best-effort."""
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path, mode)
+    except Exception:
+        pass
+
+
+def _touch_private_file(path: Path, mode: int = 0o600) -> None:
+    """Create a file if needed and tighten permissions best-effort."""
+    if not path.exists():
+        fd = os.open(str(path), os.O_CREAT | os.O_WRONLY, mode)
+        os.close(fd)
+    try:
+        os.chmod(path, mode)
+    except Exception:
+        pass
+
+
+def _write_launch_agent_plist(plist_content: dict) -> None:
+    """Write the launch agent plist atomically to avoid partial writes or symlink surprises."""
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=str(LAUNCH_AGENT_DIR),
+            prefix=f".{BUNDLE_ID}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            plistlib.dump(plist_content, temp_file)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+
+        try:
+            os.chmod(temp_path, 0o600)
+        except Exception:
+            pass
+
+        os.replace(temp_path, LAUNCH_AGENT_PLIST)
+        try:
+            os.chmod(LAUNCH_AGENT_PLIST, 0o600)
+        except Exception:
+            pass
+    finally:
+        if temp_path and temp_path.exists():
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
 
 
 def get_app_executable() -> str:
@@ -65,8 +123,8 @@ def get_launch_agent_plist() -> dict:
         "RunAtLoad": True,
         "KeepAlive": False,
         "ProcessType": "Interactive",
-        "StandardOutPath": str(Path.home() / "Library" / "Logs" / "whisper-hud.log"),
-        "StandardErrorPath": str(Path.home() / "Library" / "Logs" / "whisper-hud.error.log"),
+        "StandardOutPath": str(STDOUT_LOG),
+        "StandardErrorPath": str(STDERR_LOG),
     }
 
 
@@ -84,16 +142,16 @@ def enable_launch_at_login() -> tuple[bool, str]:
     """
     try:
         # Create LaunchAgents directory if needed
-        LAUNCH_AGENT_DIR.mkdir(parents=True, exist_ok=True)
+        _ensure_private_dir(LAUNCH_AGENT_DIR)
 
-        # Create logs directory
-        logs_dir = Path.home() / "Library" / "Logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
+        # Create app-specific logs directory and files
+        _ensure_private_dir(LAUNCH_AGENT_LOG_DIR)
+        _touch_private_file(STDOUT_LOG)
+        _touch_private_file(STDERR_LOG)
 
         # Write plist file
         plist_content = get_launch_agent_plist()
-        with open(LAUNCH_AGENT_PLIST, "wb") as f:
-            plistlib.dump(plist_content, f)
+        _write_launch_agent_plist(plist_content)
 
         # Load the launch agent
         subprocess.run(["launchctl", "load", str(LAUNCH_AGENT_PLIST)], capture_output=True)

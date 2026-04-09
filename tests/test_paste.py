@@ -184,6 +184,28 @@ class TestPaste:
     @patch("whisper_hud.paste.pyperclip.copy")
     @patch("whisper_hud.paste.pyperclip.paste")
     @patch("whisper_hud.paste.subprocess.run")
+    def test_insert_text_clears_clipboard_when_snapshot_fails(
+        self,
+        mock_run,
+        mock_paste,
+        mock_copy,
+        _mock_sleep,
+    ):
+        """If the original clipboard cannot be read, temporary pasted text should still be cleared."""
+        from whisper_hud.paste import insert_text
+
+        mock_run.return_value = MagicMock(returncode=0, stderr=b"")
+        mock_paste.side_effect = [RuntimeError("clipboard unavailable"), "secret text"]
+
+        result = insert_text("secret text")
+
+        assert result is True
+        assert mock_copy.call_args_list == [call("secret text"), call("")]
+
+    @patch("whisper_hud.paste.time.sleep")
+    @patch("whisper_hud.paste.pyperclip.copy")
+    @patch("whisper_hud.paste.pyperclip.paste")
+    @patch("whisper_hud.paste.subprocess.run")
     def test_insert_text_target_app_activation_and_focus_restore(
         self,
         mock_run,

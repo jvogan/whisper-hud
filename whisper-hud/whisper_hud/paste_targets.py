@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .logging_config import get_logger
-from .paste import escape_applescript_string
+from .paste import escape_applescript_string, _restore_clipboard_after_paste
 
 logger = get_logger("paste_targets")
 
@@ -230,6 +230,7 @@ class PasteTargetManager:
 
         original_app = None
         original_clipboard = None
+        clipboard_snapshot_failed = False
 
         try:
             # Save original state
@@ -241,6 +242,7 @@ class PasteTargetManager:
                     original_clipboard = pyperclip.paste()
                 except Exception:
                     original_clipboard = None
+                    clipboard_snapshot_failed = True
 
             # Copy text to clipboard
             pyperclip.copy(text)
@@ -278,14 +280,8 @@ class PasteTargetManager:
                 self.activate_app(original_app)
 
             # Restore clipboard
-            if restore_clipboard and original_clipboard is not None:
-                time.sleep(0.1)
-                try:
-                    current_clipboard = pyperclip.paste()
-                    if current_clipboard == text:
-                        pyperclip.copy(original_clipboard)
-                except Exception:
-                    pass
+            if restore_clipboard:
+                _restore_clipboard_after_paste(text, original_clipboard, clipboard_snapshot_failed)
 
     def paste_to_tmux(self, text: str, session: str) -> bool:
         """
@@ -300,10 +296,10 @@ class PasteTargetManager:
         """
         valid_sessions = self.get_tmux_sessions()
         if session not in valid_sessions:
-            logger.warning(f"tmux session not found in running sessions")
+            logger.warning("tmux session not found in running sessions")
             return False
 
-        if not re.match(r'^[a-zA-Z0-9_\-\.]+$', session):
+        if not re.match(r"^[a-zA-Z0-9_\-\.]+$", session):
             logger.warning("tmux session name contains unsafe characters, rejecting")
             return False
 
@@ -327,10 +323,10 @@ class PasteTargetManager:
 
     def paste_to_iterm2(self, text: str) -> bool:
         """
-        Send text directly to iTerm2 (no focus change).
+        Paste text into iTerm2 using the clipboard path.
 
-        Uses AppleScript to write directly to iTerm2's current session
-        without changing window focus.
+        Direct iTerm2 scripting can execute multiline shell input immediately,
+        so this follows the safer activate + Cmd+V + restore-focus flow.
 
         Args:
             text: Text to send
@@ -338,29 +334,7 @@ class PasteTargetManager:
         Returns:
             True if successful, False otherwise
         """
-        escaped_text = escape_applescript_string(text)
-
-        # Use 'write text' without newline to insert text at cursor
-        applescript = f"""
-        tell application "iTerm"
-            tell current session of current window
-                write text "{escaped_text}" without newline
-            end tell
-        end tell
-        """
-
-        try:
-            result = subprocess.run(["osascript", "-e", applescript], capture_output=True, timeout=5)
-
-            if result.returncode != 0:
-                logger.error(f"iTerm2 write failed: {result.stderr.decode()}")
-                return False
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Error writing to iTerm2: {e}")
-            return False
+        return self.paste_to_app(text, "iTerm2", return_focus=True, restore_clipboard=True)
 
     def paste_to_terminal(self, text: str) -> bool:
         """
@@ -378,13 +352,14 @@ class PasteTargetManager:
         import pyperclip
 
         original_clipboard = None
+        clipboard_snapshot_failed = False
 
         try:
             # Save clipboard
             try:
                 original_clipboard = pyperclip.paste()
             except Exception:
-                pass
+                clipboard_snapshot_failed = True
 
             # Copy text to clipboard
             pyperclip.copy(text)
@@ -415,14 +390,7 @@ class PasteTargetManager:
             return False
         finally:
             # Restore clipboard
-            if original_clipboard is not None:
-                time.sleep(0.1)
-                try:
-                    current_clipboard = pyperclip.paste()
-                    if current_clipboard == text:
-                        pyperclip.copy(original_clipboard)
-                except Exception:
-                    pass
+            _restore_clipboard_after_paste(text, original_clipboard, clipboard_snapshot_failed)
 
     def is_target_available(self, target_type: str, identifier: str) -> bool:
         """

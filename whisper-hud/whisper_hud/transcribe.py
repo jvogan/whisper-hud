@@ -287,13 +287,13 @@ class TranscriptionManager:
         """Find a fallback provider if the current one isn't configured."""
         local_providers = {"apple", "whisper_local", "parakeet"}
 
-        # If user selected a local provider, only fall back to other local providers
-        # to respect their privacy choice — never silently route to a cloud vendor.
-        if current_provider in local_providers:
-            fallback_order = ["apple", "whisper_local", "parakeet"]
-        else:
-            # Cloud provider can fall back to any; prefer local first
-            fallback_order = ["apple", "whisper_local", "parakeet", "gemini", "openai"]
+        # Respect provider boundaries for privacy. If a user selected a cloud
+        # provider, do not silently route microphone audio to a different vendor.
+        if current_provider not in local_providers:
+            return None
+
+        # Local providers may still fall back to other local options.
+        fallback_order = ["apple", "whisper_local", "parakeet"]
 
         for pid in fallback_order:
             if pid == current_provider:

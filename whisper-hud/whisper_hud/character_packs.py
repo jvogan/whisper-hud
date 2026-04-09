@@ -8,6 +8,7 @@ fun character icons like pandas, cats, robots, etc.
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass, field
@@ -15,6 +16,7 @@ from dataclasses import dataclass, field
 from .logging_config import get_logger
 
 logger = get_logger("character_packs")
+_VALID_PACK_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 # Default location for built-in character packs
@@ -29,6 +31,36 @@ def _get_builtin_packs_dir() -> Path:
 def _get_user_packs_dir() -> Path:
     """Get the directory for user-installed character packs."""
     return Path.home() / ".config" / "whisper-hud" / "character-packs"
+
+
+def _is_valid_pack_id(pack_id: str) -> bool:
+    """Allow only simple slugs for user-controlled pack identifiers."""
+    return bool(pack_id and _VALID_PACK_ID_RE.fullmatch(pack_id))
+
+
+def _resolve_pack_member(pack_dir: Path, relative_path: str) -> Optional[Path]:
+    """Resolve a manifest path safely inside the pack directory."""
+    if not relative_path:
+        return None
+
+    pack_root = pack_dir.resolve()
+    candidate = (pack_root / relative_path).resolve()
+    if not candidate.is_relative_to(pack_root):
+        return None
+    return candidate
+
+
+def _get_safe_user_pack_dir(pack_id: str) -> Optional[Path]:
+    """Return the target user-pack directory only for safe pack identifiers."""
+    if not _is_valid_pack_id(pack_id):
+        return None
+
+    user_dir = _get_user_packs_dir()
+    user_root = user_dir.resolve()
+    candidate = (user_root / pack_id).resolve()
+    if not candidate.is_relative_to(user_root):
+        return None
+    return candidate
 
 
 @dataclass
@@ -106,6 +138,10 @@ def load_pack_manifest(pack_dir: Path) -> Optional[CharacterPack]:
             data = json.load(f)
 
         pack_id = data.get("id", pack_dir.name)
+        if not _is_valid_pack_id(pack_id):
+            logger.warning(f"Invalid character pack id '{pack_id}' in {pack_dir}")
+            return None
+
         pack = CharacterPack(
             id=pack_id,
             name=data.get("name", pack_id.title()),
@@ -130,19 +166,21 @@ def load_pack_manifest(pack_dir: Path) -> Optional[CharacterPack]:
                 description = state_info.get("description", "")
 
             if file_name:
-                full_path = pack_dir / file_name
-                if full_path.exists():
+                full_path = _resolve_pack_member(pack_dir, file_name)
+                if full_path and full_path.is_file():
                     pack.states[state_name] = CharacterPackState(
                         file=file_name, description=description, full_path=str(full_path)
                     )
                 else:
-                    logger.warning(f"Icon file not found: {full_path}")
+                    logger.warning(f"Icon path is missing or escapes the pack directory: {file_name}")
 
         # Set preview path
         if pack.preview_image:
-            preview_path = pack_dir / pack.preview_image
-            if preview_path.exists():
+            preview_path = _resolve_pack_member(pack_dir, pack.preview_image)
+            if preview_path and preview_path.is_file():
                 pack.preview_path = str(preview_path)
+            else:
+                logger.warning(f"Preview image path is missing or escapes the pack directory: {pack.preview_image}")
 
         # Validate that pack has at least idle state
         if "idle" not in pack.states:
@@ -358,8 +396,9 @@ def install_pack_from_directory(source_dir: str) -> Optional[CharacterPack]:
         Installed CharacterPack or None if failed
     """
     import shutil
+    import tempfile
 
-    source_path = Path(source_dir)
+    source_path = Path(source_dir).expanduser().resolve()
     if not source_path.exists() or not source_path.is_dir():
         logger.error(f"Source directory not found: {source_dir}")
         return None
@@ -373,14 +412,58 @@ def install_pack_from_directory(source_dir: str) -> Optional[CharacterPack]:
     # Create user packs directory
     user_dir = _get_user_packs_dir()
     user_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(user_dir, 0o700)
+    except Exception:
+        pass
 
-    # Copy to user directory
-    dest_dir = user_dir / pack.id
+    # Copy to user directory using a manifest-driven allowlist.
+    dest_dir = _get_safe_user_pack_dir(pack.id)
+    if dest_dir is None:
+        logger.error(f"Invalid pack id during install: {pack.id}")
+        return None
+
     if dest_dir.exists():
         logger.warning(f"Pack {pack.id} already exists, overwriting")
-        shutil.rmtree(dest_dir)
+        if dest_dir.is_symlink() or dest_dir.is_file():
+            dest_dir.unlink()
+        else:
+            shutil.rmtree(dest_dir)
 
-    shutil.copytree(source_path, dest_dir)
+    temp_dir = Path(tempfile.mkdtemp(prefix=f".pack-install-{pack.id}-", dir=str(user_dir)))
+    try:
+        os.chmod(temp_dir, 0o700)
+    except Exception:
+        pass
+
+    files_to_copy = {"manifest.json"}
+    files_to_copy.update(state.file for state in pack.states.values())
+    if pack.preview_image:
+        files_to_copy.add(pack.preview_image)
+
+    try:
+        for relative_path in sorted(files_to_copy):
+            source_member = _resolve_pack_member(source_path, relative_path)
+            if source_member is None or not source_member.is_file():
+                logger.error(f"Pack member is missing or unsafe: {relative_path}")
+                return None
+
+            destination = temp_dir / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.chmod(destination.parent, 0o700)
+            except Exception:
+                pass
+            shutil.copy2(source_member, destination)
+            try:
+                os.chmod(destination, 0o600)
+            except Exception:
+                pass
+
+        shutil.move(str(temp_dir), str(dest_dir))
+    finally:
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     # Reload the pack from its new location
     installed_pack = load_pack_manifest(dest_dir)
@@ -524,19 +607,18 @@ def delete_user_pack(pack_id: str) -> Tuple[bool, str]:
     """
     import shutil
 
-    user_dir = _get_user_packs_dir()
-    pack_dir = user_dir / pack_id
+    pack_dir = _get_safe_user_pack_dir(pack_id)
+    if pack_dir is None:
+        return False, "Invalid pack ID"
 
     if not pack_dir.exists():
         return False, f"Pack '{pack_id}' not found"
 
-    # Verify it's a user pack (not in builtin dir)
-    builtin_dir = _get_builtin_packs_dir()
-    if str(pack_dir).startswith(str(builtin_dir)):
-        return False, "Cannot delete built-in packs"
-
     try:
-        shutil.rmtree(pack_dir)
+        if pack_dir.is_symlink() or pack_dir.is_file():
+            pack_dir.unlink()
+        else:
+            shutil.rmtree(pack_dir)
         logger.info(f"Deleted user pack: {pack_id}")
         return True, ""
     except Exception as e:
@@ -546,6 +628,9 @@ def delete_user_pack(pack_id: str) -> Tuple[bool, str]:
 
 def pack_id_exists(pack_id: str) -> bool:
     """Check if a pack ID already exists."""
+    if not _is_valid_pack_id(pack_id):
+        return False
+
     user_dir = _get_user_packs_dir()
     builtin_dir = _get_builtin_packs_dir()
 

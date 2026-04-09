@@ -147,7 +147,7 @@ def test_diarized_transcription_extracts_text_from_segments(monkeypatch, sample_
 
 
 def test_transcribe_raises_runtime_error_on_api_error(monkeypatch, sample_audio_bytes):
-    """SDK failures should surface as RuntimeError with the original detail."""
+    """SDK failures should surface as sanitized RuntimeError messages."""
     fake_client = _FakeClient(error=Exception("Quota exceeded"))
     monkeypatch.setattr("whisper_hud.providers.openai_whisper.get_api_key", lambda _: "sk-test")
     monkeypatch.setattr(
@@ -156,12 +156,12 @@ def test_transcribe_raises_runtime_error_on_api_error(monkeypatch, sample_audio_
         staticmethod(lambda: lambda **_: fake_client),
     )
 
-    with pytest.raises(RuntimeError, match="OpenAI transcription failed: Quota exceeded"):
+    with pytest.raises(RuntimeError, match="OpenAI transcription failed: rate limited"):
         OpenAITranscribeProvider().transcribe(sample_audio_bytes)
 
 
 def test_transcribe_handles_audio_file_not_found(monkeypatch, sample_audio_bytes):
-    """Unexpected file errors should be wrapped consistently for callers."""
+    """Unexpected local failures should be wrapped without leaking path details."""
     fake_client = _FakeClient(error=FileNotFoundError("missing.wav"))
     monkeypatch.setattr("whisper_hud.providers.openai_whisper.get_api_key", lambda _: "sk-test")
     monkeypatch.setattr(
@@ -170,7 +170,7 @@ def test_transcribe_handles_audio_file_not_found(monkeypatch, sample_audio_bytes
         staticmethod(lambda: lambda **_: fake_client),
     )
 
-    with pytest.raises(RuntimeError, match="OpenAI transcription failed: missing.wav"):
+    with pytest.raises(RuntimeError, match="OpenAI transcription failed: unexpected error"):
         OpenAITranscribeProvider().transcribe(sample_audio_bytes)
 
 

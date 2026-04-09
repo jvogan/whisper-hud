@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from .base import TranslationProvider, TranslationResult
+from ..error_utils import build_provider_error_message
 
 
 class OpenAITranslateProvider(TranslationProvider):
@@ -19,6 +20,8 @@ class OpenAITranslateProvider(TranslationProvider):
     display_name = "OpenAI (Cloud)"
 
     DEFAULT_MODEL = "gpt-5-mini"
+    CLIENT_TIMEOUT_SECONDS = 30.0
+    CLIENT_MAX_RETRIES = 0
 
     # Available models (February 2026)
     MODELS = {
@@ -131,7 +134,11 @@ class OpenAITranslateProvider(TranslationProvider):
             if not api_key:
                 raise ValueError("OpenAI API key not configured")
 
-            self._client = OpenAI(api_key=api_key)
+            self._client = OpenAI(
+                api_key=api_key,
+                timeout=self.CLIENT_TIMEOUT_SECONDS,
+                max_retries=self.CLIENT_MAX_RETRIES,
+            )
 
         return self._client
 
@@ -253,7 +260,7 @@ class OpenAITranslateProvider(TranslationProvider):
                 model=self.model,
             )
         except Exception as e:
-            raise RuntimeError(f"OpenAI translation failed: {e}")
+            raise RuntimeError(build_provider_error_message("OpenAI", "translation", e)) from e
 
     def is_available(self) -> bool:
         """Check if OpenAI API key is configured."""
@@ -348,7 +355,7 @@ class OpenAITranslateProvider(TranslationProvider):
                 model=self.model,
             )
         except Exception as e:
-            raise RuntimeError(f"OpenAI streaming translation failed: {e}")
+            raise RuntimeError(build_provider_error_message("OpenAI", "translation", e)) from e
 
     def set_model(self, model_id: str) -> None:
         """Change the active model."""

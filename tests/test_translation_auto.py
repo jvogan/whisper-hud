@@ -193,6 +193,73 @@ def test_gemini_model_not_found_falls_back_to_stable(monkeypatch):
     assert provider.get_current_model() == "gemini-2.5-flash"
 
 
+def test_gemini_translation_sanitizes_provider_errors(monkeypatch):
+    """Gemini translation should not surface raw backend error payloads."""
+
+    class FakeAPIError(Exception):
+        def __init__(self, message):
+            super().__init__(message)
+            self.status_code = 429
+
+    class FakeGeminiModels:
+        def generate_content(self, *, model, contents, config):
+            raise FakeAPIError("Quota exceeded")
+
+    provider = GeminiTranslateProvider(model="gemini-2.5-flash")
+    monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(models=FakeGeminiModels()))
+
+    with pytest.raises(RuntimeError, match="Gemini translation failed: rate limited"):
+        provider.translate("Hello world", "en", "es")
+
+
+def test_openai_streaming_translation_sanitizes_provider_errors(monkeypatch):
+    """OpenAI streaming translation should collapse backend details into safe categories."""
+
+    class FakeRateLimitError(Exception):
+        def __init__(self, message):
+            super().__init__(message)
+            self.status_code = 429
+
+    class FakeResponsesAPI:
+        def stream(self, **_kwargs):
+            raise FakeRateLimitError("Quota exceeded")
+
+    provider = OpenAITranslateProvider(model="gpt-5-mini")
+    monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(responses=FakeResponsesAPI()))
+
+    with pytest.raises(RuntimeError, match="OpenAI translation failed: rate limited"):
+        provider.translate_streaming("Hello world", "en", "es", lambda _chunk: None)
+
+
+def test_anthropic_streaming_translation_sanitizes_provider_errors(monkeypatch):
+    """Anthropic streaming translation should not leak raw provider messages."""
+
+    class FakeRateLimitError(Exception):
+        def __init__(self, message):
+            super().__init__(message)
+            self.status_code = 429
+
+    def raise_rate_limit(*args, **kwargs):
+        raise FakeRateLimitError("Quota exceeded")
+
+    provider = AnthropicTranslateProvider(model="claude-sonnet-4-5")
+    monkeypatch.setattr(provider, "_build_messages", lambda text, source, target: ("system", text))
+    monkeypatch.setattr(provider, "_translate_stream_once", raise_rate_limit)
+
+    with pytest.raises(RuntimeError, match="Anthropic translation failed: rate limited"):
+        provider.translate_streaming("Hello world", "en", "es", lambda _chunk: None)
+
+
+def test_ollama_uses_loopback_without_env_proxies():
+    """Local Ollama requests should stay on loopback and ignore proxy environment variables."""
+    provider = OllamaTranslateProvider()
+
+    session = provider._get_http_session()
+
+    assert provider.OLLAMA_API == "http://127.0.0.1:11434"
+    assert session.trust_env is False
+
+
 def test_translation_manager_normalizes_provider_models(mock_config):
     """TranslationManager should normalize invalid/stale configured model IDs."""
     mock_config.openai_translate_model = "invalid-openai-model"

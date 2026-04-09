@@ -2460,8 +2460,13 @@ class WhisperHUDApp(rumps.App):
                                 self.hud.show_success(self._hud_success_message(final_text, f" -> {lang_name}"))
 
                         except Exception as e:
-                            logger.warning(f"Translation failed: {e}")
+                            logger.warning("Translation failed (%s)", type(e).__name__)
                             final_text = result.text
+                            self._notify(
+                                "WhisperHUD",
+                                "Translation Failed",
+                                "Using the original transcription instead.",
+                            )
                             self._set_title(self.ICON_SUCCESS)
                             if self.config.show_hud:
                                 self.hud.show_success(self._hud_success_message(final_text, " (translation failed)"))
@@ -2522,7 +2527,6 @@ class WhisperHUDApp(rumps.App):
         self._close_live_session(turn)
 
         error_str = str(error).lower()
-        logger.error(f"Transcription error: {error}")
         self._set_title(self.ICON_ERROR)
 
         if "timeout" in error_str or "timed out" in error_str:
@@ -2560,6 +2564,8 @@ class WhisperHUDApp(rumps.App):
         else:
             display_error = "Transcription failed"
             detail = str(error)[:50]
+
+        logger.error("Transcription error (%s): %s", type(error).__name__, display_error)
 
         if self.config.show_hud:
             self.hud.show_error(display_error)
@@ -2863,6 +2869,7 @@ class WhisperHUDApp(rumps.App):
             f"Enter {provider_name} API Key",
             message,
             default="",
+            hidden=True,
         )
 
         if not key:
@@ -3061,12 +3068,12 @@ class WhisperHUDApp(rumps.App):
             response = rumps.alert(
                 title="Enable Private Mode?",
                 message=(
-                    "Private Mode keeps your transcriptions completely private:\n\n"
-                    "• Nothing is saved to disk—ever\n"
-                    "• Audio files are securely wiped after use\n"
+                    "Private Mode keeps WhisperHUD from saving transcription history:\n\n"
+                    "• WhisperHUD will not retain transcription history or stats\n"
+                    "• Temporary provider scratch files are cleaned up after use when possible\n"
                     "• A 🔒 icon shows when active\n\n"
                     "You can still copy/paste transcriptions normally, "
-                    "they just won't be stored."
+                    "they just won't be kept in WhisperHUD."
                     f"{history_warning}"
                 ),
                 ok="Enable Private Mode",
@@ -3075,7 +3082,7 @@ class WhisperHUDApp(rumps.App):
 
             if response == 1:
                 self.config.enable_private_mode()
-                self._notify("WhisperHUD", "🔒 Private Mode On", "Your transcriptions won't be saved anywhere.")
+                self._notify("WhisperHUD", "🔒 Private Mode On", "WhisperHUD will not keep transcription history.")
                 self._schedule_menu_rebuild()
 
     def _toggle_history_encryption(self, sender):
@@ -3125,8 +3132,8 @@ class WhisperHUDApp(rumps.App):
                 rumps.alert(
                     title="Could Not Enable Encryption",
                     message=(
-                        "Unlock passphrase storage in Privacy & Security and try again.\n\n"
-                        "History encryption does not use macOS Keychain."
+                        "WhisperHUD could not persist encrypted history.\n\n"
+                        "Unlock passphrase storage, make sure the config directory is writable, and try again."
                     ),
                 )
                 return

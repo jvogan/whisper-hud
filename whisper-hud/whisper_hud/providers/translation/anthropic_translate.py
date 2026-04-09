@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from .base import TranslationProvider, TranslationResult
+from ..error_utils import build_provider_error_message
 
 
 class AnthropicTranslateProvider(TranslationProvider):
@@ -18,6 +19,8 @@ class AnthropicTranslateProvider(TranslationProvider):
     display_name = "Anthropic Claude"
 
     DEFAULT_MODEL = "claude-sonnet-4-5"
+    CLIENT_TIMEOUT_SECONDS = 30.0
+    CLIENT_MAX_RETRIES = 0
 
     # Available model aliases from Anthropic docs (February 2026)
     MODELS = {
@@ -176,7 +179,11 @@ class AnthropicTranslateProvider(TranslationProvider):
             if not api_key:
                 raise ValueError("Anthropic API key not configured")
 
-            self._client = Anthropic(api_key=api_key)
+            self._client = Anthropic(
+                api_key=api_key,
+                timeout=self.CLIENT_TIMEOUT_SECONDS,
+                max_retries=self.CLIENT_MAX_RETRIES,
+            )
 
         return self._client
 
@@ -208,9 +215,11 @@ class AnthropicTranslateProvider(TranslationProvider):
                     result_text = self._translate_once(selected_model, system_prompt, user_message)
                     self.model = selected_model
                 except Exception as fallback_error:
-                    raise RuntimeError(f"Anthropic translation failed: {fallback_error}")
+                    raise RuntimeError(build_provider_error_message("Anthropic", "translation", fallback_error)) from (
+                        fallback_error
+                    )
             else:
-                raise RuntimeError(f"Anthropic translation failed: {e}")
+                raise RuntimeError(build_provider_error_message("Anthropic", "translation", e)) from e
 
         return TranslationResult(
             text=result_text, source_lang=source_lang, target_lang=target_lang, provider=self.name, model=selected_model
@@ -330,9 +339,9 @@ Rules:
                     )
                     self.model = selected_model
                 except Exception as fallback_error:
-                    raise RuntimeError(f"Anthropic streaming translation failed: {fallback_error}")
+                    raise RuntimeError(build_provider_error_message("Anthropic", "translation", fallback_error))
             else:
-                raise RuntimeError(f"Anthropic streaming translation failed: {e}")
+                raise RuntimeError(build_provider_error_message("Anthropic", "translation", e))
 
         return TranslationResult(
             text=final_text, source_lang=source_lang, target_lang=target_lang, provider=self.name, model=selected_model

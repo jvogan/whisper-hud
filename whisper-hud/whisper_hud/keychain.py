@@ -601,7 +601,10 @@ def _validate_openai_key(api_key: str) -> tuple[bool, str]:
         import requests
 
         response = requests.get(
-            "https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {api_key}"}, timeout=10
+            "https://api.openai.com/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+            allow_redirects=False,
         )
         if response.status_code == 200:
             return True, ""
@@ -633,7 +636,10 @@ def _validate_gemini_key(api_key: str) -> tuple[bool, str]:
         import requests
 
         response = requests.get(
-            "https://generativelanguage.googleapis.com/v1/models", headers={"x-goog-api-key": api_key}, timeout=10
+            "https://generativelanguage.googleapis.com/v1/models",
+            headers={"x-goog-api-key": api_key},
+            timeout=10,
+            allow_redirects=False,
         )
         if response.status_code == 200:
             return True, ""
@@ -668,6 +674,7 @@ def _validate_anthropic_key(api_key: str) -> tuple[bool, str]:
             "https://api.anthropic.com/v1/models",
             headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
             timeout=10,
+            allow_redirects=False,
         )
         if response.status_code == 200:
             return True, ""

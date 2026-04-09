@@ -75,9 +75,10 @@ def _unicode_character_id_segments(value: str) -> list[str]:
         return [f"(character id {ord(value)})"]
 
     utf16_bytes = value.encode("utf-16-be")
-    code_units = [
-        int.from_bytes(utf16_bytes[index : index + 2], byteorder="big") for index in range(0, len(utf16_bytes), 2)
-    ]
+    code_units = []
+    for index in range(0, len(utf16_bytes), 2):
+        end_index = index + 2
+        code_units.append(int.from_bytes(utf16_bytes[index:end_index], byteorder="big"))
     return [f"(character id {code_unit})" for code_unit in code_units]
 
 
@@ -130,6 +131,31 @@ def _as_applescript_string_expression(value: str) -> str:
     return " & ".join(chunks)
 
 
+def _restore_clipboard_after_paste(
+    pasted_text: str,
+    original_clipboard: Optional[str],
+    clipboard_snapshot_failed: bool,
+) -> None:
+    """
+    Restore the previous clipboard contents when possible.
+
+    If we could not snapshot the clipboard up front, clear our temporary
+    transcription instead of leaving it behind on the global clipboard.
+    """
+    time.sleep(0.1)
+    try:
+        current_clipboard = pyperclip.paste()
+        if current_clipboard != pasted_text:
+            return
+
+        if original_clipboard is not None:
+            pyperclip.copy(original_clipboard)
+        elif clipboard_snapshot_failed:
+            pyperclip.copy("")
+    except Exception:
+        pass
+
+
 def insert_text(
     text: str, restore_clipboard: bool = True, target_app: Optional[str] = None, return_focus: bool = True
 ) -> bool:
@@ -151,6 +177,7 @@ def insert_text(
     original_clipboard: Optional[str] = None
     original_app: Optional[str] = None
     clipboard_contains_text = False
+    clipboard_snapshot_failed = False
 
     try:
         # Save original clipboard if requested
@@ -159,6 +186,7 @@ def insert_text(
                 original_clipboard = pyperclip.paste()
             except Exception:
                 original_clipboard = None
+                clipboard_snapshot_failed = True
 
         # If targeting a specific app, save current frontmost app
         if target_app and return_focus:
@@ -213,17 +241,8 @@ def insert_text(
         logger.error(f"Paste error: {e}")
         return False
     finally:
-        if restore_clipboard and original_clipboard is not None and clipboard_contains_text:
-            time.sleep(0.1)
-            try:
-                # Only restore if clipboard still contains our text.
-                # This prevents overwriting user's content if they copied
-                # something during the paste delay.
-                current_clipboard = pyperclip.paste()
-                if current_clipboard == text:
-                    pyperclip.copy(original_clipboard)
-            except Exception:
-                pass
+        if restore_clipboard and clipboard_contains_text:
+            _restore_clipboard_after_paste(text, original_clipboard, clipboard_snapshot_failed)
 
 
 def insert_text_direct(text: str) -> bool:
