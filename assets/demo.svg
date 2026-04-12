@@ -1,0 +1,192 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 420" width="800" height="420">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00D4FF"/>
+      <stop offset="100%" style="stop-color:#BD00FF"/>
+    </linearGradient>
+    <linearGradient id="barGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#2D2D2D"/>
+      <stop offset="100%" style="stop-color:#1A1A1A"/>
+    </linearGradient>
+    <clipPath id="editorClip">
+      <rect x="40" y="60" width="720" height="320" rx="10"/>
+    </clipPath>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="420" rx="12" fill="#0D1117"/>
+
+  <!-- macOS Menu Bar -->
+  <rect x="0" y="0" width="800" height="28" fill="url(#barGrad)" rx="12" ry="0"/>
+  <rect x="0" y="12" width="800" height="16" fill="url(#barGrad)"/>
+
+  <!-- Menu bar left items -->
+  <text x="16" y="18" fill="#ccc" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="13" font-weight="600">&#xF8FF;</text>
+  <text x="40" y="18" fill="#ccc" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="13" font-weight="600">TextEdit</text>
+  <text x="102" y="18" fill="#999" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="13">File</text>
+  <text x="130" y="18" fill="#999" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="13">Edit</text>
+
+  <!-- Menu bar right - clock etc -->
+  <text x="700" y="18" fill="#999" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="12">10:42 AM</text>
+
+  <!-- WhisperHUD menu bar icon - microphone -->
+  <g id="menuIcon" transform="translate(660, 4)">
+    <!-- Idle mic icon -->
+    <g id="micIdle">
+      <rect x="5" y="2" width="10" height="14" rx="5" fill="none" stroke="#999" stroke-width="1.5"/>
+      <path d="M3 12 Q3 20 10 20 Q17 20 17 12" fill="none" stroke="#999" stroke-width="1.5"/>
+      <line x1="10" y1="20" x2="10" y2="23" stroke="#999" stroke-width="1.5"/>
+      <animate attributeName="opacity" values="1;1;0;0;0;0;0;0;1;1" dur="8s" repeatCount="indefinite"/>
+    </g>
+    <!-- Recording state - red dot -->
+    <g id="micRecording">
+      <circle cx="10" cy="10" r="7" fill="#F85149">
+        <animate attributeName="r" values="6;7;6" dur="0.8s" repeatCount="indefinite"/>
+      </circle>
+      <animate attributeName="opacity" values="0;0;1;1;1;0;0;0;0;0" dur="8s" repeatCount="indefinite"/>
+    </g>
+    <!-- Processing state -->
+    <g id="micProcessing">
+      <circle cx="10" cy="10" r="7" fill="none" stroke="#F0883E" stroke-width="2" stroke-dasharray="12 8">
+        <animateTransform attributeName="transform" type="rotate" from="0 10 10" to="360 10 10" dur="1s" repeatCount="indefinite"/>
+      </circle>
+      <animate attributeName="opacity" values="0;0;0;0;0;1;0;0;0;0" dur="8s" repeatCount="indefinite"/>
+    </g>
+    <!-- Success state - checkmark -->
+    <g id="micSuccess">
+      <circle cx="10" cy="10" r="7" fill="#3FB950" opacity="0.2"/>
+      <path d="M5 10 L9 14 L16 6" fill="none" stroke="#3FB950" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <animate attributeName="opacity" values="0;0;0;0;0;0;1;1;0;0" dur="8s" repeatCount="indefinite"/>
+    </g>
+  </g>
+
+  <!-- Editor window -->
+  <g filter="url(#shadow)">
+    <rect x="40" y="60" width="720" height="320" rx="10" fill="#1E1E2E"/>
+    <!-- Title bar -->
+    <rect x="40" y="60" width="720" height="32" rx="10" fill="#2A2A3C"/>
+    <rect x="40" y="82" width="720" height="10" fill="#2A2A3C"/>
+    <!-- Traffic lights -->
+    <circle cx="62" cy="76" r="6" fill="#FF5F57"/>
+    <circle cx="82" cy="76" r="6" fill="#FEBC2E"/>
+    <circle cx="102" cy="76" r="6" fill="#28C840"/>
+    <!-- Title -->
+    <text x="400" y="80" fill="#888" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="12" text-anchor="middle">meeting-notes.txt</text>
+  </g>
+
+  <!-- Editor content area -->
+  <g clip-path="url(#editorClip)">
+    <!-- Line numbers -->
+    <text x="56" y="116" fill="#555" font-family="SF Mono,Menlo,monospace" font-size="13">1</text>
+    <text x="56" y="136" fill="#555" font-family="SF Mono,Menlo,monospace" font-size="13">2</text>
+    <text x="56" y="156" fill="#555" font-family="SF Mono,Menlo,monospace" font-size="13">3</text>
+    <text x="56" y="176" fill="#555" font-family="SF Mono,Menlo,monospace" font-size="13">4</text>
+    <text x="56" y="196" fill="#555" font-family="SF Mono,Menlo,monospace" font-size="13">5</text>
+    <text x="56" y="216" fill="#555" font-family="SF Mono,Menlo,monospace" font-size="13">6</text>
+    <text x="56" y="236" fill="#555" font-family="SF Mono,Menlo,monospace" font-size="13">7</text>
+
+    <!-- Existing text -->
+    <text x="80" y="116" fill="#E6EDF3" font-family="SF Mono,Menlo,monospace" font-size="13"># Q2 Planning Meeting</text>
+    <text x="80" y="136" fill="#E6EDF3" font-family="SF Mono,Menlo,monospace" font-size="13"></text>
+    <text x="80" y="156" fill="#E6EDF3" font-family="SF Mono,Menlo,monospace" font-size="13">- Review last quarter metrics</text>
+    <text x="80" y="176" fill="#E6EDF3" font-family="SF Mono,Menlo,monospace" font-size="13">- Discuss hiring plan for engineering</text>
+    <text x="80" y="196" fill="#E6EDF3" font-family="SF Mono,Menlo,monospace" font-size="13">- Budget allocation for new tools</text>
+    <text x="80" y="216" fill="#E6EDF3" font-family="SF Mono,Menlo,monospace" font-size="13"></text>
+
+    <!-- Cursor line (blinking) -->
+    <rect x="77" y="223" width="2" height="16" fill="#00D4FF">
+      <animate attributeName="opacity" values="1;1;0;0" dur="1s" repeatCount="indefinite"/>
+    </rect>
+
+    <!-- Transcribed text appearing -->
+    <text x="80" y="236" fill="#3FB950" font-family="SF Mono,Menlo,monospace" font-size="13">
+      <animate attributeName="opacity" values="0;0;0;0;0;0;0;1;1;1" dur="8s" repeatCount="indefinite"/>
+      Action items: schedule follow-up with the
+    </text>
+    <text x="80" y="256" fill="#3FB950" font-family="SF Mono,Menlo,monospace" font-size="13">
+      <animate attributeName="opacity" values="0;0;0;0;0;0;0;0.3;1;1" dur="8s" repeatCount="indefinite"/>
+      design team about the new dashboard mockups
+    </text>
+  </g>
+
+  <!-- Hotkey overlay (appears briefly) -->
+  <g id="hotkeyOverlay">
+    <animate attributeName="opacity" values="0;0;1;1;0;0;0;0;0;0" dur="8s" repeatCount="indefinite"/>
+    <rect x="240" y="300" width="320" height="52" rx="10" fill="#000" fill-opacity="0.85"/>
+    <rect x="240" y="300" width="320" height="52" rx="10" fill="none" stroke="url(#grad)" stroke-width="1.5" stroke-opacity="0.6"/>
+    <!-- Key caps -->
+    <rect x="264" y="310" width="50" height="32" rx="6" fill="#333" stroke="#555" stroke-width="1"/>
+    <text x="289" y="331" fill="#ddd" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="11" text-anchor="middle" font-weight="500">&#8984; Cmd</text>
+    <text x="322" y="331" fill="#666" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="16">+</text>
+    <rect x="334" y="310" width="54" height="32" rx="6" fill="#333" stroke="#555" stroke-width="1"/>
+    <text x="361" y="331" fill="#ddd" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="11" text-anchor="middle" font-weight="500">&#8679; Shift</text>
+    <text x="396" y="331" fill="#666" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="16">+</text>
+    <rect x="408" y="310" width="56" height="32" rx="6" fill="#333" stroke="#555" stroke-width="1"/>
+    <text x="436" y="331" fill="#ddd" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="11" text-anchor="middle" font-weight="500">Space</text>
+    <!-- Recording label -->
+    <circle cx="480" cy="326" r="4" fill="#F85149">
+      <animate attributeName="opacity" values="1;0.3;1" dur="0.6s" repeatCount="indefinite"/>
+    </circle>
+    <text x="490" y="331" fill="#F85149" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="11" font-weight="500">REC</text>
+  </g>
+
+  <!-- Audio waveform visualization (during recording) -->
+  <g id="waveform" transform="translate(220, 260)">
+    <animate attributeName="opacity" values="0;0;0;1;1;0;0;0;0;0" dur="8s" repeatCount="indefinite"/>
+    <!-- Waveform bars -->
+    <rect x="0" y="10" width="4" height="20" rx="2" fill="url(#grad)" opacity="0.7">
+      <animate attributeName="height" values="8;20;12;18;8" dur="0.7s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="16;10;14;11;16" dur="0.7s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="8" y="6" width="4" height="28" rx="2" fill="url(#grad)" opacity="0.8">
+      <animate attributeName="height" values="28;12;24;16;28" dur="0.6s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="6;14;8;12;6" dur="0.6s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="16" y="12" width="4" height="16" rx="2" fill="url(#grad)" opacity="0.6">
+      <animate attributeName="height" values="16;26;10;22;16" dur="0.8s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="12;7;15;9;12" dur="0.8s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="24" y="4" width="4" height="32" rx="2" fill="url(#grad)" opacity="0.9">
+      <animate attributeName="height" values="32;14;28;18;32" dur="0.5s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="4;13;6;11;4" dur="0.5s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="32" y="8" width="4" height="24" rx="2" fill="url(#grad)" opacity="0.7">
+      <animate attributeName="height" values="24;10;20;14;24" dur="0.65s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="8;15;10;13;8" dur="0.65s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="40" y="14" width="4" height="12" rx="2" fill="url(#grad)" opacity="0.5">
+      <animate attributeName="height" values="12;22;8;18;12" dur="0.75s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="14;9;16;11;14" dur="0.75s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="48" y="6" width="4" height="28" rx="2" fill="url(#grad)" opacity="0.8">
+      <animate attributeName="height" values="28;16;24;12;28" dur="0.55s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="6;12;8;14;6" dur="0.55s" repeatCount="indefinite"/>
+    </rect>
+    <!-- "Speaking..." label -->
+    <text x="62" y="26" fill="#8B949E" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="12" font-style="italic">speaking...</text>
+  </g>
+
+  <!-- Status label at bottom -->
+  <g>
+    <!-- Phase labels that fade in/out -->
+    <text x="400" y="405" fill="#8B949E" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="12" text-anchor="middle" font-style="italic">
+      <animate attributeName="opacity" values="1;1;0;0;0;0;0;0;0;1" dur="8s" repeatCount="indefinite"/>
+      ready - press &#8984;&#8679;Space to record
+    </text>
+    <text x="400" y="405" fill="#F85149" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="12" text-anchor="middle" font-weight="500">
+      <animate attributeName="opacity" values="0;0;1;1;1;0;0;0;0;0" dur="8s" repeatCount="indefinite"/>
+      recording...
+    </text>
+    <text x="400" y="405" fill="#F0883E" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="12" text-anchor="middle" font-weight="500">
+      <animate attributeName="opacity" values="0;0;0;0;0;1;0;0;0;0" dur="8s" repeatCount="indefinite"/>
+      transcribing...
+    </text>
+    <text x="400" y="405" fill="#3FB950" font-family="-apple-system,SF Pro Text,Helvetica Neue,sans-serif" font-size="12" text-anchor="middle" font-weight="500">
+      <animate attributeName="opacity" values="0;0;0;0;0;0;1;1;1;0" dur="8s" repeatCount="indefinite"/>
+      text pasted at cursor
+    </text>
+  </g>
+</svg>

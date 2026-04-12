@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WhisperHUD - System-Wide Voice to Text for macOS</title>
+  <meta name="description" content="Hold a hotkey anywhere on macOS, speak, and text appears at your cursor. Free local transcription or bring your own API keys. No subscription required.">
+  <meta name="keywords" content="voice to text, speech to text, macOS dictation, transcription app, whisper, openai, gemini, push to talk, mac voice input, dictation alternative, stt, accessibility">
+  <meta name="author" content="WhisperHUD Contributors">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://jvogan.github.io/whisper-hud/">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="WhisperHUD - Voice to Text, Invisibly">
+  <meta property="og:description" content="System-wide voice-to-text for macOS. Hold a hotkey, speak, text appears at your cursor. Free local option, no subscription, open source.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/jvogan/whisper-hud/main/assets/social/og_image.png">
+  <meta property="og:url" content="https://jvogan.github.io/whisper-hud/">
+  <meta property="og:site_name" content="WhisperHUD">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="WhisperHUD - Voice to Text, Invisibly">
+  <meta name="twitter:description" content="System-wide voice-to-text for macOS. Hold a hotkey, speak, text appears at your cursor. Free local option, no subscription.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/jvogan/whisper-hud/main/assets/social/twitter_card.png">
+
+  <!-- Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "WhisperHUD",
+    "operatingSystem": "macOS",
+    "applicationCategory": "UtilitiesApplication",
+    "description": "System-wide voice-to-text for macOS. Hold a hotkey anywhere, speak, and text appears at your cursor. Supports local and cloud transcription providers.",
+    "url": "https://jvogan.github.io/whisper-hud/",
+    "downloadUrl": "https://github.com/jvogan/whisper-hud",
+    "softwareVersion": "1.0.0",
+    "license": "https://opensource.org/licenses/MIT",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "featureList": [
+      "System-wide push-to-talk voice dictation",
+      "Local transcription with Apple Speech (free, no setup)",
+      "Cloud transcription with OpenAI Whisper and Google Gemini",
+      "50+ language translation",
+      "No subscription or account required",
+      "Encrypted API key storage",
+      "Zero telemetry"
+    ]
+  }
+  </script>
+
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+    :root {
+      --cyan: #00D4FF;
+      --mid: #7B61FF;
+      --purple: #BD00FF;
+      --bg: #0D1117;
+      --bg-card: #1A2030;
+      --bg-card-hover: #222A3A;
+      --text: #E6EDF3;
+      --text-dim: #8B949E;
+      --green: #3FB950;
+      --red: #F85149;
+      --orange: #F0883E;
+      --radius: 12px;
+    }
+
+    html { scroll-behavior: smooth }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--cyan); text-decoration: none }
+    a:hover { text-decoration: underline }
+
+    /* Hero */
+    .hero {
+      min-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 2rem 1.5rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -40%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 800px;
+      background: radial-gradient(circle, rgba(0,212,255,0.08) 0%, rgba(189,0,255,0.04) 50%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.5rem, 6vw, 4.5rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      margin-bottom: 0.5rem;
+    }
+
+    .hero h1 span {
+      background: linear-gradient(135deg, var(--cyan), var(--mid), var(--purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .tagline {
+      font-size: clamp(1.1rem, 2.5vw, 1.4rem);
+      color: var(--text-dim);
+      margin-bottom: 2rem;
+      font-weight: 400;
+    }
+
+    .hero-pitch {
+      font-size: 1.15rem;
+      color: var(--text-dim);
+      max-width: 600px;
+      margin-bottom: 2.5rem;
+      line-height: 1.7;
+    }
+
+    .cta-group {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.85rem 1.75rem;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      transition: transform 0.15s, box-shadow 0.15s;
+      border: none;
+      cursor: pointer;
+    }
+
+    .btn:hover { transform: translateY(-1px); text-decoration: none }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--cyan), var(--purple));
+      color: #fff;
+      box-shadow: 0 4px 24px rgba(0,212,255,0.2);
+    }
+
+    .btn-primary:hover { box-shadow: 0 6px 32px rgba(0,212,255,0.3) }
+
+    .btn-secondary {
+      background: var(--bg-card);
+      color: var(--text);
+      border: 1px solid #30363D;
+    }
+
+    .btn-secondary:hover { border-color: var(--text-dim) }
+
+    .install-cmd {
+      margin-top: 2rem;
+      background: var(--bg-card);
+      border: 1px solid #30363D;
+      border-radius: 8px;
+      padding: 0.75rem 1.5rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.95rem;
+      color: var(--green);
+      display: inline-block;
+    }
+
+    /* Sections */
+    section {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 5rem 1.5rem;
+    }
+
+    section h2 {
+      font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+      font-weight: 700;
+      margin-bottom: 1rem;
+      letter-spacing: -0.02em;
+    }
+
+    section h2 span {
+      background: linear-gradient(135deg, var(--cyan), var(--purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .section-sub {
+      color: var(--text-dim);
+      font-size: 1.1rem;
+      margin-bottom: 3rem;
+      max-width: 640px;
+    }
+
+    /* Feature grid */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.25rem;
+    }
+
+    .feature {
+      background: var(--bg-card);
+      border: 1px solid #2D333B;
+      border-radius: var(--radius);
+      padding: 1.75rem;
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    .feature:hover {
+      border-color: #30363D;
+      background: var(--bg-card-hover);
+    }
+
+    .feature-icon {
+      font-size: 1.5rem;
+      margin-bottom: 0.75rem;
+      display: block;
+      width: 2.5rem;
+      height: 2.5rem;
+      line-height: 2.5rem;
+      text-align: center;
+      border-radius: 8px;
+      background: rgba(0,212,255,0.08);
+    }
+
+    .feature h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+
+    .feature p {
+      color: var(--text-dim);
+      font-size: 0.92rem;
+      line-height: 1.6;
+    }
+
+    /* Provider table */
+    .providers-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+    }
+
+    .providers-table th,
+    .providers-table td {
+      padding: 0.85rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid #2D333B;
+      font-size: 0.92rem;
+    }
+
+    .providers-table th {
+      color: var(--text-dim);
+      font-weight: 500;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .providers-table tr:hover td { background: var(--bg-card) }
+
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .badge-free { background: rgba(63,185,80,0.15); color: var(--green) }
+    .badge-cloud { background: rgba(0,212,255,0.12); color: var(--cyan) }
+
+    /* How it works */
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 2rem;
+      counter-reset: step;
+    }
+
+    .step {
+      text-align: center;
+      position: relative;
+    }
+
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      display: block;
+      width: 3rem;
+      height: 3rem;
+      line-height: 3rem;
+      margin: 0 auto 1rem;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--cyan), var(--purple));
+      color: #fff;
+      font-weight: 700;
+      font-size: 1.2rem;
+    }
+
+    .step h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+    }
+
+    .step p {
+      color: var(--text-dim);
+      font-size: 0.9rem;
+    }
+
+    .step kbd {
+      display: inline-block;
+      background: var(--bg-card);
+      border: 1px solid #30363D;
+      border-radius: 4px;
+      padding: 0.1rem 0.4rem;
+      font-family: 'SF Mono', monospace;
+      font-size: 0.8rem;
+    }
+
+    /* Comparison */
+    .comparison {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .comparison table {
+      width: 100%;
+      min-width: 640px;
+      border-collapse: collapse;
+    }
+
+    .comparison th, .comparison td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid #21262D;
+      font-size: 0.9rem;
+    }
+
+    .comparison th {
+      color: var(--text-dim);
+      font-weight: 500;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+    }
+
+    .comparison th:first-child { color: var(--text) }
+    .comparison td:first-child { font-weight: 600 }
+    .comparison tr:hover td { background: var(--bg-card) }
+    .check { color: var(--green) }
+    .cross { color: var(--text-dim) }
+
+    /* Footer */
+    footer {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 3rem 1.5rem;
+      border-top: 1px solid #21262D;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      color: var(--text-dim);
+      font-size: 0.85rem;
+    }
+
+    footer a { color: var(--text-dim) }
+    footer a:hover { color: var(--text) }
+
+    .footer-links {
+      display: flex;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+    }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .hero { min-height: 80vh; padding-top: 4rem }
+      section { padding: 3rem 1rem }
+      .features { grid-template-columns: 1fr }
+      .steps { grid-template-columns: 1fr; gap: 1.5rem }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Hero -->
+  <div class="hero">
+    <h1><span>WhisperHUD</span></h1>
+    <p class="tagline">voice &rarr; text, invisibly</p>
+    <p class="hero-pitch">
+      System-wide voice-to-text for macOS. Hold a hotkey anywhere &mdash; in any app, any text field, any terminal &mdash; speak, and your words appear at the cursor. Free local transcription or bring your own API keys. No subscription. No account. Open source.
+    </p>
+    <div class="cta-group">
+      <a href="https://github.com/jvogan/whisper-hud" class="btn btn-primary">View on GitHub</a>
+      <a href="https://github.com/jvogan/whisper-hud#quickstart" class="btn btn-secondary">Get Started</a>
+    </div>
+    <div class="install-cmd">./install.sh</div>
+  </div>
+
+  <!-- How it works -->
+  <section>
+    <h2>How it <span>works</span></h2>
+    <p class="section-sub">Three steps. No configuration required if you use Apple Speech.</p>
+    <div class="steps">
+      <div class="step">
+        <h3>Hold the hotkey</h3>
+        <p>Press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> anywhere on macOS</p>
+      </div>
+      <div class="step">
+        <h3>Speak</h3>
+        <p>Talk naturally. The menu bar shows you're recording.</p>
+      </div>
+      <div class="step">
+        <h3>Release</h3>
+        <p>Text appears at your cursor, instantly pasted into whatever app you're using.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section>
+    <h2>Why <span>WhisperHUD</span></h2>
+    <p class="section-sub">Built for people who want voice input without the friction.</p>
+    <div class="features">
+      <div class="feature">
+        <span class="feature-icon">&#9000;</span>
+        <h3>Works everywhere</h3>
+        <p>System-wide &mdash; dictate into any app, text field, terminal, or editor. Not locked to a single application.</p>
+      </div>
+      <div class="feature">
+        <span class="feature-icon">&#9881;</span>
+        <h3>Free local option</h3>
+        <p>Apple Speech is built into macOS. Zero setup, zero cost, no API key. Start transcribing in 30 seconds.</p>
+      </div>
+      <div class="feature">
+        <span class="feature-icon">&#128274;</span>
+        <h3>Private by default</h3>
+        <p>No telemetry, no data collection. Local providers keep everything on-device. Cloud keys encrypted at rest.</p>
+      </div>
+      <div class="feature">
+        <span class="feature-icon">&#127760;</span>
+        <h3>50+ language translation</h3>
+        <p>Transcribe in one language, paste in another. Local or cloud translation with Apple, Ollama, Gemini, OpenAI, or Anthropic.</p>
+      </div>
+      <div class="feature">
+        <span class="feature-icon">&#128176;</span>
+        <h3>No subscription</h3>
+        <p>Bring your own API keys. Typical cloud cost: $0.001 per dictation. Or use local providers for free, forever.</p>
+      </div>
+      <div class="feature">
+        <span class="feature-icon">&#128187;</span>
+        <h3>Open source</h3>
+        <p>MIT licensed. Read every line, modify anything, contribute back. No black boxes.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Providers -->
+  <section>
+    <h2>Transcription <span>providers</span></h2>
+    <p class="section-sub">Choose the provider that fits your needs. Mix and switch anytime.</p>
+    <table class="providers-table">
+      <thead>
+        <tr>
+          <th>Provider</th>
+          <th>Type</th>
+          <th>Setup</th>
+          <th>Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Apple Speech</td>
+          <td><span class="badge badge-free">Local</span></td>
+          <td>None &mdash; built into macOS</td>
+          <td>Free</td>
+        </tr>
+        <tr>
+          <td>Whisper Local</td>
+          <td><span class="badge badge-free">Local</span></td>
+          <td>pip install extra</td>
+          <td>Free</td>
+        </tr>
+        <tr>
+          <td>Parakeet</td>
+          <td><span class="badge badge-free">Local</span></td>
+          <td>pip install extra (Apple Silicon)</td>
+          <td>Free</td>
+        </tr>
+        <tr>
+          <td>Google Gemini</td>
+          <td><span class="badge badge-cloud">Cloud</span></td>
+          <td>API key (free tier)</td>
+          <td>~$0.001/min</td>
+        </tr>
+        <tr>
+          <td>OpenAI Whisper</td>
+          <td><span class="badge badge-cloud">Cloud</span></td>
+          <td>API key</td>
+          <td>~$0.003&ndash;0.006/min</td>
+        </tr>
+        <tr>
+          <td>OpenAI Realtime</td>
+          <td><span class="badge badge-cloud">Cloud</span></td>
+          <td>Same OpenAI key</td>
+          <td>Realtime pricing</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="color:var(--text-dim);font-size:0.85rem;margin-top:1rem">Typical usage (30s of speech): $0.001&ndash;$0.003 with cloud. Local is completely free.</p>
+  </section>
+
+  <!-- Comparison -->
+  <section>
+    <h2>How it <span>compares</span></h2>
+    <div class="comparison">
+      <table>
+        <thead>
+          <tr>
+            <th></th>
+            <th>WhisperHUD</th>
+            <th>macOS Dictation</th>
+            <th>Superwhisper</th>
+            <th>Whisper.cpp CLI</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>System-wide paste</td>
+            <td class="check">Yes</td>
+            <td class="check">Yes</td>
+            <td class="check">Yes</td>
+            <td class="cross">No</td>
+          </tr>
+          <tr>
+            <td>Bring your own key</td>
+            <td class="check">Yes</td>
+            <td class="cross">N/A</td>
+            <td class="cross">No (subscription)</td>
+            <td class="cross">N/A</td>
+          </tr>
+          <tr>
+            <td>Local + cloud</td>
+            <td class="check">Both</td>
+            <td>Local only</td>
+            <td class="check">Both</td>
+            <td>Local only</td>
+          </tr>
+          <tr>
+            <td>Translation</td>
+            <td class="check">50+ languages</td>
+            <td class="cross">No</td>
+            <td class="cross">No</td>
+            <td class="cross">No</td>
+          </tr>
+          <tr>
+            <td>Streaming preview</td>
+            <td class="check">Yes</td>
+            <td class="check">Yes</td>
+            <td class="check">Yes</td>
+            <td class="cross">No</td>
+          </tr>
+          <tr>
+            <td>Cost</td>
+            <td>Free / BYOK</td>
+            <td>Free</td>
+            <td>$8&ndash;16/mo</td>
+            <td>Free</td>
+          </tr>
+          <tr>
+            <td>Open source</td>
+            <td class="check">MIT</td>
+            <td class="cross">No</td>
+            <td class="cross">No</td>
+            <td class="check">Yes</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div>MIT License &copy; 2025 WhisperHUD Contributors</div>
+    <div class="footer-links">
+      <a href="https://github.com/jvogan/whisper-hud">GitHub</a>
+      <a href="https://github.com/jvogan/whisper-hud#documentation">Docs</a>
+      <a href="https://github.com/jvogan/whisper-hud/issues">Issues</a>
+      <a href="https://github.com/jvogan/whisper-hud/blob/main/LICENSE">License</a>
+    </div>
+  </footer>
+
+</body>
+</html>

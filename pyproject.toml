@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "whisper-hud"
 version = "1.0.0"
-description = "Voice to text, invisibly - a macOS menu bar transcription app"
+description = "System-wide voice-to-text for macOS — hold a hotkey, speak, text appears at your cursor. Supports OpenAI, Gemini, Apple Speech, and local models. No subscription, bring your own API keys."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -14,11 +14,20 @@ authors = [
 ]
 keywords = [
     "voice-to-text",
+    "speech-to-text",
     "transcription",
+    "dictation",
     "macos",
     "menu-bar",
     "whisper",
-    "speech-recognition"
+    "speech-recognition",
+    "stt",
+    "openai-whisper",
+    "gemini",
+    "voice-input",
+    "push-to-talk",
+    "accessibility",
+    "privacy"
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -74,10 +83,11 @@ parakeet = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jvogan/whisper-hud"
+Homepage = "https://jvogan.github.io/whisper-hud/"
 Documentation = "https://github.com/jvogan/whisper-hud#readme"
 Repository = "https://github.com/jvogan/whisper-hud.git"
 Issues = "https://github.com/jvogan/whisper-hud/issues"
+Changelog = "https://github.com/jvogan/whisper-hud/blob/main/CHANGELOG.md"
 
 [project.scripts]
 whisper-hud = "whisper_hud.main:run"
