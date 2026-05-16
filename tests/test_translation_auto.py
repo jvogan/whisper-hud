@@ -1,6 +1,6 @@
 """Tests for translation auto-detect behavior."""
 
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -296,6 +296,47 @@ def test_gemini_model_normalization_tracks_current_preview_successors():
     """Gemini translation should map stale Gemini 3 IDs to the current preview lineage."""
     assert GeminiTranslateProvider.normalize_model_id("gemini-3-pro-preview") == "gemini-3.1-pro-preview"
     assert GeminiTranslateProvider.normalize_model_id("gemini-3.1-flash-lite-preview") == "gemini-3.1-flash-lite"
+
+
+def test_gemini_translation_client_ignores_env_proxies(monkeypatch):
+    """Gemini translation requests should not inherit proxy variables from the environment."""
+    calls = {"api_keys": [], "trust_env": []}
+
+    class FakeClient:
+        def __init__(self, *, api_key, http_options=None):
+            calls["api_keys"].append(api_key)
+            calls["trust_env"].append(
+                (
+                    getattr(http_options, "clientArgs", {}).get("trust_env"),
+                    getattr(http_options, "asyncClientArgs", {}).get("trust_env"),
+                )
+            )
+            self.models = SimpleNamespace()
+
+    class FakeHttpOptions:
+        def __init__(self, *, timeout=None, clientArgs=None, asyncClientArgs=None, **_kwargs):
+            self.timeout = timeout
+            self.clientArgs = clientArgs or {}
+            self.asyncClientArgs = asyncClientArgs or {}
+
+    google_module = ModuleType("google")
+    genai_module = ModuleType("google.genai")
+    types_module = ModuleType("google.genai.types")
+    genai_module.Client = FakeClient
+    genai_module.types = types_module
+    types_module.HttpOptions = FakeHttpOptions
+    google_module.genai = genai_module
+
+    monkeypatch.setitem(__import__("sys").modules, "google", google_module)
+    monkeypatch.setitem(__import__("sys").modules, "google.genai", genai_module)
+    monkeypatch.setitem(__import__("sys").modules, "google.genai.types", types_module)
+    monkeypatch.setattr("whisper_hud.keychain.get_api_key", lambda _provider: "gemini-key")
+
+    client = GeminiTranslateProvider()._get_client()
+
+    assert client.models is not None
+    assert calls["api_keys"] == ["gemini-key"]
+    assert calls["trust_env"] == [(False, False)]
 
 
 def test_gemini_translation_sanitizes_provider_errors(monkeypatch):

@@ -11,7 +11,7 @@ from whisper_hud.providers.gemini import GeminiProvider
 def fake_gemini_sdk(monkeypatch):
     """Install a minimal google.genai SDK surface for provider tests."""
 
-    calls = {"parts": [], "client_api_keys": [], "client_http_timeouts": []}
+    calls = {"parts": [], "client_api_keys": [], "client_http_timeouts": [], "client_trust_env": []}
 
     class FakePart:
         @staticmethod
@@ -23,11 +23,19 @@ def fake_gemini_sdk(monkeypatch):
         def __init__(self, *, api_key, http_options=None):
             calls["client_api_keys"].append(api_key)
             calls["client_http_timeouts"].append(getattr(http_options, "timeout", None))
+            calls["client_trust_env"].append(
+                (
+                    getattr(http_options, "clientArgs", {}).get("trust_env"),
+                    getattr(http_options, "asyncClientArgs", {}).get("trust_env"),
+                )
+            )
             self.models = SimpleNamespace()
 
     class FakeHttpOptions:
-        def __init__(self, *, timeout=None, **_kwargs):
+        def __init__(self, *, timeout=None, clientArgs=None, asyncClientArgs=None, **_kwargs):
             self.timeout = timeout
+            self.clientArgs = clientArgs or {}
+            self.asyncClientArgs = asyncClientArgs or {}
 
     google_module = ModuleType("google")
     genai_module = ModuleType("google.genai")
@@ -88,6 +96,7 @@ def test_get_client_builds_and_caches_sdk_client(monkeypatch, fake_gemini_sdk):
     assert first is second
     assert fake_gemini_sdk["client_api_keys"] == ["gemini-key"]
     assert fake_gemini_sdk["client_http_timeouts"] == [30000]
+    assert fake_gemini_sdk["client_trust_env"] == [(False, False)]
 
 
 def test_get_client_raises_value_error_when_api_key_is_missing(monkeypatch, fake_gemini_sdk):
