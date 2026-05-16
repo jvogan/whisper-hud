@@ -12,7 +12,7 @@ from whisper_hud.providers.openai_realtime import OpenAIRealtimeProvider, OpenAI
 
 def _build_session(
     *,
-    model: str = "gpt-4o-mini-transcribe",
+    model: str = "gpt-realtime-whisper",
     language: str | None = None,
     prompt: str | None = None,
 ):
@@ -49,7 +49,7 @@ def test_session_builds_expected_transcription_payload():
                 "format": {"type": "audio/pcm", "rate": 24000},
                 "noise_reduction": {"type": "near_field"},
                 "transcription": {
-                    "model": "gpt-4o-mini-transcribe",
+                    "model": "gpt-realtime-whisper",
                     "language": "en",
                     "prompt": "Use punctuation.",
                 },
@@ -166,26 +166,26 @@ def test_encode_audio_chunk_resamples_stereo_audio_to_24khz_pcm16():
 def test_provider_normalizes_models_and_uses_batch_fallback_for_supported_model():
     """The realtime provider should expose the current documented model slugs and map latest-only aliases for batch fallback."""
     default_provider = OpenAIRealtimeProvider(model="unsupported")
-    assert default_provider.get_current_model() == "gpt-4o-mini-transcribe"
-    assert OpenAIRealtimeProvider(model="gpt-4o-transcribe-latest").get_current_model() == "gpt-4o-transcribe-latest"
+    assert default_provider.get_current_model() == "gpt-realtime-whisper"
+    assert OpenAIRealtimeProvider(model="gpt-4o-transcribe-latest").get_current_model() == "gpt-realtime-whisper"
 
     model_ids = [model["id"] for model in default_provider.get_models()]
-    assert model_ids == ["gpt-4o-mini-transcribe", "gpt-4o-transcribe-latest", "gpt-4o-transcribe"]
+    assert model_ids == ["gpt-realtime-whisper", "gpt-4o-mini-transcribe", "gpt-4o-transcribe"]
 
     with patch("whisper_hud.providers.openai_realtime.OpenAITranscribeProvider") as batch_cls:
         batch_cls.return_value.transcribe.return_value = SimpleNamespace(
             text="hello",
             duration_seconds=1.25,
             cost_estimate=0.006,
-            model="gpt-4o-transcribe",
+            model="gpt-4o-mini-transcribe",
             language="en",
         )
-        provider = OpenAIRealtimeProvider(model="gpt-4o-transcribe-latest")
+        provider = OpenAIRealtimeProvider(model="gpt-realtime-whisper")
         result = provider.transcribe(b"wav")
 
-    batch_cls.assert_called_once_with(model="gpt-4o-transcribe")
+    batch_cls.assert_called_once_with(model="gpt-4o-mini-transcribe")
     assert result.provider == "openai_realtime"
-    assert result.model == "gpt-4o-transcribe"
+    assert result.model == "gpt-4o-mini-transcribe"
     assert result.text == "hello"
 
 
@@ -223,7 +223,7 @@ def test_realtime_session_pins_openai_endpoints_and_disables_env_routing():
 
         OpenAIRealtimeSession(
             api_key="sk-test",
-            model="gpt-4o-mini-transcribe",
+            model="gpt-realtime-whisper",
             provider_name="openai_realtime",
             cost_per_minute=0.003,
             on_partial=lambda _text: None,

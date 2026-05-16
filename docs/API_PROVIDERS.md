@@ -21,6 +21,7 @@ WhisperHUD supports multiple transcription providers, each with different trade-
 
 **Models available:**
 - `gpt-4o-mini-transcribe` - OpenAI's currently recommended general transcription model
+- `gpt-4o-mini-transcribe-2025-12-15` - Pinned mini transcription snapshot
 - `gpt-4o-transcribe` - Higher-cost batch transcription
 - `gpt-4o-transcribe-diarize` - Adds speaker diarization
 - `whisper-1` - Original Whisper model
@@ -48,9 +49,9 @@ WhisperHUD supports multiple transcription providers, each with different trade-
 Uses OpenAI's Realtime WebSocket transcription flow for low-latency dictation.
 
 **Models available:**
-- `gpt-4o-mini-transcribe` - Fastest live dictation option (default)
-- `gpt-4o-transcribe-latest` - Rolling alias for the latest non-mini Realtime snapshot
-- `gpt-4o-transcribe` - Higher accuracy live dictation
+- `gpt-realtime-whisper` - Lowest-latency live dictation option (default)
+- `gpt-4o-mini-transcribe` - Lower-cost transcription model retained for compatibility
+- `gpt-4o-transcribe` - Higher accuracy transcription model retained for compatibility
 
 **Setup:**
 1. Get API key from [platform.openai.com](https://platform.openai.com/api-keys)
@@ -75,12 +76,12 @@ Uses OpenAI's Realtime WebSocket transcription flow for low-latency dictation.
 ### Google Gemini
 
 **Models available:**
-- `gemini-2.5-flash` - Stable, fast, cost-effective
-- `gemini-2.5-pro` - Strongest stable quality
-- `gemini-2.5-flash-lite` - Lowest latency/cost
-- `gemini-3.1-pro-preview` - Latest preview quality model
+- `gemini-3.1-flash-lite` - Current stable default for direct audio transcription
 - `gemini-3-flash-preview` - Newer preview balanced model
-- `gemini-3.1-flash-lite-preview` - Latest preview speed/cost model for translation/transcription at scale
+- `gemini-3.1-pro-preview` - Latest preview quality model
+- `gemini-2.5-flash` - Legacy stable balanced option
+- `gemini-2.5-pro` - Legacy stable quality option
+- `gemini-2.5-flash-lite` - Legacy stable speed option
 
 **Setup:**
 1. Get API key from [aistudio.google.com](https://aistudio.google.com/apikey)
@@ -246,15 +247,15 @@ Cloud translation uses API keys and model-specific defaults with compatibility f
 #### Gemini Translation
 
 - Models:
-  - `gemini-2.5-flash` (balanced, stable default)
-  - `gemini-2.5-pro` (stable quality)
-  - `gemini-2.5-flash-lite` (stable speed)
+  - `gemini-3.1-flash-lite` (current stable default)
   - `gemini-3.1-pro-preview` (latest preview quality)
   - `gemini-3-flash-preview` (newer preview balanced)
-  - `gemini-3.1-flash-lite-preview` (latest preview speed/cost)
+  - `gemini-2.5-flash` (legacy stable balanced)
+  - `gemini-2.5-pro` (legacy stable quality)
+  - `gemini-2.5-flash-lite` (legacy stable speed)
 - Notes:
   - Older Gemini 3 preview aliases are normalized to current Gemini 3.1 preview IDs where possible.
-  - If a preview ID is unavailable, WhisperHUD automatically retries with `gemini-2.5-flash`.
+  - If a preview ID is unavailable, WhisperHUD automatically retries with `gemini-3.1-flash-lite`.
 
 #### Anthropic Translation
 

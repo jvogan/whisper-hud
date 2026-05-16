@@ -21,41 +21,41 @@ class GeminiTranslateProvider(TranslationProvider):
     name = "gemini"
     display_name = "Gemini (Cloud)"
 
-    DEFAULT_MODEL = "gemini-2.5-flash"
-    STABLE_FALLBACK_MODEL = "gemini-2.5-flash"
+    DEFAULT_MODEL = "gemini-3.1-flash-lite"
+    STABLE_FALLBACK_MODEL = "gemini-3.1-flash-lite"
     CLIENT_TIMEOUT_MS = 30000
 
-    # Available models (April 2026)
+    # Available models (May 2026)
     MODELS = {
+        "gemini-3.1-flash-lite": {
+            "name": "Gemini 3.1 Flash-Lite",
+            "description": "Current stable default for low-latency, high-volume translation",
+            "category": "speed",
+            "recommended": True,
+        },
         "gemini-3.1-pro-preview": {
             "name": "Gemini 3.1 Pro (Preview)",
             "description": "Latest preview quality model with improved reasoning and reliability",
             "category": "quality",
-        },
-        "gemini-2.5-pro": {
-            "name": "Gemini 2.5 Pro",
-            "description": "Highest stable quality for nuanced translation",
-            "category": "quality",
-        },
-        "gemini-2.5-flash": {
-            "name": "Gemini 2.5 Flash",
-            "description": "Current stable default for fast, high-volume translation",
-            "category": "balanced",
-            "recommended": True,
-        },
-        "gemini-2.5-flash-lite": {
-            "name": "Gemini 2.5 Flash Lite",
-            "description": "Lowest latency/cost",
-            "category": "speed",
         },
         "gemini-3-flash-preview": {
             "name": "Gemini 3 Flash (Preview)",
             "description": "Frontier preview model for the latest Gemini 3 quality",
             "category": "balanced",
         },
-        "gemini-3.1-flash-lite-preview": {
-            "name": "Gemini 3.1 Flash-Lite (Preview)",
-            "description": "Latest preview speed/cost option, explicitly recommended for translation at scale",
+        "gemini-2.5-pro": {
+            "name": "Gemini 2.5 Pro",
+            "description": "Legacy stable quality option; Google recommends migrating to Gemini 3.1 Pro Preview",
+            "category": "quality",
+        },
+        "gemini-2.5-flash": {
+            "name": "Gemini 2.5 Flash",
+            "description": "Legacy stable balanced option; Google recommends migrating to Gemini 3 Flash Preview",
+            "category": "balanced",
+        },
+        "gemini-2.5-flash-lite": {
+            "name": "Gemini 2.5 Flash Lite",
+            "description": "Legacy stable speed option; Google recommends migrating to Gemini 3.1 Flash-Lite",
             "category": "speed",
         },
     }
@@ -65,9 +65,9 @@ class GeminiTranslateProvider(TranslationProvider):
         "gemini-3-pro": "gemini-3.1-pro-preview",
         "gemini-3.1-pro": "gemini-3.1-pro-preview",
         "gemini-3-flash": "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite": "gemini-3.1-flash-lite-preview",
+        "gemini-3.1-flash-lite-preview": "gemini-3.1-flash-lite",
         "gemini-2.5-flash-preview": "gemini-2.5-flash",
-        "gemini-2.5-flash-lite-preview-09-2025": "gemini-2.5-flash-lite",
+        "gemini-2.5-flash-lite-preview-09-2025": "gemini-3.1-flash-lite",
     }
 
     # Supported languages (100+)

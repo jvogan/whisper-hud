@@ -4,11 +4,11 @@ Google Gemini API provider for audio transcription.
 Gemini models can process audio natively and provide transcription.
 Supports speaker diarization through prompting.
 
-Models (April 2026):
-- gemini-2.5-flash: Stable, supports audio input
-- gemini-3.1-pro-preview: Latest preview quality model
+Models (May 2026):
+- gemini-3.1-flash-lite: Current stable default for direct audio transcription
 - gemini-3-flash-preview: Frontier preview balanced model
-- gemini-3.1-flash-lite-preview: Latest preview speed/cost model
+- gemini-3.1-pro-preview: Latest preview quality model
+- gemini-2.5-flash: Legacy stable fallback, supports audio input
 - gemini-2.5-pro: Strongest stable quality
 - gemini-2.5-flash-lite: Lowest latency/cost, supports audio input
 """
@@ -27,37 +27,31 @@ class GeminiProvider(TranscriptionProvider):
     display_name = "Google Gemini"
     CLIENT_TIMEOUT_MS = 30000
 
-    DEFAULT_MODEL = "gemini-2.5-flash"
-    STABLE_FALLBACK_MODEL = "gemini-2.5-flash"
+    DEFAULT_MODEL = "gemini-3.1-flash-lite"
+    STABLE_FALLBACK_MODEL = "gemini-3.1-flash-lite"
     MODEL_ALIASES = {
         "gemini-3-pro-preview": "gemini-3.1-pro-preview",
         "gemini-3-pro": "gemini-3.1-pro-preview",
         "gemini-3.1-pro": "gemini-3.1-pro-preview",
         "gemini-3-flash": "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite": "gemini-3.1-flash-lite-preview",
+        "gemini-3.1-flash-lite-preview": "gemini-3.1-flash-lite",
         "gemini-2.5-flash-preview": "gemini-2.5-flash",
-        "gemini-2.5-flash-lite-preview-09-2025": "gemini-2.5-flash-lite",
+        "gemini-2.5-flash-lite-preview-09-2025": "gemini-3.1-flash-lite",
     }
 
     # Available models with approximate costs
     MODELS = [
         {
-            "id": "gemini-2.5-pro",
-            "name": "Gemini 2.5 Pro",
-            "description": "Strongest stable quality for complex audio tasks",
-            "cost_per_minute": 0.001,
-        },
-        {
-            "id": "gemini-2.5-flash",
-            "name": "Gemini 2.5 Flash",
-            "description": "Current stable default for low-latency, high-volume transcription",
+            "id": "gemini-3.1-flash-lite",
+            "name": "Gemini 3.1 Flash-Lite",
+            "description": "Current stable default for direct audio transcription",
             "cost_per_minute": 0.001,
             "recommended": True,
         },
         {
-            "id": "gemini-2.5-flash-lite",
-            "name": "Gemini 2.5 Flash Lite",
-            "description": "Lowest latency/cost, supports audio input",
+            "id": "gemini-3-flash-preview",
+            "name": "Gemini 3 Flash (Preview)",
+            "description": "Frontier preview balanced model for newer Gemini 3 multimodal support",
             "cost_per_minute": 0.001,
         },
         {
@@ -67,15 +61,21 @@ class GeminiProvider(TranscriptionProvider):
             "cost_per_minute": 0.001,
         },
         {
-            "id": "gemini-3-flash-preview",
-            "name": "Gemini 3 Flash (Preview)",
-            "description": "Frontier preview balanced model for newer Gemini 3 multimodal support",
+            "id": "gemini-2.5-pro",
+            "name": "Gemini 2.5 Pro",
+            "description": "Legacy stable quality option; Google recommends migrating to Gemini 3.1 Pro Preview",
             "cost_per_minute": 0.001,
         },
         {
-            "id": "gemini-3.1-flash-lite-preview",
-            "name": "Gemini 3.1 Flash-Lite (Preview)",
-            "description": "Latest preview speed/cost option, explicitly recommended by Google for translation and transcription at scale",
+            "id": "gemini-2.5-flash",
+            "name": "Gemini 2.5 Flash",
+            "description": "Legacy stable balanced option; Google recommends migrating to Gemini 3 Flash Preview",
+            "cost_per_minute": 0.001,
+        },
+        {
+            "id": "gemini-2.5-flash-lite",
+            "name": "Gemini 2.5 Flash Lite",
+            "description": "Legacy stable speed option; Google recommends migrating to Gemini 3.1 Flash-Lite",
             "cost_per_minute": 0.001,
         },
     ]
