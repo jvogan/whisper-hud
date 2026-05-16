@@ -2773,13 +2773,15 @@ class WhisperHUDApp(rumps.App):
                 self.widget.set_idle()
             return
 
-        if turn.live_session and turn.live_session.is_ready():
-            turn.finalize_timer = self._start_live_finalize_timer(turn.turn_id)
-            turn.live_session.request_stop()
+        if turn.live_session:
+            if turn.live_session.is_ready():
+                turn.finalize_timer = self._start_live_finalize_timer(turn.turn_id)
+                turn.live_session.request_stop()
+                return
+            self._degrade_turn_to_batch(turn.turn_id, f"Stop requested before live session ready ({reason})")
             return
 
-        turn.batch_fallback_started = True
-        self._degrade_turn_to_batch(turn.turn_id, f"Stop requested before live session ready ({reason})")
+        self._start_batch_transcription(turn.turn_id)
 
     def _stop_recording(self):
         """Called when hotkey is released."""
@@ -3676,9 +3678,8 @@ class WhisperHUDApp(rumps.App):
 
         # Check if target is still available (using cached data for speed)
         if not self._is_target_available_cached(target_type, target_id):
-            # Target not available, fallback to focused window
-            self._notify("WhisperHUD", "Target Unavailable", f"{target_display} not found. Pasted to focused window.")
-            return insert_text(text, restore_clipboard=self.config.restore_clipboard)
+            self._notify("WhisperHUD", "Target Unavailable", f"{target_display} not found. Nothing was pasted.")
+            return False
 
         # Create target and paste
         target = PasteTarget(type=TargetType(target_type), name=target_id, identifier=target_id)

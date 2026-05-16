@@ -66,7 +66,7 @@ def test_request_stop_falls_back_to_batch_once_when_live_not_ready():
     app._request_stop("manual_release")
 
     assert app._is_recording is False
-    assert turn.batch_fallback_started is True
+    assert turn.batch_fallback_started is False
     assert turn.audio_bytes == b"x" * 2000
     app._degrade_turn_to_batch.assert_called_once()
 

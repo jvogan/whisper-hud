@@ -224,7 +224,11 @@ class GeminiTranslateProvider(TranslationProvider):
 
             self._client = genai.Client(
                 api_key=api_key,
-                http_options=types.HttpOptions(timeout=self.CLIENT_TIMEOUT_MS),
+                http_options=types.HttpOptions(
+                    timeout=self.CLIENT_TIMEOUT_MS,
+                    clientArgs={"trust_env": False},
+                    asyncClientArgs={"trust_env": False},
+                ),
             )
 
         return self._client

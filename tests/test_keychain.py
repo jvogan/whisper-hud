@@ -1,7 +1,7 @@
 """Tests for credential storage and API key management."""
 
 import builtins
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import pytest
 
@@ -251,6 +251,74 @@ class TestPassphraseMode:
                     assert ok
                     assert get_api_key("gemini") == valid_gemini_key
 
+    def test_change_passphrase_rolls_back_history_rewrap_when_credential_write_fails(self, temp_config_dir):
+        """History key rewrap should not be left ahead of credentials after a partial failure."""
+        from whisper_hud.keychain import (
+            unlock_passphrase_store,
+            lock_passphrase_store,
+            set_api_key,
+            change_passphrase,
+        )
+
+        with patch("whisper_hud.config.CONFIG_DIR", temp_config_dir):
+            with patch("whisper_hud.config.CONFIG_FILE", temp_config_dir / "config.json"):
+                with patch("whisper_hud.keychain.get_storage_mode", return_value="passphrase"):
+                    lock_passphrase_store()
+                    ok, _ = unlock_passphrase_store("old-passphrase-123")
+                    assert ok
+                    assert set_api_key("gemini", "g" * 20)
+
+                    with patch("whisper_hud.encryption.has_encryption_key", return_value=True):
+                        with patch("whisper_hud.encryption.rewrap_history_key", return_value=(True, "")) as mock_rewrap:
+                            with patch("whisper_hud.keychain._write_passphrase_store", return_value=False):
+                                ok, message = change_passphrase("old-passphrase-123", "new-passphrase-456")
+
+        assert ok is False
+        assert message == "Failed to update passphrase"
+        assert mock_rewrap.call_args_list == [
+            call("old-passphrase-123", "new-passphrase-456"),
+            call("new-passphrase-456", "old-passphrase-123"),
+        ]
+
+    def test_failed_passphrase_change_keeps_history_readable_with_old_passphrase(self, temp_config_dir):
+        """A failed credential rewrite should restore the history key to the old passphrase."""
+        from whisper_hud.encryption import (
+            decrypt_text,
+            encrypt_text,
+            lock_history_encryption,
+            unlock_history_encryption,
+        )
+        from whisper_hud.keychain import change_passphrase, lock_passphrase_store, set_api_key, unlock_passphrase_store
+
+        with patch("whisper_hud.config.CONFIG_DIR", temp_config_dir):
+            with patch("whisper_hud.config.CONFIG_FILE", temp_config_dir / "config.json"):
+                with patch("whisper_hud.keychain.get_storage_mode", return_value="passphrase"):
+                    lock_passphrase_store()
+                    lock_history_encryption()
+                    ok, _ = unlock_passphrase_store("old-passphrase-123")
+                    assert ok
+                    assert set_api_key("gemini", "g" * 20)
+
+                    ok, _ = unlock_history_encryption("old-passphrase-123", create_if_missing=True)
+                    assert ok
+                    encrypted_text = encrypt_text("private history item")
+                    assert encrypted_text
+
+                    with patch("whisper_hud.keychain._write_passphrase_store", return_value=False):
+                        ok, message = change_passphrase("old-passphrase-123", "new-passphrase-456")
+
+                    assert ok is False
+                    assert message == "Failed to update passphrase"
+
+                    lock_history_encryption()
+                    ok, _ = unlock_history_encryption("old-passphrase-123", create_if_missing=False)
+                    assert ok
+                    assert decrypt_text(encrypted_text) == "private history item"
+
+                    lock_history_encryption()
+                    ok, _ = unlock_history_encryption("new-passphrase-456", create_if_missing=False)
+                    assert not ok
+
 
 class TestUtilityFunctions:
     """Tests for small key utility helpers."""
@@ -275,7 +343,7 @@ class TestValidateApiKey:
         response = Mock(status_code=200)
         valid_key = "sk-valid-key-padded-to-pass-format-check-1234"
 
-        with patch("requests.get", return_value=response) as mock_get:
+        with patch("whisper_hud.keychain._validation_get", return_value=response) as mock_get:
             is_valid, error = validate_api_key("openai", valid_key)
 
         assert is_valid is True
@@ -294,7 +362,7 @@ class TestValidateApiKey:
         response = Mock(status_code=401)
         invalid_key = "sk-invalid-key-padded-to-pass-format-1234567"
 
-        with patch("requests.get", return_value=response) as mock_get:
+        with patch("whisper_hud.keychain._validation_get", return_value=response) as mock_get:
             is_valid, error = validate_api_key("openai", invalid_key)
 
         assert is_valid is False
@@ -308,7 +376,7 @@ class TestValidateApiKey:
 
         timeout_key = "sk-timeout-key-padded-to-pass-format-123456789"
 
-        with patch("requests.get", side_effect=Timeout) as mock_get:
+        with patch("whisper_hud.keychain._validation_get", side_effect=Timeout) as mock_get:
             is_valid, error = validate_api_key("openai", timeout_key)
 
         assert is_valid is False
@@ -338,7 +406,7 @@ class TestValidateApiKey:
         """An empty key should fail format check before any network call."""
         from whisper_hud.keychain import validate_api_key
 
-        with patch("requests.get") as mock_get:
+        with patch("whisper_hud.keychain._validation_get") as mock_get:
             is_valid, error = validate_api_key("openai", "")
 
         assert is_valid is False
@@ -352,7 +420,7 @@ class TestValidateApiKey:
         response = Mock(status_code=200)
         valid_key = "g" * 24
 
-        with patch("requests.get", return_value=response) as mock_get:
+        with patch("whisper_hud.keychain._validation_get", return_value=response) as mock_get:
             is_valid, error = validate_api_key("gemini", valid_key)
 
         assert is_valid is True
@@ -360,6 +428,59 @@ class TestValidateApiKey:
         mock_get.assert_called_once_with(
             "https://generativelanguage.googleapis.com/v1/models",
             headers={"x-goog-api-key": valid_key},
+            timeout=10,
+            allow_redirects=False,
+        )
+
+    def test_validate_api_key_disables_redirects_for_anthropic(self):
+        """Anthropic validation should use the same no-redirect API-key handling."""
+        from whisper_hud.keychain import validate_api_key
+
+        response = Mock(status_code=200)
+        valid_key = "sk-ant-" + "a" * 24
+
+        with patch("whisper_hud.keychain._validation_get", return_value=response) as mock_get:
+            is_valid, error = validate_api_key("anthropic", valid_key)
+
+        assert is_valid is True
+        assert error == ""
+        mock_get.assert_called_once_with(
+            "https://api.anthropic.com/v1/models",
+            headers={"x-api-key": valid_key, "anthropic-version": "2023-06-01"},
+            timeout=10,
+            allow_redirects=False,
+        )
+
+    def test_validation_get_ignores_ambient_proxy_environment(self):
+        """Validation requests should not send API-key headers through env-configured proxies."""
+        from whisper_hud.keychain import _validation_get
+
+        class FakeSession:
+            def __init__(self):
+                self.trust_env = True
+                self.get = Mock(return_value=Mock(status_code=200))
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        fake_session = FakeSession()
+
+        with patch("requests.Session", return_value=fake_session):
+            response = _validation_get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": "Bearer sk-test"},
+                timeout=10,
+                allow_redirects=False,
+            )
+
+        assert response.status_code == 200
+        assert fake_session.trust_env is False
+        fake_session.get.assert_called_once_with(
+            "https://api.openai.com/v1/models",
+            headers={"Authorization": "Bearer sk-test"},
             timeout=10,
             allow_redirects=False,
         )

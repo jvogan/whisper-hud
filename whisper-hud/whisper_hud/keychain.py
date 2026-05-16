@@ -344,7 +344,10 @@ def change_passphrase(current_passphrase: str, new_passphrase: str) -> tuple[boo
         return False, message
 
     # Re-wrap history encryption key first so encrypted history remains readable
-    # after the credential passphrase changes.
+    # after the credential passphrase changes. If the credential write fails,
+    # roll this back so history and credentials stay unlocked by the same
+    # passphrase.
+    history_rewrapped = False
     try:
         from .encryption import has_encryption_key, rewrap_history_key
 
@@ -352,10 +355,18 @@ def change_passphrase(current_passphrase: str, new_passphrase: str) -> tuple[boo
             ok, history_msg = rewrap_history_key(current_passphrase, new_passphrase)
             if not ok:
                 return False, history_msg or "Failed to update history encryption passphrase"
+            history_rewrapped = True
     except Exception as e:
         return False, f"Failed to update history encryption passphrase: {str(e)[:80]}"
 
     if not _write_passphrase_store(_session_passphrase_cache, new_passphrase, rotate_salt=True):
+        if history_rewrapped:
+            try:
+                ok, _ = rewrap_history_key(new_passphrase, current_passphrase)
+                if not ok:
+                    return False, "Failed to update passphrase; history encryption rollback also failed"
+            except Exception:
+                return False, "Failed to update passphrase; history encryption rollback also failed"
         return False, "Failed to update passphrase"
 
     _session_passphrase = new_passphrase
@@ -612,6 +623,15 @@ def validate_api_key(provider: str, api_key: str) -> tuple[bool, str]:
     return False, f"Unknown provider: {provider}"
 
 
+def _validation_get(url: str, **kwargs):
+    """Make validation requests without leaking API-key headers through env proxies."""
+    import requests
+
+    with requests.Session() as session:
+        session.trust_env = False
+        return session.get(url, **kwargs)
+
+
 def _validate_openai_key(api_key: str) -> tuple[bool, str]:
     """Validate OpenAI API key by listing models."""
     if not api_key or not api_key.startswith("sk-") or len(api_key) < 20:
@@ -619,7 +639,7 @@ def _validate_openai_key(api_key: str) -> tuple[bool, str]:
     try:
         import requests
 
-        response = requests.get(
+        response = _validation_get(
             "https://api.openai.com/v1/models",
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=10,
@@ -654,7 +674,7 @@ def _validate_gemini_key(api_key: str) -> tuple[bool, str]:
     try:
         import requests
 
-        response = requests.get(
+        response = _validation_get(
             "https://generativelanguage.googleapis.com/v1/models",
             headers={"x-goog-api-key": api_key},
             timeout=10,
@@ -689,7 +709,7 @@ def _validate_anthropic_key(api_key: str) -> tuple[bool, str]:
     try:
         import requests
 
-        response = requests.get(
+        response = _validation_get(
             "https://api.anthropic.com/v1/models",
             headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
             timeout=10,

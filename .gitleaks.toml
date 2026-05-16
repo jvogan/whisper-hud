@@ -7,6 +7,6 @@ title = "WhisperHUD gitleaks config"
 # repeated-character padding strings (sk-aaa...aaa / sk-bbb...bbb).
 regexes = [
   '''sk-(test|valid-key|invalid-key|timeout-key|no-requests|short-key)''',
-  '''sk-[a-z]{1}\1{30,}''',
+  '''sk-(a{30,}|b{30,}|c{30,}|z{30,})''',
   '''"sk-" \+ \("[a-z]" \* \d+\)''',
 ]

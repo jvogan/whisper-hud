@@ -261,8 +261,6 @@ def test_recording_start_stop_transcribes_and_pastes(monkeypatch, fake_manager, 
     FakeInputStream.last_instance.callback(speech_chunk, len(speech_chunk), None, None)
 
     app._stop_recording()
-    assert app._active_turn is not None
-    app._start_batch_transcription(app._active_turn.turn_id)
 
     assert app._is_recording is False
     assert pasted["text"] == EXPECTED_TEXT
@@ -295,8 +293,6 @@ def test_provider_error_propagates_to_hud(monkeypatch, fake_manager, app_symbols
     FakeInputStream.last_instance.callback(speech_chunk, len(speech_chunk), None, None)
 
     app._stop_recording()
-    assert app._active_turn is not None
-    app._start_batch_transcription(app._active_turn.turn_id)
 
     app.hud.show_error.assert_called_once_with("Transcription failed")
     app._notify.assert_called_once_with("WhisperHUD", "Transcription failed", "provider exploded")

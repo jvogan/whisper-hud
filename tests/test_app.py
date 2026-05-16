@@ -3,7 +3,7 @@
 import sys
 import threading
 import types
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from whisper_hud.app import ActiveTranscriptionTurn, WhisperHUDApp
 from whisper_hud.config import Config
@@ -476,20 +476,37 @@ def test_hotkey_press_starts_recording():
 
 
 def test_hotkey_release_stops_recording_and_dispatches_transcription():
-    """Stopping a recording turn without a ready live session should fall back to batch dispatch."""
+    """Stopping a non-live recording turn should dispatch batch transcription directly."""
     app = _build_recording_app()
     app._is_recording = True
     app._active_turn = ActiveTranscriptionTurn(turn_id=7, provider_id="openai")
     app.recorder.stop.return_value = b"x" * 2000
     app._degrade_turn_to_batch = MagicMock()
+    app._start_batch_transcription = MagicMock()
 
     app._stop_recording()
 
     assert app._is_recording is False
     assert app._active_turn.stop_reason == "manual_release"
-    assert app._active_turn.batch_fallback_started is True
+    assert app._active_turn.batch_fallback_started is False
     app.recorder.stop.assert_called_once_with()
-    app._degrade_turn_to_batch.assert_called_once_with(7, "Stop requested before live session ready (manual_release)")
+    app._degrade_turn_to_batch.assert_not_called()
+    app._start_batch_transcription.assert_called_once_with(7)
+
+
+def test_degrade_turn_to_batch_starts_batch_once():
+    """Batch fallback should mark itself started only when it actually dispatches batch work."""
+    app = _build_recording_app()
+    turn = ActiveTranscriptionTurn(turn_id=9, provider_id="openai_realtime")
+    turn.audio_bytes = b"x" * 2000
+    app._active_turn = turn
+    app._start_batch_transcription = MagicMock()
+
+    app._degrade_turn_to_batch(9, "not ready")
+    app._degrade_turn_to_batch(9, "still not ready")
+
+    assert turn.batch_fallback_started is True
+    app._start_batch_transcription.assert_called_once_with(9)
 
 
 def test_transcription_result_is_dispatched_to_paste_pipeline(monkeypatch):
@@ -513,6 +530,22 @@ def test_transcription_result_is_dispatched_to_paste_pipeline(monkeypatch):
     app._paste_to_target.assert_called_once_with("hello world")
     app.hud.show_success.assert_called_once_with("Done! (2 words)")
     app._finish_turn_cleanup.assert_called_once_with(3)
+
+
+def test_locked_paste_target_unavailable_fails_closed():
+    """Locked paste targets should not silently paste private text into the focused app."""
+    app = _build_recording_app()
+    app.config.paste_target_enabled = True
+    app.config.paste_target_type = "app"
+    app.config.paste_target_identifier = "Notes"
+    app._is_target_available_cached = MagicMock(return_value=False)
+    app._get_paste_target_display_name = MagicMock(return_value="Notes")
+
+    with patch("whisper_hud.app.insert_text") as mock_insert_text:
+        assert app._paste_to_target("private transcript") is False
+
+    mock_insert_text.assert_not_called()
+    app._notify.assert_called_once_with("WhisperHUD", "Target Unavailable", "Notes not found. Nothing was pasted.")
 
 
 def test_empty_transcription_suppresses_success_hud(monkeypatch):
