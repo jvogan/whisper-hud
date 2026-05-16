@@ -69,7 +69,7 @@ dev = [
 ]
 custom-icons = [
     "Pillow>=10.0.0",
-    "rembg>=2.0.0",
+    "rembg>=2.0.75",
 ]
 vision = [
     "pyobjc-framework-Vision>=11.0",
