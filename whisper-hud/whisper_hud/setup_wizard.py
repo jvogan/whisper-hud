@@ -130,7 +130,7 @@ class SetupWizard:
         self._translation_models = {
             "apple": "system",
             "ollama": "translategemma-4b",
-            "gemini": "gemini-2.5-flash",
+            "gemini": "gemini-3.1-flash-lite",
             "openai": "gpt-5.4-mini",
             "anthropic": "claude-sonnet-4-6",
         }

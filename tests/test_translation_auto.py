@@ -286,16 +286,16 @@ def test_gemini_model_not_found_falls_back_to_stable(monkeypatch):
 
     result = provider.translate("Hello world", "en", "es")
 
-    assert fake_client.models.calls == ["gemini-3-flash-preview", "gemini-2.5-flash"]
+    assert fake_client.models.calls == ["gemini-3-flash-preview", "gemini-3.1-flash-lite"]
     assert result.text == "Hola mundo"
-    assert result.model == "gemini-2.5-flash"
-    assert provider.get_current_model() == "gemini-2.5-flash"
+    assert result.model == "gemini-3.1-flash-lite"
+    assert provider.get_current_model() == "gemini-3.1-flash-lite"
 
 
 def test_gemini_model_normalization_tracks_current_preview_successors():
     """Gemini translation should map stale Gemini 3 IDs to the current preview lineage."""
     assert GeminiTranslateProvider.normalize_model_id("gemini-3-pro-preview") == "gemini-3.1-pro-preview"
-    assert GeminiTranslateProvider.normalize_model_id("gemini-3.1-flash-lite") == "gemini-3.1-flash-lite-preview"
+    assert GeminiTranslateProvider.normalize_model_id("gemini-3.1-flash-lite-preview") == "gemini-3.1-flash-lite"
 
 
 def test_gemini_translation_sanitizes_provider_errors(monkeypatch):
@@ -310,7 +310,7 @@ def test_gemini_translation_sanitizes_provider_errors(monkeypatch):
         def generate_content(self, *, model, contents, config):
             raise FakeAPIError("Quota exceeded")
 
-    provider = GeminiTranslateProvider(model="gemini-2.5-flash")
+    provider = GeminiTranslateProvider(model="gemini-3.1-flash-lite")
     monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(models=FakeGeminiModels()))
 
     with pytest.raises(RuntimeError, match="Gemini translation failed: rate limited"):

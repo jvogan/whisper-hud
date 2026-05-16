@@ -365,22 +365,27 @@ class OpenAIRealtimeProvider(TranscriptionProvider):
 
     name = "openai_realtime"
     display_name = "OpenAI Realtime"
-    DEFAULT_MODEL = "gpt-4o-mini-transcribe"
-    MODEL_ALIASES = {}
+    DEFAULT_MODEL = "gpt-realtime-whisper"
+    MODEL_ALIASES = {
+        "gpt-4o-transcribe-latest": "gpt-realtime-whisper",
+    }
+    BATCH_FALLBACK_MODELS = {
+        "gpt-realtime-whisper": "gpt-4o-mini-transcribe",
+    }
 
     MODELS = [
         {
-            "id": "gpt-4o-mini-transcribe",
-            "name": "GPT-4o Mini Transcribe",
-            "description": "True live dictation with the fastest OpenAI transcription model",
+            "id": "gpt-realtime-whisper",
+            "name": "GPT Realtime Whisper",
+            "description": "Lowest-latency live dictation model for Realtime transcription sessions",
             "cost_per_minute": 0.003,
             "recommended": True,
         },
         {
-            "id": "gpt-4o-transcribe-latest",
-            "name": "GPT-4o Transcribe Latest",
-            "description": "Rolling alias for the latest non-mini Realtime transcription snapshot",
-            "cost_per_minute": 0.006,
+            "id": "gpt-4o-mini-transcribe",
+            "name": "GPT-4o Mini Transcribe",
+            "description": "Lower-cost transcription model retained for Realtime compatibility",
+            "cost_per_minute": 0.003,
         },
         {
             "id": "gpt-4o-transcribe",
@@ -395,7 +400,7 @@ class OpenAIRealtimeProvider(TranscriptionProvider):
 
     def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
         """Fallback one-shot transcription if the app calls this provider synchronously."""
-        batch_model = "gpt-4o-transcribe" if self.model == "gpt-4o-transcribe-latest" else self.model
+        batch_model = self.BATCH_FALLBACK_MODELS.get(self.model, self.model)
         batch_provider = OpenAITranscribeProvider(model=batch_model)
         result = batch_provider.transcribe(audio_bytes)
         return TranscriptionResult(

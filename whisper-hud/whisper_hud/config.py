@@ -101,8 +101,8 @@ class Config:
 
     # Default model for each transcription provider
     openai_model: str = "gpt-4o-mini-transcribe"
-    openai_realtime_model: str = "gpt-4o-mini-transcribe"
-    gemini_model: str = "gemini-2.5-flash"
+    openai_realtime_model: str = "gpt-realtime-whisper"
+    gemini_model: str = "gemini-3.1-flash-lite"
     apple_model: str = "en-US"
     whisper_local_model: str = "large-v3-turbo"
     parakeet_model: str = "parakeet-tdt-0.6b-v3"
@@ -137,7 +137,7 @@ class Config:
     translation_enabled: bool = False
     translation_provider: str = "apple"  # apple, ollama, gemini, openai
     translation_model: str = "translategemma-4b"  # Ollama model: 4b, 12b, 27b
-    gemini_translate_model: str = "gemini-2.5-flash"  # Gemini translation model
+    gemini_translate_model: str = "gemini-3.1-flash-lite"  # Gemini translation model
     openai_translate_model: str = "gpt-5.4-mini"  # OpenAI translation model
     anthropic_translate_model: str = "claude-sonnet-4-6"  # Anthropic translation model
     target_language: str = "en"  # Default: English (neutral first-run choice)

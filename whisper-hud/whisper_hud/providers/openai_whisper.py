@@ -1,8 +1,9 @@
 """
 OpenAI Transcription API provider.
 
-Models (April 2026):
+Models (May 2026):
 - gpt-4o-mini-transcribe: OpenAI currently recommends this over gpt-4o-transcribe
+- gpt-4o-mini-transcribe-2025-12-15: pinned mini snapshot
 - gpt-4o-transcribe: Higher-cost batch transcription
 - gpt-4o-transcribe-diarize: Speaker-aware transcripts (diarization)
 - whisper-1: Classic Whisper v2, still available
@@ -40,6 +41,12 @@ class OpenAITranscribeProvider(TranscriptionProvider):
             "description": "Recommended by OpenAI for most new transcription workloads",
             "cost_per_minute": 0.003,
             "recommended": True,
+        },
+        {
+            "id": "gpt-4o-mini-transcribe-2025-12-15",
+            "name": "GPT-4o Mini Transcribe (2025-12-15)",
+            "description": "Pinned snapshot of the mini transcription model",
+            "cost_per_minute": 0.003,
         },
         {
             "id": "gpt-4o-transcribe",

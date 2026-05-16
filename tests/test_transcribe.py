@@ -241,8 +241,8 @@ def test_manager_lists_openai_realtime_with_openai_credentials(mock_config):
     assert provider_map["openai_realtime"]["category"] == "cloud"
     assert manager.is_cloud_provider("openai_realtime") is True
     assert [model["id"] for model in provider_map["openai_realtime"]["models"]] == [
+        "gpt-realtime-whisper",
         "gpt-4o-mini-transcribe",
-        "gpt-4o-transcribe-latest",
         "gpt-4o-transcribe",
     ]
 

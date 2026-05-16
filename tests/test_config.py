@@ -19,13 +19,13 @@ class TestConfig:
 
             assert config.default_provider == "apple"
             assert config.openai_model == "gpt-4o-mini-transcribe"
-            assert config.openai_realtime_model == "gpt-4o-mini-transcribe"
-            assert config.gemini_model == "gemini-2.5-flash"
+            assert config.openai_realtime_model == "gpt-realtime-whisper"
+            assert config.gemini_model == "gemini-3.1-flash-lite"
             assert config.hotkey_mode == "push_to_talk"
             assert config.auto_paste is True
             assert config.show_hud is True
             assert config.translation_enabled is False
-            assert config.gemini_translate_model == "gemini-2.5-flash"
+            assert config.gemini_translate_model == "gemini-3.1-flash-lite"
             assert config.openai_translate_model == "gpt-5.4-mini"
             assert config.anthropic_translate_model == "claude-sonnet-4-6"
             assert config.source_language == "auto"
@@ -258,8 +258,8 @@ class TestConfig:
             config = Config()
 
             assert config.get_provider_model("openai") == "gpt-4o-mini-transcribe"
-            assert config.get_provider_model("openai_realtime") == "gpt-4o-mini-transcribe"
-            assert config.get_provider_model("gemini") == "gemini-2.5-flash"
+            assert config.get_provider_model("openai_realtime") == "gpt-realtime-whisper"
+            assert config.get_provider_model("gemini") == "gemini-3.1-flash-lite"
             assert config.get_provider_model("apple") == "en-US"
             assert config.get_provider_model("unknown") == ""
 
@@ -272,9 +272,10 @@ class TestConfig:
                 json.dumps(
                     {
                         "openai_translate_model": "gpt-5-mini",
+                        "openai_realtime_model": "gpt-4o-transcribe-latest",
                         "anthropic_translate_model": "claude-sonnet-4-5",
-                        "gemini_model": "gemini-3-pro-preview",
-                        "gemini_translate_model": "gemini-3-pro-preview",
+                        "gemini_model": "gemini-3.1-flash-lite-preview",
+                        "gemini_translate_model": "gemini-3.1-flash-lite-preview",
                     }
                 ),
                 encoding="utf-8",
@@ -287,9 +288,10 @@ class TestConfig:
                     loaded = Config.load()
 
             assert loaded.openai_translate_model == "gpt-5.4-mini"
+            assert loaded.openai_realtime_model == "gpt-realtime-whisper"
             assert loaded.anthropic_translate_model == "claude-sonnet-4-6"
-            assert loaded.gemini_model == "gemini-3.1-pro-preview"
-            assert loaded.gemini_translate_model == "gemini-3.1-pro-preview"
+            assert loaded.gemini_model == "gemini-3.1-flash-lite"
+            assert loaded.gemini_translate_model == "gemini-3.1-flash-lite"
 
     def test_set_provider_model_supports_openai_realtime(self):
         """Realtime provider model selection should persist like other providers."""

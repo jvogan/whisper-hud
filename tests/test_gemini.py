@@ -50,17 +50,17 @@ def test_provider_initialization_and_model_helpers():
     """GeminiProvider should expose the expected default interface."""
     provider = GeminiProvider()
 
-    assert provider.get_current_model() == "gemini-2.5-flash"
+    assert provider.get_current_model() == "gemini-3.1-flash-lite"
     assert provider.supports_streaming() is True
     assert provider.get_models() == provider.MODELS
 
-    provider.set_model("gemini-2.5-flash")
-    assert provider.get_current_model() == "gemini-2.5-flash"
+    provider.set_model("gemini-3.1-flash-lite")
+    assert provider.get_current_model() == "gemini-3.1-flash-lite"
 
     provider.set_model("not-a-real-model")
-    assert provider.get_current_model() == "gemini-2.5-flash"
+    assert provider.get_current_model() == "gemini-3.1-flash-lite"
     assert GeminiProvider.normalize_model_id("gemini-3-pro-preview") == "gemini-3.1-pro-preview"
-    assert GeminiProvider.normalize_model_id("gemini-3.1-flash-lite") == "gemini-3.1-flash-lite-preview"
+    assert GeminiProvider.normalize_model_id("gemini-3.1-flash-lite-preview") == "gemini-3.1-flash-lite"
 
 
 def test_provider_reports_unavailable_when_api_key_is_not_set(monkeypatch):
@@ -100,11 +100,11 @@ def test_get_client_raises_value_error_when_api_key_is_missing(monkeypatch, fake
 
 def test_transcribe_returns_result_on_success(monkeypatch, sample_audio_bytes, fake_gemini_sdk):
     """Successful transcriptions should return normalized text and metadata."""
-    provider = GeminiProvider(model="gemini-2.5-flash")
+    provider = GeminiProvider(model="gemini-3.1-flash-lite")
 
     class FakeModels:
         def generate_content(self, *, model, contents):
-            assert model == "gemini-2.5-flash"
+            assert model == "gemini-3.1-flash-lite"
             assert contents[0].startswith("Transcribe this audio exactly as spoken.")
             assert contents[1]["data"] == sample_audio_bytes
             assert contents[1]["mime_type"] == "audio/wav"
@@ -116,7 +116,7 @@ def test_transcribe_returns_result_on_success(monkeypatch, sample_audio_bytes, f
 
     assert result.text == "Hello from Gemini"
     assert result.provider == "gemini"
-    assert result.model == "gemini-2.5-flash"
+    assert result.model == "gemini-3.1-flash-lite"
     assert result.duration_seconds == pytest.approx(len(sample_audio_bytes) / 32000)
     assert result.cost_estimate == pytest.approx((result.duration_seconds / 60) * 0.001)
     assert result.language is None
@@ -125,7 +125,7 @@ def test_transcribe_returns_result_on_success(monkeypatch, sample_audio_bytes, f
 
 def test_transcribe_preview_model_falls_back_to_stable_when_rejected(monkeypatch, sample_audio_bytes, fake_gemini_sdk):
     """Preview Gemini transcription IDs should fail over to the stable default when the API rejects them."""
-    provider = GeminiProvider(model="gemini-3.1-flash-lite-preview")
+    provider = GeminiProvider(model="gemini-3.1-pro-preview")
 
     class FakeModels:
         def __init__(self):
@@ -133,8 +133,8 @@ def test_transcribe_preview_model_falls_back_to_stable_when_rejected(monkeypatch
 
         def generate_content(self, *, model, contents):
             self.calls.append(model)
-            if model == "gemini-3.1-flash-lite-preview":
-                raise RuntimeError("Model not found: gemini-3.1-flash-lite-preview")
+            if model == "gemini-3.1-pro-preview":
+                raise RuntimeError("Model not found: gemini-3.1-pro-preview")
             return {"text": "  Hello from stable Gemini  "}
 
     fake_models = FakeModels()
@@ -142,10 +142,10 @@ def test_transcribe_preview_model_falls_back_to_stable_when_rejected(monkeypatch
 
     result = provider.transcribe(sample_audio_bytes)
 
-    assert fake_models.calls == ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"]
+    assert fake_models.calls == ["gemini-3.1-pro-preview", "gemini-3.1-flash-lite"]
     assert result.text == "Hello from stable Gemini"
-    assert result.model == "gemini-2.5-flash"
-    assert provider.get_current_model() == "gemini-2.5-flash"
+    assert result.model == "gemini-3.1-flash-lite"
+    assert provider.get_current_model() == "gemini-3.1-flash-lite"
 
 
 def test_transcribe_raises_runtime_error_on_network_error(
@@ -244,12 +244,12 @@ def test_transcribe_streaming_emits_cumulative_chunks_and_returns_final_result(
     fake_gemini_sdk,
 ):
     """Streaming transcription should accumulate chunk text and return final metadata."""
-    provider = GeminiProvider(model="gemini-2.5-flash")
+    provider = GeminiProvider(model="gemini-3.1-flash-lite")
     seen_chunks = []
 
     class FakeModels:
         def generate_content_stream(self, *, model, contents):
-            assert model == "gemini-2.5-flash"
+            assert model == "gemini-3.1-flash-lite"
             assert contents[1]["data"] == sample_audio_bytes
             return [
                 SimpleNamespace(text=" Hello"),
@@ -266,7 +266,7 @@ def test_transcribe_streaming_emits_cumulative_chunks_and_returns_final_result(
     assert result.duration_seconds == pytest.approx(len(sample_audio_bytes) / 32000)
     assert result.cost_estimate == pytest.approx((result.duration_seconds / 60) * 0.001)
     assert result.provider == "gemini"
-    assert result.model == "gemini-2.5-flash"
+    assert result.model == "gemini-3.1-flash-lite"
 
 
 def test_transcribe_streaming_handles_empty_audio_gracefully():
