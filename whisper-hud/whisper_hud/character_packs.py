@@ -18,6 +18,33 @@ from .logging_config import get_logger
 logger = get_logger("character_packs")
 _VALID_PACK_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
+# Animation / sound schema (manifest v2) constraints.
+# Frame-sequence playback speed is clamped to a sane range so a malformed
+# manifest cannot pin the animation timer at an absurd interval.
+MIN_FRAME_FPS = 0.5
+MAX_FRAME_FPS = 30.0
+DEFAULT_FRAME_FPS = 12.0
+
+# Per-state sounds are restricted to small, uncompressed clips that NSSound /
+# afplay can play without extra codecs.
+ALLOWED_SOUND_EXTENSIONS = {".wav", ".aiff", ".aif"}
+MAX_SOUND_SIZE = 2 * 1024 * 1024  # 2 MB
+
+# Valid interpolation hints for the rendering pipeline.
+VALID_INTERPOLATION_MODES = {"smooth", "nearest"}
+DEFAULT_INTERPOLATION = "smooth"
+
+
+def _clamp_fps(value: Any) -> float:
+    """Coerce a manifest fps value into the supported range."""
+    try:
+        fps = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_FRAME_FPS
+    if fps != fps:  # NaN guard
+        return DEFAULT_FRAME_FPS
+    return max(MIN_FRAME_FPS, min(MAX_FRAME_FPS, fps))
+
 
 # Default location for built-in character packs
 def _get_builtin_packs_dir() -> Path:
@@ -50,6 +77,27 @@ def _resolve_pack_member(pack_dir: Path, relative_path: str) -> Optional[Path]:
     return candidate
 
 
+def _resolve_pack_sound(pack_dir: Path, relative_path: str) -> Optional[Path]:
+    """Resolve a sound path, enforcing extension and size limits.
+
+    Returns the resolved path only when it stays inside the pack, has an
+    allowed extension and is within ``MAX_SOUND_SIZE``; otherwise None.
+    """
+    candidate = _resolve_pack_member(pack_dir, relative_path)
+    if candidate is None or not candidate.is_file():
+        return None
+    if candidate.suffix.lower() not in ALLOWED_SOUND_EXTENSIONS:
+        logger.warning(f"Sound has unsupported extension and was skipped: {relative_path}")
+        return None
+    try:
+        if candidate.stat().st_size > MAX_SOUND_SIZE:
+            logger.warning(f"Sound exceeds size cap and was skipped: {relative_path}")
+            return None
+    except OSError:
+        return None
+    return candidate
+
+
 def _get_safe_user_pack_dir(pack_id: str) -> Optional[Path]:
     """Return the target user-pack directory only for safe pack identifiers."""
     if not _is_valid_pack_id(pack_id):
@@ -65,11 +113,27 @@ def _get_safe_user_pack_dir(pack_id: str) -> Optional[Path]:
 
 @dataclass
 class CharacterPackState:
-    """Represents a single state's icon in a character pack."""
+    """Represents a single state's icon in a character pack.
+
+    Manifest v2 (all optional) adds multi-frame sprite animation and a
+    per-state sound:
+
+    - ``frames``: ordered list of image filenames resolved to ``frame_paths``.
+      When present, the widget plays them as an animation loop (or one-shot for
+      transient states) instead of the single ``file`` icon.
+    - ``fps``: playback speed for ``frames`` (clamped to ``MIN_FRAME_FPS``..
+      ``MAX_FRAME_FPS``).
+    - ``sound``: filename played once when the widget enters this state.
+    """
 
     file: str
     description: str = ""
     full_path: str = ""
+    frames: List[str] = field(default_factory=list)
+    frame_paths: List[str] = field(default_factory=list)
+    fps: float = DEFAULT_FRAME_FPS
+    sound: str = ""
+    sound_path: str = ""
 
 
 @dataclass
@@ -104,13 +168,44 @@ class CharacterPack:
         """Get a dict of state -> full path for all icons."""
         return {state: info.full_path for state, info in self.states.items() if info.full_path}
 
+    def get_animation_states(self) -> Dict[str, Dict[str, Any]]:
+        """Per-state animation metadata for the widget/image layers.
+
+        Maps each state with resolved frames to ``{frames, fps}`` where
+        ``frames`` is a list of absolute image paths.
+        """
+        animations: Dict[str, Dict[str, Any]] = {}
+        for state, info in self.states.items():
+            if info.frame_paths:
+                animations[state] = {"frames": list(info.frame_paths), "fps": info.fps}
+        return animations
+
+    def get_state_sounds(self) -> Dict[str, str]:
+        """Map of state -> absolute sound path for states that define one."""
+        return {state: info.sound_path for state, info in self.states.items() if info.sound_path}
+
+    def get_interpolation(self) -> str:
+        """Interpolation hint requested by the pack (smooth|nearest)."""
+        mode = self.settings.get("interpolation", DEFAULT_INTERPOLATION)
+        return mode if mode in VALID_INTERPOLATION_MODES else DEFAULT_INTERPOLATION
+
     def to_appearance_config(self) -> Dict[str, Any]:
-        """Convert pack to widget appearance custom_icon config format."""
+        """Convert pack to widget appearance custom_icon config format.
+
+        ``icons`` stays a flat state -> path map for backward compatibility with
+        the single-icon image pipeline. Manifest v2 adds ``animations`` (frame
+        sequences), ``sounds`` (per-state audio) and ``interpolation`` so the
+        widget and image layers can opt into animation / crisp pixel-art
+        rendering without breaking older packs.
+        """
         return {
             "enabled": True,
             "path": "",  # Not used when per_state is True
             "per_state": True,
             "icons": self.get_all_icon_paths(),
+            "animations": self.get_animation_states(),
+            "sounds": self.get_state_sounds(),
+            "interpolation": self.get_interpolation(),
             "apply_state_tint": self.settings.get("apply_state_tint", False),
             "tint_opacity": self.settings.get("tint_opacity", 0.3),
             "shape_mode": self.settings.get("shape_mode", "alpha"),
@@ -160,17 +255,50 @@ def load_pack_manifest(pack_dir: Path) -> Optional[CharacterPack]:
                 # Simple format: just filename
                 file_name = state_info
                 description = ""
+                frames_raw: List[Any] = []
+                fps_raw: Any = DEFAULT_FRAME_FPS
+                sound_raw = ""
             else:
-                # Full format: dict with file and description
+                # Full format: dict with file and (optional) v2 keys.
                 file_name = state_info.get("file", "")
                 description = state_info.get("description", "")
+                frames_raw = state_info.get("frames", []) or []
+                fps_raw = state_info.get("fps", DEFAULT_FRAME_FPS)
+                sound_raw = state_info.get("sound", "") or ""
 
             if file_name:
                 full_path = _resolve_pack_member(pack_dir, file_name)
                 if full_path and full_path.is_file():
-                    pack.states[state_name] = CharacterPackState(
+                    state = CharacterPackState(
                         file=file_name, description=description, full_path=str(full_path)
                     )
+
+                    # Resolve frame sequence (manifest v2). Every frame must
+                    # stay inside the pack and exist; unsafe/missing frames are
+                    # dropped so the state simply falls back to the static icon.
+                    if isinstance(frames_raw, list):
+                        for frame_name in frames_raw:
+                            if not isinstance(frame_name, str) or not frame_name:
+                                continue
+                            frame_path = _resolve_pack_member(pack_dir, frame_name)
+                            if frame_path and frame_path.is_file():
+                                state.frames.append(frame_name)
+                                state.frame_paths.append(str(frame_path))
+                            else:
+                                logger.warning(
+                                    f"Frame is missing or escapes the pack directory: {frame_name}"
+                                )
+
+                    state.fps = _clamp_fps(fps_raw)
+
+                    # Resolve per-state sound (manifest v2).
+                    if sound_raw:
+                        sound_path = _resolve_pack_sound(pack_dir, sound_raw)
+                        if sound_path:
+                            state.sound = sound_raw
+                            state.sound_path = str(sound_path)
+
+                    pack.states[state_name] = state
                 else:
                     logger.warning(f"Icon path is missing or escapes the pack directory: {file_name}")
 
@@ -437,7 +565,13 @@ def install_pack_from_directory(source_dir: str) -> Optional[CharacterPack]:
         pass
 
     files_to_copy = {"manifest.json"}
-    files_to_copy.update(state.file for state in pack.states.values())
+    for state in pack.states.values():
+        files_to_copy.add(state.file)
+        # Frame sequences and per-state sounds must be copied too, otherwise the
+        # manifest references them but they silently vanish on install.
+        files_to_copy.update(state.frames)
+        if state.sound:
+            files_to_copy.add(state.sound)
     if pack.preview_image:
         files_to_copy.add(pack.preview_image)
 
@@ -546,8 +680,9 @@ def save_user_pack(
 
             state_files[state] = filename
 
-        # Success state uses recording image
-        if "recording" in state_files:
+        # Success state falls back to the recording image only when the user
+        # did not provide a distinct success image (pack_creator step 5).
+        if "success" not in state_files and "recording" in state_files:
             state_files["success"] = state_files["recording"]
 
         # Create manifest

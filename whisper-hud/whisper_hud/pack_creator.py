@@ -52,8 +52,14 @@ except ImportError:
     HAS_APPKIT = False
 
 
-# States to collect images for
+# Required states to collect images for.
 PACK_STATES = ["idle", "recording", "processing", "error"]
+# Optional states the user may add. ``success`` falls back to the recording
+# image when omitted (see character_packs.save_user_pack), so the classic
+# 4-image flow keeps working unchanged.
+OPTIONAL_PACK_STATES = ["success"]
+# Every state the wizard can collect, required first then optional.
+ALL_PACK_STATES = PACK_STATES + OPTIONAL_PACK_STATES
 STATE_INFO = {
     "idle": {"label": "Idle", "description": "Sleeping, relaxed, peaceful", "example": "Eyes closed, Zzz..."},
     "recording": {
@@ -67,7 +73,17 @@ STATE_INFO = {
         "example": "Question mark, scratching head",
     },
     "error": {"label": "Error", "description": "Distressed, dizzy", "example": "X eyes, stars, fallen over"},
+    "success": {
+        "label": "Success (optional)",
+        "description": "Happy, celebrating",
+        "example": "Sparkles, thumbs up, smile",
+    },
 }
+
+# NOTE: Frame-sequence (multi-frame sprite animation) authoring in this wizard
+# is intentionally OUT OF SCOPE for now. The pack format supports animation via
+# manifest v2 (states[*].frames / fps), but the GUI only collects single images.
+# Future work: add an optional frame-strip importer per state.
 
 
 def _hex_to_nscolor(hex_color: str) -> "NSColor":
@@ -411,70 +427,70 @@ class PackCreatorWindow:
         # Subtitle
         subtitle = self._create_label(
             NSMakeRect(20, height - 75, width - 40, 20),
-            "Select an image for each widget state. Backgrounds will be removed automatically.",
+            "Select an image for each state. Success is optional. Backgrounds are removed automatically.",
             size=12,
             color=NSColor.secondaryLabelColor(),
         )
         content.addSubview_(subtitle)
 
-        # Image upload grid (2x2)
-        x_positions = [30, 350]
-        y_positions = [height - 280, height - 480]
-
-        states_grid = [["idle", "recording"], ["processing", "error"]]
+        # Image upload grid: 3 columns x 2 rows holds the 4 required states plus
+        # the optional success state.
+        x_positions = [20, 240, 460]
+        y_positions = [height - 270, height - 470]
 
         self._image_previews = {}
         self._browse_buttons = {}
 
-        for row_idx, row in enumerate(states_grid):
-            for col_idx, state in enumerate(row):
-                x = x_positions[col_idx]
-                y = y_positions[row_idx]
+        for index, state in enumerate(ALL_PACK_STATES):
+            col_idx = index % 3
+            row_idx = index // 3
+            x = x_positions[col_idx]
+            y = y_positions[row_idx]
 
-                info = STATE_INFO[state]
+            info = STATE_INFO[state]
 
-                # State label
-                state_label = self._create_label(
-                    NSMakeRect(x, y + 130, 280, 20), f"{info['label']} - {info['description']}", bold=True, size=12
-                )
-                content.addSubview_(state_label)
+            # State label
+            state_label = self._create_label(
+                NSMakeRect(x, y + 130, 200, 20), info["label"], bold=True, size=12
+            )
+            content.addSubview_(state_label)
 
-                # Example text
-                example = self._create_label(
-                    NSMakeRect(x, y + 110, 280, 18),
-                    f"Example: {info['example']}",
-                    size=10,
-                    color=NSColor.secondaryLabelColor(),
-                )
-                content.addSubview_(example)
+            # Example text
+            example = self._create_label(
+                NSMakeRect(x, y + 112, 200, 18),
+                f"Ex: {info['example']}",
+                size=9,
+                color=NSColor.secondaryLabelColor(),
+            )
+            content.addSubview_(example)
 
-                # Image preview box
-                preview = ImagePreviewBox.alloc().initWithFrame_(NSMakeRect(x, y, 100, 100))
-                preview.setPlaceholderText_("No image")
-                if state in self._source_images:
-                    img = NSImage.alloc().initWithContentsOfFile_(self._source_images[state])
-                    preview.setImage_(img)
-                content.addSubview_(preview)
-                self._image_previews[state] = preview
+            # Image preview box
+            preview = ImagePreviewBox.alloc().initWithFrame_(NSMakeRect(x, y, 100, 100))
+            preview.setPlaceholderText_("No image")
+            if state in self._source_images:
+                img = NSImage.alloc().initWithContentsOfFile_(self._source_images[state])
+                preview.setImage_(img)
+            content.addSubview_(preview)
+            self._image_previews[state] = preview
 
-                # Browse button
-                browse_btn = NSButton.alloc().initWithFrame_(NSMakeRect(x + 110, y + 60, 80, 28))
-                browse_btn.setTitle_("Browse...")
-                browse_btn.setBezelStyle_(NSBezelStyleRounded)
-                browse_btn.setTarget_(self._delegate)
-                browse_btn.setAction_("browseImage:")
-                browse_btn.setTag_(hash(state) & 0x7FFFFFFF)
-                content.addSubview_(browse_btn)
-                self._browse_buttons[state] = browse_btn
+            # Browse button
+            browse_btn = NSButton.alloc().initWithFrame_(NSMakeRect(x + 102, y + 60, 80, 28))
+            browse_btn.setTitle_("Browse...")
+            browse_btn.setBezelStyle_(NSBezelStyleRounded)
+            browse_btn.setTarget_(self._delegate)
+            browse_btn.setAction_("browseImage:")
+            browse_btn.setTag_(hash(state) & 0x7FFFFFFF)
+            content.addSubview_(browse_btn)
+            self._browse_buttons[state] = browse_btn
 
-                # Clear button
-                clear_btn = NSButton.alloc().initWithFrame_(NSMakeRect(x + 110, y + 30, 80, 28))
-                clear_btn.setTitle_("Clear")
-                clear_btn.setBezelStyle_(NSBezelStyleRounded)
-                clear_btn.setTarget_(self._delegate)
-                clear_btn.setAction_("clearImage:")
-                clear_btn.setTag_(hash(state) & 0x7FFFFFFF)
-                content.addSubview_(clear_btn)
+            # Clear button
+            clear_btn = NSButton.alloc().initWithFrame_(NSMakeRect(x + 102, y + 30, 80, 28))
+            clear_btn.setTitle_("Clear")
+            clear_btn.setBezelStyle_(NSBezelStyleRounded)
+            clear_btn.setTarget_(self._delegate)
+            clear_btn.setAction_("clearImage:")
+            clear_btn.setTag_(hash(state) & 0x7FFFFFFF)
+            content.addSubview_(clear_btn)
 
         # Navigation
         self._add_navigation_buttons(content, height, show_back=True, show_next=True)
@@ -685,7 +701,13 @@ class PackCreatorWindow:
             # Copy source images to avoid race conditions
             source_images = dict(self._source_images)
 
-            for i, state in enumerate(PACK_STATES):
+            # Process the required states plus any optional state the user added
+            # (e.g. a distinct success image).
+            states_to_process = list(PACK_STATES) + [
+                s for s in OPTIONAL_PACK_STATES if s in source_images
+            ]
+
+            for i, state in enumerate(states_to_process):
                 # Check if window was closed
                 if self._processing_cancelled or self._window is None:
                     return
@@ -874,7 +896,7 @@ class PackCreatorWindow:
     def handleClearImage(self, sender):
         """Handle clear button click."""
         state = None
-        for s in PACK_STATES:
+        for s in ALL_PACK_STATES:
             if hash(s) & 0x7FFFFFFF == sender.tag():
                 state = s
                 break

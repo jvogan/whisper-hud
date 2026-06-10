@@ -32,6 +32,7 @@ try:
         NSMakeRect,
         NSZeroRect,
         NSImageInterpolationHigh,
+        NSImageInterpolationNone,
         NSBitmapImageRep,
         NSPNGFileType,
     )
@@ -194,13 +195,25 @@ def load_image(path: str) -> Optional["NSImage"]:
         return None
 
 
-def crop_to_circle(image: "NSImage", size: int) -> Optional["NSImage"]:
+def _interpolation_constant(interpolation: str):
+    """Map a manifest interpolation hint to an NSImageInterpolation constant.
+
+    'nearest' selects point sampling for crisp pixel art; anything else
+    (default 'smooth') keeps high-quality bilinear interpolation.
+    """
+    if interpolation == "nearest":
+        return NSImageInterpolationNone
+    return NSImageInterpolationHigh
+
+
+def crop_to_circle(image: "NSImage", size: int, interpolation: str = "smooth") -> Optional["NSImage"]:
     """
     Crop an image to a circle and resize.
 
     Args:
         image: Source NSImage
         size: Target size in pixels (width and height)
+        interpolation: "smooth" (high quality) or "nearest" (crisp pixel art)
 
     Returns:
         Circle-cropped NSImage or None
@@ -214,9 +227,9 @@ def crop_to_circle(image: "NSImage", size: int) -> Optional["NSImage"]:
         result = NSImage.alloc().initWithSize_((size, size))
         result.lockFocus()
         try:
-            # Set up high-quality interpolation
+            # Set up interpolation (high quality, or point sampling for pixel art)
             context = NSGraphicsContext.currentContext()
-            context.setImageInterpolation_(NSImageInterpolationHigh)
+            context.setImageInterpolation_(_interpolation_constant(interpolation))
 
             # Create a circular clipping path
             circle_path = NSBezierPath.bezierPathWithOvalInRect_(NSMakeRect(0, 0, size, size))
@@ -295,7 +308,7 @@ def has_alpha_channel(image: "NSImage") -> bool:
         return False
 
 
-def crop_preserving_alpha(image: "NSImage", size: int) -> Optional["NSImage"]:
+def crop_preserving_alpha(image: "NSImage", size: int, interpolation: str = "smooth") -> Optional["NSImage"]:
     """
     Resize image while preserving alpha channel (no circle crop).
 
@@ -304,6 +317,7 @@ def crop_preserving_alpha(image: "NSImage", size: int) -> Optional["NSImage"]:
     Args:
         image: Source NSImage
         size: Target size in pixels (width and height)
+        interpolation: "smooth" (high quality) or "nearest" (crisp pixel art)
 
     Returns:
         Resized NSImage with preserved alpha or None
@@ -317,9 +331,9 @@ def crop_preserving_alpha(image: "NSImage", size: int) -> Optional["NSImage"]:
         result = NSImage.alloc().initWithSize_((size, size))
         result.lockFocus()
         try:
-            # Set up high-quality interpolation
+            # Set up interpolation (high quality, or point sampling for pixel art)
             context = NSGraphicsContext.currentContext()
-            context.setImageInterpolation_(NSImageInterpolationHigh)
+            context.setImageInterpolation_(_interpolation_constant(interpolation))
 
             # Clear to transparent
             NSColor.clearColor().set()
@@ -520,7 +534,9 @@ def pil_to_nsimage(pil_image: "PILImage.Image") -> Optional["NSImage"]:
         return None
 
 
-def process_shape(image: "NSImage", image_path: str, size: int, shape_mode: str = "auto") -> Optional["NSImage"]:
+def process_shape(
+    image: "NSImage", image_path: str, size: int, shape_mode: str = "auto", interpolation: str = "smooth"
+) -> Optional["NSImage"]:
     """
     Process image according to shape mode with fallback chain.
 
@@ -529,6 +545,9 @@ def process_shape(image: "NSImage", image_path: str, size: int, shape_mode: str 
         image_path: Original file path (needed for subject extraction)
         size: Target size in pixels
         shape_mode: "auto", "circle", "alpha", "vision", or "subject"
+        interpolation: "smooth" (default) or "nearest" for crisp pixel art.
+            Only affects the direct crop/resize paths; AI background-removal
+            paths render their own output.
 
     Returns:
         Processed NSImage or None
@@ -537,13 +556,13 @@ def process_shape(image: "NSImage", image_path: str, size: int, shape_mode: str 
         return None
 
     if shape_mode == "circle":
-        return crop_to_circle(image, size)
+        return crop_to_circle(image, size, interpolation)
 
     elif shape_mode == "alpha":
         # Use alpha if image has transparency, otherwise fall back to circle
         if has_alpha_channel(image):
-            return crop_preserving_alpha(image, size)
-        return crop_to_circle(image, size)
+            return crop_preserving_alpha(image, size, interpolation)
+        return crop_to_circle(image, size, interpolation)
 
     elif shape_mode == "vision":
         # Try Vision framework (macOS 14+), fall back to rembg, then circle
@@ -556,7 +575,7 @@ def process_shape(image: "NSImage", image_path: str, size: int, shape_mode: str 
             result = extract_subject(image_path, size)
             if result:
                 return result
-        return crop_to_circle(image, size)
+        return crop_to_circle(image, size, interpolation)
 
     elif shape_mode == "subject":
         # Try AI extraction (rembg), fall back to circle
@@ -564,12 +583,12 @@ def process_shape(image: "NSImage", image_path: str, size: int, shape_mode: str 
             result = extract_subject(image_path, size)
             if result:
                 return result
-        return crop_to_circle(image, size)
+        return crop_to_circle(image, size, interpolation)
 
     elif shape_mode == "auto":
         # Priority: alpha > vision > subject > circle
         if has_alpha_channel(image):
-            return crop_preserving_alpha(image, size)
+            return crop_preserving_alpha(image, size, interpolation)
 
         # Try Vision framework first (native, fast)
         if _VISION_AVAILABLE and image_path:
@@ -583,11 +602,11 @@ def process_shape(image: "NSImage", image_path: str, size: int, shape_mode: str 
             if result:
                 return result
 
-        return crop_to_circle(image, size)
+        return crop_to_circle(image, size, interpolation)
 
     else:
         # Unknown mode, default to circle
-        return crop_to_circle(image, size)
+        return crop_to_circle(image, size, interpolation)
 
 
 def apply_tint(image: "NSImage", hex_color: str, opacity: float = 0.3) -> Optional["NSImage"]:
@@ -671,10 +690,22 @@ def hex_to_nscolor(hex_color: str) -> Optional["NSColor"]:
 
 
 def _get_cache_key(
-    path: str, size: int, state: str, tint_color: str = "", tint_opacity: float = 0.0, shape_mode: str = "circle"
+    path: str,
+    size: int,
+    state: str,
+    tint_color: str = "",
+    tint_opacity: float = 0.0,
+    shape_mode: str = "circle",
+    interpolation: str = "smooth",
+    frame_index: int = -1,
 ) -> str:
-    """Generate a cache key for a processed image."""
-    key_str = f"{path}_{size}_{state}_{tint_color}_{tint_opacity}_{shape_mode}"
+    """Generate a cache key for a processed image.
+
+    ``interpolation`` and ``frame_index`` are included so that nearest/smooth
+    variants and individual animation frames do not collide in the LRU cache
+    (frames share the same on-disk path family but render distinct images).
+    """
+    key_str = f"{path}_{size}_{state}_{tint_color}_{tint_opacity}_{shape_mode}_{interpolation}_{frame_index}"
     return hashlib.md5(key_str.encode()).hexdigest()
 
 
@@ -712,6 +743,7 @@ def get_icon_for_state(config: dict, state: str, size: int, force_reload: bool =
 
     # Get shape mode
     shape_mode = custom_icon.get("shape_mode", "auto")
+    interpolation = _normalize_interpolation(custom_icon.get("interpolation"))
 
     # Get tint settings
     apply_tint_flag = custom_icon.get("apply_state_tint", True)
@@ -722,20 +754,65 @@ def get_icon_for_state(config: dict, state: str, size: int, force_reload: bool =
     state_colors = colors.get(state, {})
     tint_color = state_colors.get("icon", "#FFFFFF") if apply_tint_flag else ""
 
-    # Check cache
-    cache_key = _get_cache_key(path, size, state, tint_color, tint_opacity if apply_tint_flag else 0, shape_mode)
+    return _process_icon_path(
+        path,
+        size,
+        state,
+        shape_mode=shape_mode,
+        interpolation=interpolation,
+        apply_tint_flag=apply_tint_flag,
+        tint_color=tint_color,
+        tint_opacity=tint_opacity,
+        force_reload=force_reload,
+    )
+
+
+def _normalize_interpolation(value) -> str:
+    """Clamp an interpolation hint to a supported value ('smooth'|'nearest')."""
+    return "nearest" if value == "nearest" else "smooth"
+
+
+def _process_icon_path(
+    path: str,
+    size: int,
+    state: str,
+    shape_mode: str,
+    interpolation: str,
+    apply_tint_flag: bool,
+    tint_color: str,
+    tint_opacity: float,
+    force_reload: bool = False,
+    frame_index: int = -1,
+) -> Optional["NSImage"]:
+    """Load, shape, tint and cache a single icon/frame image.
+
+    Shared by ``get_icon_for_state`` (single icon) and ``get_frames_for_state``
+    (animation frames). ``frame_index`` only participates in the cache key so
+    each frame caches independently.
+    """
+    if not HAS_APPKIT or not path:
+        return None
+
+    cache_key = _get_cache_key(
+        path,
+        size,
+        state,
+        tint_color,
+        tint_opacity if apply_tint_flag else 0,
+        shape_mode,
+        interpolation,
+        frame_index,
+    )
     if not force_reload:
         cached = _cache_get(cache_key)
         if cached is not None:
             return cached
 
-    # Load and process image
     image = load_image(path)
     if image is None:
         return None
 
-    # Process according to shape mode
-    image = process_shape(image, path, size, shape_mode)
+    image = process_shape(image, path, size, shape_mode, interpolation)
     if image is None:
         return None
 
@@ -743,10 +820,70 @@ def get_icon_for_state(config: dict, state: str, size: int, force_reload: bool =
     if apply_tint_flag and state != "idle" and tint_color:
         image = apply_tint(image, tint_color, tint_opacity)
 
-    # Cache result with LRU eviction
     _cache_set(cache_key, image)
-
     return image
+
+
+def get_frames_for_state(config: dict, state: str, size: int, force_reload: bool = False) -> list:
+    """
+    Get the ordered list of processed animation frames for a widget state.
+
+    Reuses the single-icon processing pipeline once per frame. When the active
+    pack defines no frame sequence for ``state``, returns an empty list and the
+    caller should fall back to :func:`get_icon_for_state`.
+
+    Args:
+        config: Widget appearance config dict
+        state: Widget state (idle, recording, processing, success, error)
+        size: Target icon size in pixels
+        force_reload: Force reload from disk, bypassing cache
+
+    Returns:
+        List of processed NSImage frames (may be empty)
+    """
+    if not HAS_APPKIT:
+        return []
+
+    custom_icon = config.get("custom_icon", {})
+    if not custom_icon.get("enabled", False):
+        return []
+
+    animations = custom_icon.get("animations", {})
+    state_anim = animations.get(state) if isinstance(animations, dict) else None
+    if not state_anim:
+        return []
+
+    frame_paths = state_anim.get("frames", []) if isinstance(state_anim, dict) else []
+    if not frame_paths:
+        return []
+
+    shape_mode = custom_icon.get("shape_mode", "auto")
+    interpolation = _normalize_interpolation(custom_icon.get("interpolation"))
+    apply_tint_flag = custom_icon.get("apply_state_tint", True)
+    tint_opacity = custom_icon.get("tint_opacity", 0.3)
+
+    colors = config.get("colors", {})
+    state_colors = colors.get(state, {})
+    tint_color = state_colors.get("icon", "#FFFFFF") if apply_tint_flag else ""
+
+    frames = []
+    for index, frame_path in enumerate(frame_paths):
+        frame_image = _process_icon_path(
+            frame_path,
+            size,
+            state,
+            shape_mode=shape_mode,
+            interpolation=interpolation,
+            apply_tint_flag=apply_tint_flag,
+            tint_color=tint_color,
+            tint_opacity=tint_opacity,
+            force_reload=force_reload,
+            frame_index=index,
+        )
+        if frame_image is not None:
+            frames.append(frame_image)
+
+    return frames
 
 
 def import_image(source_path: str, dest_dir: str, filename: str = None) -> Tuple[bool, str, str]:
@@ -991,6 +1128,11 @@ class ImageProcessor:
         """Get the processed icon for a widget state."""
         appearance = self._config.widget_appearance
         return get_icon_for_state(appearance, state, size)
+
+    def get_frames_for_state(self, state: str, size: int) -> list:
+        """Get the processed animation frames for a widget state (may be empty)."""
+        appearance = self._config.widget_appearance
+        return get_frames_for_state(appearance, state, size)
 
     def validate_image(self, path: str) -> Tuple[bool, str]:
         """Validate an image file."""

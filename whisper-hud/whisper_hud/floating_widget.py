@@ -13,6 +13,10 @@ import threading
 from enum import Enum
 from typing import Callable, Optional
 
+from .logging_config import get_logger
+
+logger = get_logger("floating_widget")
+
 try:
     import AppKit
     from PyObjCTools import AppHelper
@@ -36,6 +40,11 @@ try:
     NSCursor = AppKit.NSCursor
     NSCompositingOperationSourceOver = AppKit.NSCompositingOperationSourceOver
     NSZeroRect = AppKit.NSZeroRect
+    NSGraphicsContext = getattr(AppKit, "NSGraphicsContext", None)
+    NSImageInterpolationNone = getattr(AppKit, "NSImageInterpolationNone", 1)
+    NSSound = getattr(AppKit, "NSSound", None)
+    NSLineCapStyleRound = getattr(AppKit, "NSLineCapStyleRound", 1)
+    NSLineJoinStyleRound = getattr(AppKit, "NSLineJoinStyleRound", 1)
     NSMenu = AppKit.NSMenu
     NSMenuItem = AppKit.NSMenuItem
     NSAccessibilityButtonRole = getattr(AppKit, "NSAccessibilityButtonRole", "AXButton")
@@ -86,10 +95,16 @@ class WidgetState(Enum):
     IDLE = "idle"
     RECORDING = "recording"
     PROCESSING = "processing"
+    SUCCESS = "success"
+    ERROR = "error"
 
 
 DEFAULT_WIDGET_RIGHT_MARGIN = 20
 DEFAULT_WIDGET_BOTTOM_MARGIN = 100
+
+# How long the transient success/error states stay visible before reverting to idle.
+SUCCESS_REVERT_SECONDS = 1.2
+ERROR_REVERT_SECONDS = 2.0
 
 
 if HAS_APPKIT:
@@ -118,6 +133,7 @@ if HAS_APPKIT:
             self._on_drag_end = on_drag_end  # Callback when drag ends
             self._on_reset_position = on_reset_position
             self._is_hovering = False
+            self._is_pressed = False
             self._state = WidgetState.IDLE
             self._initial_location = None
             self._mouse_down_time = None
@@ -127,8 +143,12 @@ if HAS_APPKIT:
 
             # Appearance configuration
             self._appearance_config = None
-            self._custom_icon = None  # Cached custom icon image
+            self._custom_icon = None  # Cached custom icon image (single-frame)
             self._animation_phase = 0.0
+            # Multi-frame sprite animation: when the active pack defines frames
+            # for the current state these are drawn instead of _custom_icon.
+            self._frames = []
+            self._frame_index = 0
 
             # Enable layer backing for smooth rendering
             self.setWantsLayer_(True)
@@ -164,6 +184,25 @@ if HAS_APPKIT:
             self._custom_icon = icon
             self.setNeedsDisplay_(True)
 
+        def setFrames_(self, frames):
+            """Set the multi-frame animation sequence for the current state."""
+            self._frames = list(frames) if frames else []
+            self._frame_index = 0
+            self.setNeedsDisplay_(True)
+
+        def setFrameIndex_(self, index):
+            """Select which animation frame to draw."""
+            self._frame_index = index
+            self.setNeedsDisplay_(True)
+
+        def _current_icon_image(self):
+            """Return the image to blit: active animation frame or static icon."""
+            if self._frames:
+                if 0 <= self._frame_index < len(self._frames):
+                    return self._frames[self._frame_index]
+                return self._frames[0]
+            return self._custom_icon
+
         def setAnimationPhase_(self, phase):
             """Update the animation phase used when drawing active states."""
             self._animation_phase = phase
@@ -178,6 +217,8 @@ if HAS_APPKIT:
                 "idle": {"background": "#232329", "icon": "#66A5FF", "background_hover": "#383840"},
                 "recording": {"background": "#D92626", "icon": "#FFFFFF"},
                 "processing": {"background": "#BF8C19", "icon": "#FFFFFF"},
+                "success": {"background": "#2E9E5B", "icon": "#FFFFFF"},
+                "error": {"background": "#D92626", "icon": "#FFFFFF"},
             }
 
             if self._appearance_config and "colors" in self._appearance_config:
@@ -278,11 +319,15 @@ if HAS_APPKIT:
             # Draw icon (custom or default circle)
             # For character packs (per_state + alpha), make icons larger to fill widget
             is_character_pack = False
+            nearest_interpolation = False
             if self._appearance_config:
                 custom_icon = self._appearance_config.get("custom_icon", {})
                 is_character_pack = custom_icon.get("per_state", False) and custom_icon.get("shape_mode") == "alpha"
+                nearest_interpolation = custom_icon.get("interpolation") == "nearest"
 
-            if is_character_pack and self._custom_icon:
+            icon_image = self._current_icon_image()
+
+            if is_character_pack and icon_image:
                 # Character pack icons fill almost the entire widget (95%)
                 widget_size = dims[0]  # Full widget width/height
                 char_icon_size = int(widget_size * 0.95)
@@ -291,15 +336,36 @@ if HAS_APPKIT:
             else:
                 icon_rect = NSMakeRect(icon_offset, icon_offset, icon_size, icon_size)
 
-            if self._custom_icon:
-                # Draw custom icon
-                self._custom_icon.drawInRect_fromRect_operation_fraction_(
+            # Subtle hover / pressed micro-interaction on the icon rect.
+            interaction_scale = self._interaction_scale()
+            if interaction_scale != 1.0:
+                icon_rect = self._scaled_rect(icon_rect, interaction_scale)
+
+            if icon_image:
+                # Pixel-art packs request point sampling so the second resample
+                # (this blit) does not blur crisp art the way the cached image's
+                # first resample already avoided.
+                if nearest_interpolation and NSGraphicsContext is not None:
+                    gc = NSGraphicsContext.currentContext()
+                    if gc is not None:
+                        gc.setImageInterpolation_(NSImageInterpolationNone)
+
+                # Draw custom icon (single frame or active animation frame)
+                icon_image.drawInRect_fromRect_operation_fraction_(
                     icon_rect, NSZeroRect, NSCompositingOperationSourceOver, 1.0
                 )
             else:
                 # Draw default circle icon
                 if self._state == WidgetState.PROCESSING:
                     self._draw_processing_spinner(icon_rect, colors, animation_phase)
+                    return
+
+                if self._state == WidgetState.SUCCESS:
+                    self._draw_success_check(icon_rect, colors)
+                    return
+
+                if self._state == WidgetState.ERROR:
+                    self._draw_error_mark(icon_rect, colors)
                     return
 
                 if self._state == WidgetState.RECORDING:
@@ -319,6 +385,18 @@ if HAS_APPKIT:
 
                 if self._state == WidgetState.RECORDING:
                     self._draw_recording_ring(icon_rect, icon_color, animation_phase)
+
+        # Icon micro-interaction scales. Pressed takes priority over hover.
+        HOVER_SCALE = 1.06
+        PRESSED_SCALE = 0.94
+
+        def _interaction_scale(self):
+            """Scale factor for hover/press feedback on the icon (1.0 = none)."""
+            if self._is_pressed:
+                return self.PRESSED_SCALE
+            if self._is_hovering:
+                return self.HOVER_SCALE
+            return 1.0
 
         def _scaled_rect(self, rect, scale):
             center_x = rect.origin.x + (rect.size.width / 2.0)
@@ -371,6 +449,72 @@ if HAS_APPKIT:
             spinner_color.setFill()
             dot_path.fill()
 
+        def _opaque_icon_color(self, colors):
+            """Return the state icon color forced to full opacity."""
+            icon_hex = colors.get("icon", "#FFFFFF")
+            icon_color = _hex_to_nscolor(icon_hex)
+            return NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                icon_color.redComponent(), icon_color.greenComponent(), icon_color.blueComponent(), 1.0
+            )
+
+        def _draw_success_check(self, icon_rect, colors):
+            """Draw a simple checkmark for the success state."""
+            stroke_color = self._opaque_icon_color(colors)
+            origin_x = icon_rect.origin.x
+            origin_y = icon_rect.origin.y
+            width = icon_rect.size.width
+            height = icon_rect.size.height
+            line_width = max(2.0, width * 0.14)
+
+            # Three-point checkmark within the icon rect (origin is bottom-left).
+            start = (origin_x + width * 0.22, origin_y + height * 0.52)
+            elbow = (origin_x + width * 0.42, origin_y + height * 0.30)
+            end = (origin_x + width * 0.78, origin_y + height * 0.72)
+
+            check_path = NSBezierPath.bezierPath()
+            check_path.moveToPoint_(start)
+            check_path.lineToPoint_(elbow)
+            check_path.lineToPoint_(end)
+            check_path.setLineWidth_(line_width)
+            check_path.setLineCapStyle_(NSLineCapStyleRound)
+            check_path.setLineJoinStyle_(NSLineJoinStyleRound)
+            stroke_color.setStroke()
+            check_path.stroke()
+
+        def _draw_error_mark(self, icon_rect, colors):
+            """Draw a simple exclamation mark for the error state."""
+            stroke_color = self._opaque_icon_color(colors)
+            origin_x = icon_rect.origin.x
+            origin_y = icon_rect.origin.y
+            width = icon_rect.size.width
+            height = icon_rect.size.height
+            line_width = max(2.0, width * 0.16)
+            center_x = origin_x + width * 0.5
+
+            # Vertical stroke (origin is bottom-left, so the stem sits above the dot).
+            stem_top = (center_x, origin_y + height * 0.82)
+            stem_bottom = (center_x, origin_y + height * 0.38)
+
+            stem_path = NSBezierPath.bezierPath()
+            stem_path.moveToPoint_(stem_top)
+            stem_path.lineToPoint_(stem_bottom)
+            stem_path.setLineWidth_(line_width)
+            stem_path.setLineCapStyle_(NSLineCapStyleRound)
+            stroke_color.setStroke()
+            stem_path.stroke()
+
+            # Dot beneath the stem.
+            dot_size = line_width
+            dot_rect = NSMakeRect(
+                center_x - (dot_size / 2.0),
+                origin_y + height * 0.18 - (dot_size / 2.0),
+                dot_size,
+                dot_size,
+            )
+            dot_path = NSBezierPath.bezierPathWithOvalInRect_(dot_rect)
+            stroke_color.setFill()
+            dot_path.fill()
+
         def mouseEntered_(self, event):
             self._is_hovering = True
             NSCursor.pointingHandCursor().set()
@@ -378,6 +522,7 @@ if HAS_APPKIT:
 
         def mouseExited_(self, event):
             self._is_hovering = False
+            self._is_pressed = False
             NSCursor.arrowCursor().set()
             self.setNeedsDisplay_(True)
 
@@ -395,6 +540,9 @@ if HAS_APPKIT:
             self._initial_location = event.locationInWindow()
             self._mouse_down_time = time.time()
             self._did_drag = False
+            # Pressed micro-interaction feedback.
+            self._is_pressed = True
+            self.setNeedsDisplay_(True)
 
         def mouseDragged_(self, event):
             if self._initial_location is None:
@@ -458,6 +606,9 @@ if HAS_APPKIT:
             self._initial_window_origin = None
             self._mouse_down_time = None
             self._did_drag = False
+            # Release the pressed micro-interaction.
+            self._is_pressed = False
+            self.setNeedsDisplay_(True)
 
         def setState_(self, state):
             self._state = state
@@ -513,6 +664,19 @@ class FloatingWidget:
         self._animation_timer: Optional[threading.Timer] = None
         self._animation_generation = 0
         self._animation_interval = 1.0 / 15.0
+        # Multi-frame sprite animation state (manifest v2). When the active pack
+        # defines frames for the current state, these drive the same timer loop:
+        # the procedural _animation_phase is replaced by a frame index walk.
+        self._state_frames: list = []
+        self._state_fps = 0.0
+        self._frame_index = 0
+        self._state_loops = True  # transient states (success/error) play once
+        self._last_sound_state: Optional[WidgetState] = None
+        # Transient success/error states auto-revert to idle via this timer.
+        # Structured like the animation timer so a future one-shot animation
+        # can hook the same window/generation guard.
+        self._revert_timer: Optional[threading.Timer] = None
+        self._revert_generation = 0
         self._tooltip_provider = "Unknown"
         self._tooltip_hotkey = ""
         self._tooltip_mode = "push_to_talk"
@@ -594,18 +758,26 @@ class FloatingWidget:
         self._update_animation_phase()
 
     def _handle_click(self):
-        """Handle click on widget."""
+        """Handle click on widget.
+
+        Drive the transition through the public ``set_recording`` /
+        ``set_processing`` API so the animation timer, per-state sound, and
+        accessibility notification fire on the click path too. The lock is
+        released before calling those methods (they acquire it themselves), and
+        ``_state`` is NOT pre-mutated so the later app-callback
+        ``set_recording()`` / ``set_processing()`` simply dedups to a no-op
+        instead of swallowing the animation start.
+        """
         with self._lock:
-            if self._state == WidgetState.IDLE:
-                self._state = WidgetState.RECORDING
-                self._update_view()
-                if self._on_record_start:
-                    threading.Thread(target=self._on_record_start, daemon=True).start()
-            elif self._state == WidgetState.RECORDING:
-                self._state = WidgetState.PROCESSING
-                self._update_view()
-                if self._on_record_stop:
-                    threading.Thread(target=self._on_record_stop, daemon=True).start()
+            current = self._state
+        if current == WidgetState.IDLE:
+            self.set_recording()
+            if self._on_record_start:
+                threading.Thread(target=self._on_record_start, daemon=True).start()
+        elif current == WidgetState.RECORDING:
+            self.set_processing()
+            if self._on_record_stop:
+                threading.Thread(target=self._on_record_stop, daemon=True).start()
 
     def _handle_drag_end(self, x: float, y: float):
         """Handle end of drag - save position."""
@@ -631,6 +803,8 @@ class FloatingWidget:
             WidgetState.IDLE: "Idle",
             WidgetState.RECORDING: "Recording",
             WidgetState.PROCESSING: "Processing",
+            WidgetState.SUCCESS: "Success",
+            WidgetState.ERROR: "Error",
         }
         return f"WhisperHUD - {state_labels.get(state, 'Idle')}"
 
@@ -682,12 +856,127 @@ class FloatingWidget:
             self._animation_timer.cancel()
             self._animation_timer = None
 
+    def _cancel_revert_timer_locked(self):
+        """Cancel any pending auto-revert and invalidate in-flight callbacks."""
+        self._revert_generation += 1
+        if self._revert_timer:
+            self._revert_timer.cancel()
+            self._revert_timer = None
+
+    def _schedule_revert_locked(self, delay: float):
+        """Schedule a one-shot revert to idle after ``delay`` seconds."""
+        self._cancel_revert_timer_locked()
+        generation = self._revert_generation
+        timer = threading.Timer(delay, self._revert_to_idle, args=(generation,))
+        timer.daemon = True
+        self._revert_timer = timer
+        timer.start()
+
+    def _revert_to_idle(self, generation: int):
+        """Timer callback: return to idle unless a newer state change intervened."""
+        with self._lock:
+            if generation != self._revert_generation:
+                return
+            self._revert_timer = None
+        # Reuse the normal idle transition (cancels timers, updates view/a11y).
+        self.set_idle()
+
+    # States whose frame animations loop forever vs. play exactly once.
+    _LOOPING_STATES = {WidgetState.IDLE, WidgetState.RECORDING, WidgetState.PROCESSING}
+
+    def _load_state_frames_locked(self):
+        """Load the active pack's frame sequence for the current state.
+
+        Populates ``_state_frames`` / ``_state_fps`` / ``_state_loops`` and
+        pushes the frame list to the view. Falls back to an empty list (static
+        icon / procedural animation) when the pack defines no frames.
+        """
+        self._state_frames = []
+        self._state_fps = 0.0
+        self._frame_index = 0
+        # Transient states play once; everything else loops.
+        self._state_loops = self._state in self._LOOPING_STATES
+
+        if not self._image_processor or not self._appearance_config:
+            self._push_frames_to_view([])
+            return
+
+        custom_icon = self._appearance_config.get("custom_icon", {})
+        if not custom_icon.get("enabled", False):
+            self._push_frames_to_view([])
+            return
+
+        dims = self._get_dimensions()
+        icon_size = dims[3]
+        state_name = self._state.value
+        try:
+            frames = self._image_processor.get_frames_for_state(state_name, icon_size)
+        except Exception as exc:  # best-effort; never break the widget on render
+            logger.debug(f"Failed to load animation frames for {state_name}: {exc}")
+            frames = []
+
+        if frames:
+            self._state_frames = list(frames)
+            animations = custom_icon.get("animations", {})
+            state_anim = animations.get(state_name, {}) if isinstance(animations, dict) else {}
+            self._state_fps = state_anim.get("fps", 0.0) if isinstance(state_anim, dict) else 0.0
+
+        self._push_frames_to_view(self._state_frames)
+
+    def _push_frames_to_view(self, frames):
+        """Send the frame list to the view on the main thread."""
+        if not HAS_APPKIT or not self._view:
+            return
+
+        view = self._view
+        frames_copy = list(frames)
+
+        def _apply():
+            if self._view is view:
+                self._view.setFrames_(frames_copy)
+
+        AppHelper.callAfter(_apply)
+
+    def _update_frame_index(self):
+        """Push the current frame index to the view on the main thread."""
+        if not HAS_APPKIT or not self._view:
+            return
+
+        view = self._view
+        index = self._frame_index
+
+        def _apply():
+            if self._view is view:
+                self._view.setFrameIndex_(index)
+
+        AppHelper.callAfter(_apply)
+
+    def _has_frame_animation_locked(self) -> bool:
+        return len(self._state_frames) > 1
+
+    def _current_animation_interval_locked(self) -> float:
+        """Timer interval for the current state's animation.
+
+        Frame sequences honour the pack's fps; procedural states keep the
+        default 1/15s cadence.
+        """
+        if self._has_frame_animation_locked() and self._state_fps > 0:
+            return 1.0 / self._state_fps
+        return self._animation_interval
+
     def _state_uses_animation(self) -> bool:
+        # Any state with a multi-frame sequence animates (including IDLE, the
+        # idle-breathing hero case); procedural recording/processing also do.
+        if self._has_frame_animation_locked():
+            return True
         return self._state in {WidgetState.RECORDING, WidgetState.PROCESSING}
 
     def _restart_animation_for_state_locked(self):
         self._animation_generation += 1
         self._cancel_animation_timer_locked()
+        # (Re)load frames for the new state before deciding whether to animate.
+        self._load_state_frames_locked()
+
         if not self._state_uses_animation() or not self._visible:
             self._animation_phase = 0.0
             self._update_animation_phase()
@@ -695,11 +984,13 @@ class FloatingWidget:
 
         self._animation_phase = 0.0
         self._update_animation_phase()
+        if self._has_frame_animation_locked():
+            self._update_frame_index()
         self._schedule_animation_tick_locked()
 
     def _schedule_animation_tick_locked(self):
         timer = threading.Timer(
-            self._animation_interval,
+            self._current_animation_interval_locked(),
             self._animation_tick,
             args=(self._animation_generation,),
         )
@@ -708,6 +999,8 @@ class FloatingWidget:
         timer.start()
 
     def _animation_tick(self, generation: int):
+        advance_phase = False
+        advance_frame = False
         with self._lock:
             if generation != self._animation_generation:
                 return
@@ -715,11 +1008,32 @@ class FloatingWidget:
                 self._animation_timer = None
                 return
 
-            self._animation_phase = (self._animation_phase + 0.12) % 1.0
+            if self._has_frame_animation_locked():
+                next_index = self._frame_index + 1
+                if next_index >= len(self._state_frames):
+                    if self._state_loops:
+                        self._frame_index = 0
+                    else:
+                        # One-shot transition: hold the final frame and stop;
+                        # the revert timer returns the widget to idle.
+                        self._frame_index = len(self._state_frames) - 1
+                        self._animation_timer = None
+                        self._update_frame_index()
+                        return
+                else:
+                    self._frame_index = next_index
+                advance_frame = True
+            else:
+                self._animation_phase = (self._animation_phase + 0.12) % 1.0
+                advance_phase = True
+
             self._animation_timer = None
             self._schedule_animation_tick_locked()
 
-        self._update_animation_phase()
+        if advance_frame:
+            self._update_frame_index()
+        if advance_phase:
+            self._update_animation_phase()
 
     def _build_tooltip_text(self) -> str:
         provider = self._tooltip_provider or "Unknown"
@@ -751,11 +1065,97 @@ class FloatingWidget:
         with self._lock:
             if state == self._state:
                 return
+            # Any explicit state change cancels a pending success/error revert.
+            self._cancel_revert_timer_locked()
             self._state = state
             self._accessibility_label = self._build_accessibility_label(state)
             self._restart_animation_for_state_locked()
             self._update_view()
         self._post_accessibility_notification()
+        self._trigger_state_sound(state)
+
+    def _set_transient_state(self, state: WidgetState, revert_after: float):
+        """Enter a transient state that auto-reverts to idle after a delay."""
+        with self._lock:
+            changed = state != self._state
+            if changed:
+                self._state = state
+                self._accessibility_label = self._build_accessibility_label(state)
+                self._restart_animation_for_state_locked()
+                self._update_view()
+            # Schedule the revert even if the state was already set, so repeated
+            # calls keep the widget visible for the full window.
+            self._schedule_revert_locked(revert_after)
+        if changed:
+            self._post_accessibility_notification()
+            self._trigger_state_sound(state)
+
+    def _state_sound_path(self, state: WidgetState) -> Optional[str]:
+        """Resolve the active pack's sound file for a state, if any."""
+        if not self._appearance_config:
+            return None
+        custom_icon = self._appearance_config.get("custom_icon", {})
+        if not custom_icon.get("enabled", False):
+            return None
+        sounds = custom_icon.get("sounds", {})
+        if not isinstance(sounds, dict):
+            return None
+        return sounds.get(state.value) or None
+
+    def _sound_enabled(self) -> bool:
+        """Whether sounds may play, gated read-only on the completion-sound toggle.
+
+        The widget never owns config; it reaches the existing ``play_sound``
+        flag through the image processor it was wired with (read-only).
+        """
+        processor = self._image_processor
+        config = getattr(processor, "_config", None) if processor is not None else None
+        if config is None:
+            return False
+        return bool(getattr(config, "play_sound", False))
+
+    def _trigger_state_sound(self, state: WidgetState):
+        """Best-effort: play the pack's per-state sound on entering ``state``.
+
+        Never blocks the UI thread and never raises; failures are debug-logged.
+        Gated on the existing completion-sound preference.
+        """
+        sound_path = self._state_sound_path(state)
+        if not sound_path:
+            return
+        if not self._sound_enabled():
+            return
+        threading.Thread(target=self._play_sound_file, args=(sound_path,), daemon=True).start()
+
+    def _play_sound_file(self, sound_path: str):
+        """Play a sound file via NSSound, falling back to ``afplay``.
+
+        ``NSSound.play()`` is asynchronous and the Python wrapper is the sole
+        owner of the NSSound, so GC could dealloc it mid-playback and truncate
+        the clip. This method runs on a dedicated daemon thread, so we keep the
+        ``sound`` reference alive on this stack frame by sleeping for the clip's
+        duration (bounded to avoid hung threads on bad durations).
+        """
+        try:
+            if NSSound is not None:
+                sound = NSSound.alloc().initWithContentsOfFile_byReference_(sound_path, True)
+                if sound is not None:
+                    sound.play()
+                    import time
+
+                    try:
+                        dur = float(sound.duration())
+                    except Exception:
+                        dur = 0.0
+                    # Hold the reference for the playback window; the bound keeps
+                    # the thread from lingering on absurd or invalid durations.
+                    time.sleep(min(dur + 0.25, 10.0))
+                    return
+            import subprocess
+
+            subprocess.Popen(["afplay", sound_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as exc:
+            logger.debug(f"Failed to play state sound {sound_path}: {exc}")
 
     def set_idle(self):
         """Set to idle state."""
@@ -768,6 +1168,14 @@ class FloatingWidget:
     def set_processing(self):
         """Set to processing state."""
         self.set_state(WidgetState.PROCESSING)
+
+    def set_success(self):
+        """Flash the success state, then auto-revert to idle."""
+        self._set_transient_state(WidgetState.SUCCESS, SUCCESS_REVERT_SECONDS)
+
+    def set_error(self):
+        """Flash the error state, then auto-revert to idle."""
+        self._set_transient_state(WidgetState.ERROR, ERROR_REVERT_SECONDS)
 
     def show(self):
         """Show the widget."""
@@ -795,6 +1203,7 @@ class FloatingWidget:
 
         with self._lock:
             self._visible = False
+            self._cancel_revert_timer_locked()
             self._restart_animation_for_state_locked()
 
         def _hide():
@@ -913,6 +1322,11 @@ class FloatingWidget:
                         self._view.setCustomIcon_(None)
                 else:
                     self._view.setCustomIcon_(None)
+
+            # Reload any frame sequence for the new pack and (re)start animation
+            # so an idle breathing loop begins as soon as the pack is applied.
+            with self._lock:
+                self._restart_animation_for_state_locked()
 
         AppHelper.callAfter(_update_appearance)
 
