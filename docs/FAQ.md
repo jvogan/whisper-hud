@@ -3,7 +3,7 @@
 ## Do I need an API key?
 
 Only if you use cloud providers (OpenAI batch, OpenAI Realtime, Gemini, or Anthropic).  
-Local providers (Apple, Whisper Local, Parakeet, Ollama translation) work without API keys.
+Local providers (Apple Built-in, Apple Speech Advanced, Whisper Local, Parakeet, Qwen3 ASR, Ollama translation) work without API keys.
 
 OpenAI Realtime reuses the same OpenAI API key as the batch OpenAI provider.
 
@@ -92,6 +92,9 @@ Accessibility allows apps to control your Mac. Only grant it to trusted apps and
 Install extras in your venv:
 
 ```bash
-pip install -e ".[whisper-local]"
-pip install -e ".[parakeet]"
+pip install -e ".[whisper-local]"   # Whisper Local
+pip install -e ".[parakeet]"        # Parakeet (Apple Silicon)
+pip install -e ".[qwen3-asr]"       # Qwen3 ASR (Apple Silicon)
 ```
+
+Apple Speech (Advanced) needs no pip extra, but requires macOS 26+ and a one-time Swift helper build (`./scripts/build-speechanalyzer.sh`, also run automatically by `./run.sh`).

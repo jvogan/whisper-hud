@@ -242,6 +242,57 @@ Then select **Parakeet** again and download a model.
 
 ---
 
+### Qwen3 ASR Issues
+
+#### Qwen3 ASR not available
+
+Qwen3 ASR is Apple Silicon (M1/M2/M3/M4) only and ships as an optional extra.
+
+- On an Intel Mac it is unavailable — use Apple Speech, Whisper Local, or a cloud provider instead.
+- On Apple Silicon, install the engine:
+  ```bash
+  pip install -e ".[qwen3-asr]"
+  ```
+  Then select **Qwen3 ASR** again. The model (`qwen3-asr-0.6b` by default) downloads on first use.
+
+---
+
+### Apple Speech (Advanced) Issues
+
+#### Apple Speech (Advanced) not listed
+
+This provider uses the macOS 26+ SpeechAnalyzer API via a small bundled Swift helper, and stays hidden until both conditions are met:
+
+1. **macOS version**: It requires macOS 26 or later. On older macOS it is not offered — use Apple Speech (Built-in) instead.
+2. **Helper not built**: Build the Swift helper once (needs Xcode Command Line Tools):
+   ```bash
+   ./scripts/build-speechanalyzer.sh
+   ```
+   `./run.sh` also builds it automatically on launch when it is missing. After it builds, select **Apple Speech (Advanced)** again.
+
+---
+
+### AI Cleanup (Local) Issues
+
+#### AI Cleanup shows unavailable
+
+AI Cleanup is an **optional, local-only** feature that tidies transcripts using a local Ollama model — transcripts are never sent to the cloud. The menu shows "Ollama: not reachable" when no local server is running.
+
+```bash
+# Install Ollama (if needed)
+brew install ollama
+
+# Start the server
+ollama serve
+
+# Optional: pull a small instruct model for cleanup
+ollama pull qwen3:1.7b
+```
+
+Then re-open **Dictation Intelligence**; the status should read "Ollama: ready". If you have no model installed, cleanup is skipped and the raw transcript is used. You can also use **Check Cleanup Status…** in that menu to re-probe.
+
+---
+
 ### Widget Issues
 
 #### Floating widget not appearing

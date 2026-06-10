@@ -6,12 +6,14 @@ WhisperHUD supports multiple transcription providers, each with different trade-
 
 | Provider | Speed | Accuracy | Privacy | Cost | Setup |
 |----------|-------|----------|---------|------|-------|
-| **OpenAI** | Fast | Excellent | Cloud | ~$0.006/min | API key |
+| **OpenAI** | Fast | Excellent | Cloud | ~$0.003–0.006/min | API key |
 | **OpenAI Realtime** | Very Fast | Excellent | Cloud | OpenAI Realtime pricing | Same OpenAI API key |
 | **Gemini** | Very Fast | Excellent | Cloud | Free tier available | API key |
-| **Apple** | Fast | Good | On-device | Free | None |
+| **Apple (Built-in)** | Fast | Good | On-device | Free | None |
 | **Whisper Local** | Slow | Excellent | On-device | Free | Model download |
 | **Parakeet (Apple Silicon)** | Very Fast | Good | On-device | Free | Model download |
+| **Qwen3 ASR (Apple Silicon)** | Fast | Good | On-device | Free | Extra + model download |
+| **Apple Speech (Advanced)** | Very Fast | Good | On-device | Free | macOS 26+ + helper build |
 
 ---
 
@@ -20,17 +22,17 @@ WhisperHUD supports multiple transcription providers, each with different trade-
 ### OpenAI (Batch)
 
 **Models available:**
-- `gpt-4o-mini-transcribe` - OpenAI's currently recommended general transcription model
-- `gpt-4o-mini-transcribe-2025-12-15` - Pinned mini transcription snapshot
-- `gpt-4o-transcribe` - Higher-cost batch transcription
-- `gpt-4o-transcribe-diarize` - Adds speaker diarization
-- `whisper-1` - Original Whisper model
+- `gpt-4o-mini-transcribe` - OpenAI's currently recommended general transcription model (default, $0.003/min)
+- `gpt-4o-mini-transcribe-2025-12-15` - Pinned mini transcription snapshot ($0.003/min)
+- `gpt-4o-transcribe` - Best accuracy, handles accents and noise well ($0.006/min)
+- `gpt-4o-transcribe-diarize` - Speaker-aware transcript; HUD shows plain text ($0.006/min). Custom vocabulary is not applied to this model (the API rejects the prompt parameter).
+- `whisper-1` - Classic Whisper v2 ($0.006/min)
 
 **Setup:**
 1. Get API key from [platform.openai.com](https://platform.openai.com/api-keys)
 2. Enter key in WhisperHUD → API Keys → OpenAI
 
-**Pricing:** ~$0.006 per minute of audio
+**Pricing:** ~$0.003/min for the mini models, ~$0.006/min for `gpt-4o-transcribe`, `gpt-4o-transcribe-diarize`, and `whisper-1`
 
 **Pros:**
 - Excellent accuracy
@@ -76,11 +78,12 @@ Uses OpenAI's Realtime WebSocket transcription flow for low-latency dictation.
 ### Google Gemini
 
 **Models available:**
-- `gemini-3.1-flash-lite` - Current stable default for direct audio transcription
-- `gemini-3-flash-preview` - Newer preview balanced model
+- `gemini-3.1-flash-lite` - Current stable default for direct audio transcription (lowest latency/cost)
+- `gemini-3.5-flash` - Newest stable audio-capable Flash model; higher quality than Flash-Lite
+- `gemini-3-flash-preview` - Frontier preview balanced model
 - `gemini-3.1-pro-preview` - Latest preview quality model
-- `gemini-2.5-flash` - Legacy stable balanced option
 - `gemini-2.5-pro` - Legacy stable quality option
+- `gemini-2.5-flash` - Legacy stable balanced option
 - `gemini-2.5-flash-lite` - Legacy stable speed option
 
 **Setup:**
@@ -103,9 +106,9 @@ Uses OpenAI's Realtime WebSocket transcription flow for low-latency dictation.
 
 ## Local Providers
 
-### Apple Speech Recognition
+### Apple (Built-in) Speech Recognition
 
-Uses macOS built-in speech recognition (same as Siri dictation).
+Uses macOS built-in speech recognition (same as Siri dictation). For the modern on-device engine, see **Apple Speech (Advanced)** below.
 
 **Setup:** None required - works out of the box!
 
@@ -162,10 +165,11 @@ Run OpenAI's Whisper model locally on your Mac.
 
 ### Parakeet (Apple Silicon)
 
-Parakeet is an Apple Silicon-optimized local model (via `parakeet-mlx`).
+Parakeet is an Apple Silicon-optimized local model (via `parakeet-mlx`, MLX-converted weights from the `mlx-community` Hugging Face org). Supports live streaming transcription.
 
 **Models available:**
-- `parakeet-tdt-0.6b-v3` - Multilingual (25 European languages)
+- `parakeet-tdt-0.6b-v3` - Multilingual, 25 European languages (default)
+- `parakeet-tdt-0.6b-v2` - English only; fastest and most accurate for English
 
 **Setup:**
 ```bash
@@ -177,10 +181,83 @@ Then select **Parakeet** in WhisperHUD. The model downloads on first use.
 - Very fast on Apple Silicon
 - Runs locally (no cloud)
 - Free after download
+- Live streaming support
 
 **Cons:**
 - Apple Silicon only
 - Limited language support compared to Whisper
+- Does not support custom vocabulary biasing
+
+---
+
+### Qwen3 ASR (Apple Silicon)
+
+Alibaba's Qwen3-ASR family (Apache-2.0), run fully on-device via the pure-MLX `qwen3-asr-mlx` package. Strong on accented and noisy speech and on non-European languages, closing WhisperHUD's biggest local-language gap.
+
+**Models available:**
+- `qwen3-asr-0.6b` - 52 languages, fast (default, ~700 MB; Hugging Face `mlx-community/Qwen3-ASR-0.6B-bf16`)
+- `qwen3-asr-1.7b` - 52 languages, higher accuracy, larger download (~1.8 GB; `mlx-community/Qwen3-ASR-1.7B-bf16`)
+
+**Setup:**
+```bash
+pip install -e ".[qwen3-asr]"
+```
+Then select **Qwen3 ASR** in WhisperHUD. The model downloads on first use.
+
+**Pros:**
+- 52 languages, including many non-European ones
+- Robust to accents and background noise
+- Runs locally (no cloud), free after download
+
+**Cons:**
+- Apple Silicon (M1/M2/M3/M4) only
+- Does not support custom vocabulary biasing (the package exposes no biasing parameter)
+- First transcription triggers a model download
+
+---
+
+### Apple Speech (Advanced)
+
+On-device transcription via the macOS 26+ SpeechAnalyzer / SpeechTranscriber API — Apple's modern, Neural Engine-accelerated replacement for the built-in recognizer. Substantially faster than Whisper for comparable quality, free, and fully on-device. The API is Swift-only, so WhisperHUD drives a small bundled Swift helper.
+
+**Models available:**
+- `system` - macOS 26+ on-device speech model; ~40 languages, uses your current system locale
+
+**Setup:**
+1. Requires macOS 26 or later.
+2. Build the bundled Swift helper (needs Xcode Command Line Tools):
+   ```bash
+   ./scripts/build-speechanalyzer.sh
+   ```
+   `./run.sh` also builds it automatically on first launch if it is missing. The provider is hidden until the helper exists.
+3. Select **Apple Speech (Advanced)** in WhisperHUD.
+
+**Pros:**
+- Free and fully on-device
+- Very fast (Neural Engine accelerated)
+- Supports custom vocabulary biasing via SpeechAnalyzer contextual hints
+
+**Cons:**
+- Requires macOS 26+
+- Requires building the Swift helper once
+
+---
+
+## Custom Vocabulary Biasing
+
+WhisperHUD can bias transcription toward names, jargon, and terms you list under **Dictation Intelligence → Vocabulary & Replacements** (`custom_vocabulary`, up to 200 terms). It is threaded into every provider that supports biasing, mapped to each provider's native mechanism:
+
+| Provider | How vocabulary is applied |
+|----------|----------------------------|
+| OpenAI (batch) | `prompt` glossary string (skipped for the diarize model) |
+| Whisper Local | `initial_prompt` glossary string |
+| Gemini | Appended hint line in the transcription instruction |
+| Apple Speech (Advanced) | SpeechAnalyzer `contextualStrings` hints (capped at 100) |
+| Apple (Built-in) | Not supported |
+| Parakeet | Not supported |
+| Qwen3 ASR | Not supported |
+
+The same vocabulary is also applied to streaming / live sessions and to the "Transcribe Audio File…" action.
 
 ---
 
