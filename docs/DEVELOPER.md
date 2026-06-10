@@ -43,6 +43,16 @@ Two providers drive small bundled Swift helper binaries that must be compiled on
 - `./run.sh` runs both scripts automatically on launch when the corresponding binary is missing, so a normal `./install.sh` + `./run.sh` flow builds them for you on a supported OS.
 - The provider stays hidden (its module is unavailable) until the helper binary exists and is executable.
 
+## Realtime endpoints (OpenAI)
+
+WhisperHUD talks to three OpenAI realtime endpoints over websockets — live transcription, live speech translation, and the voice assistant conversation. The `openai` SDK floor is **>=2.41.0** for these.
+
+- `providers/realtime_audio.py` — shared PCM16 encode/decode helpers. All OpenAI realtime endpoints consume base64-encoded 24 kHz mono PCM16 audio, so encode/decode lives in one place.
+- `providers/openai_realtime.py` — live dictation transcription session. The realtime client deliberately pins **`max_retries=0`** on both the client and `realtime.connect()`: a one-shot dictation turn keeps its audio in the server-side input buffer, and an SDK auto-reconnect mid-turn would silently drop that buffer and truncate the transcript. Failing fast instead hands the turn to the local batch-fallback path, which still holds the full recording. (The rationale is commented at the `CONNECT_MAX_RETRIES` constant.)
+- `providers/openai_translate_live.py` — live speech-translation session for the `/v1/realtime/translations` endpoint. The SDK exposes no client for this endpoint, so it carries the JSON wire protocol over a raw `websockets` sync client. Validates the target language against the 13 supported output languages before connecting.
+- `assistant.py` — the Voice Assistant: a long-lived `gpt-realtime-2` conversation. Mic audio streams up, spoken replies stream back via `PCM16Player`, and server VAD drives turn-taking. The model may request exactly one tool, `paste_text`; no other tool is ever executed and model-supplied strings are treated as opaque data (the paste callback is the single side-effect channel).
+- `audio_output.py` — `PCM16Player`, streaming 24 kHz PCM16 playback via `sounddevice`. Built for low-latency barge-in: `flush()` drops queued audio and interrupts the chunk mid-write so the assistant stops the instant the user speaks.
+
 ## Character pack manifest (v2 authoring)
 
 Character packs live in `assets/character-packs/<pack-id>/manifest.json` (built-in) or `~/.config/whisper-hud/character-packs/<pack-id>/` (user-installed). Manifest v2 adds optional per-state animation and sound; **all v2 keys are optional and v1 single-icon packs continue to work unchanged**.

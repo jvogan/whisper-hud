@@ -186,6 +186,10 @@ ollama list
 - Ensure Ollama server is running locally
 - Consider using cloud translation (Gemini/OpenAI) for speed
 
+#### Live Speech Translation isn't engaging
+
+It only runs when all three are true: **translation is enabled**, an **OpenAI API key** is set, and your **target language is supported** (English, Spanish, Portuguese, French, German, Italian, Japanese, Korean, Chinese, Russian, Hindi, Indonesian, Vietnamese). When the toggle is on but can't take effect, the Translation menu shows a hint explaining why (missing key or unsupported target). If the network drops or the live session fails mid-turn, WhisperHUD silently falls back to normal transcription plus text translation, so you still get a result.
+
 ---
 
 ## Known Limitations
@@ -290,6 +294,30 @@ ollama pull qwen3:1.7b
 ```
 
 Then re-open **Dictation Intelligence**; the status should read "Ollama: ready". If you have no model installed, cleanup is skipped and the raw transcript is used. You can also use **Check Cleanup Status…** in that menu to re-probe.
+
+---
+
+### Voice Assistant Issues
+
+#### Voice Assistant won't start
+
+- It needs an **OpenAI API key**. Add one in **API Keys → OpenAI** (and unlock API key storage if you use passphrase mode).
+- It can't run while dictation is active — the microphone belongs to one feature at a time. Finish your dictation first.
+
+#### The assistant talks over me
+
+It's designed to stop as soon as you start speaking (barge-in): begin talking and its current reply cuts off immediately so it can listen. If it keeps going, check that your microphone is being picked up (see **No audio being captured** above).
+
+#### No assistant audio
+
+The assistant speaks through your system output device.
+1. Check your output device and volume in **System Settings** → **Sound** → **Output**.
+2. Make sure the right output (speakers/headphones) is selected and not muted.
+3. The menu-bar icon shows 🤖 while a chat is active — if it's not there, the chat isn't running; start it again.
+
+#### The assistant won't paste text
+
+Pasting only works when **Allow Pasting Text** is enabled in the **Voice Assistant** menu, and it's the only action the assistant can perform. Pasting also needs Accessibility permission (see [Accessibility permission not working](#accessibility-permission-not-working)).
 
 ---
 

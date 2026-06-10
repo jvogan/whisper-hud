@@ -87,6 +87,14 @@ History is disabled by default. If enabled, recent transcriptions are saved loca
 
 Accessibility allows apps to control your Mac. Only grant it to trusted apps and remove access if you no longer use WhisperHUD.
 
+## Why is Live Speech Translation greyed out or not working?
+
+Live Speech Translation only runs when all three are true: **translation is enabled**, an **OpenAI API key** is set, and your **target language is supported** (English, Spanish, Portuguese, French, German, Italian, Japanese, Korean, Chinese, Russian, Hindi, Indonesian, or Vietnamese). If any is missing — or the network drops mid-turn — WhisperHUD automatically falls back to the normal transcribe-then-translate flow, so you still get a result. The Translation menu shows a hint when the toggle is on but can't take effect.
+
+## Is the Voice Assistant private?
+
+No — it's a **cloud** feature. It uses your own OpenAI API key (bring-your-own-key), and while a chat is active your audio is sent to OpenAI. It's **off by default** and only starts when you click **Start Voice Chat**. Its only possible action on your Mac is pasting text, and only when you turn on **Allow Pasting Text** — it cannot run commands, read files, or control anything else. Exchanges are saved to history when history is enabled; turn on **Private Mode** to keep them out of history entirely.
+
 ## How do I use local engines?
 
 Install extras in your venv:

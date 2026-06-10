@@ -64,6 +64,7 @@ A post-transcription text pipeline. All features are off by default and additive
 
 - **Provider**: Apple (local), Ollama (local), Gemini, OpenAI, or Anthropic
 - **Enable translation**: Translate transcriptions before pasting
+- **Live Speech Translation (OpenAI)**: Translate your speech in real time as you dictate (translated text is pasted directly), instead of transcribing then translating. See [Live Speech Translation](#live-speech-translation) below.
 - **Source language**: Auto detect (default) or explicit source language
 - **Target language**: Language to translate into (50+ supported)
 - **Translation model**: Choose an Ollama size (4B/12B/27B) or a cloud model
@@ -91,6 +92,25 @@ A post-transcription text pipeline. All features are off by default and additive
 
 Language support varies by provider. Common options include:
 Arabic, Chinese, Dutch, French, German, Hindi, Indonesian, Italian, Japanese, Korean, Portuguese, Russian, Spanish, Turkish, Vietnamese
+
+### Live Speech Translation
+
+Translates your speech in real time as you dictate and pastes the translated text directly — a single step instead of transcribe-then-translate. Off by default.
+
+To turn it on, all three must be true: **translation is enabled**, an **OpenAI API key** is set, and your **target language is supported** (English, Spanish, Portuguese, French, German, Italian, Japanese, Korean, Chinese, Russian, Hindi, Indonesian, or Vietnamese). You can speak any of 70+ input languages — they're detected automatically. If any requirement is missing, WhisperHUD quietly uses the normal transcribe-then-translate path, and the menu shows a hint explaining why the toggle can't take effect.
+
+Your vocabulary and text replacements still apply. Voice commands and AI Cleanup are skipped for live-translated turns. History keeps the translated text plus the original-language transcript. Pricing is $0.034 per audio minute and is counted in the in-app cost stats. See the [provider guide](API_PROVIDERS.md#live-speech-translation-openai) for full details.
+
+## Voice Assistant
+
+A hands-free spoken conversation with OpenAI's voice model, in the top-level **Voice Assistant** menu. You talk, it replies through your speakers, and you can interrupt it mid-reply just by speaking. This is a **cloud, bring-your-own-key** feature: it needs an OpenAI API key, and your audio is sent to OpenAI while a chat is active.
+
+- **Start / Stop Voice Chat**: Begin or end the conversation. The menu-bar icon shows 🤖 while it's active.
+- **Voice**: The assistant's spoken voice (10 options; default **marin**).
+- **Reasoning Effort**: low / medium / high (default **low**).
+- **Allow Pasting Text**: When on, you can ask the assistant to paste text into the app you're using. Pasting is the **only** action it can take — it cannot run commands, read files, or control anything else.
+
+Dictation and the assistant can't run at once (the mic belongs to one of them). Exchanges are saved to history when history is enabled; **Private Mode** keeps them out. The assistant's cost is **not** estimated in the in-app stats. See the [provider guide](API_PROVIDERS.md#voice-assistant-openai) for pricing and details.
 
 ## Streaming Display
 

@@ -24,6 +24,13 @@
 | Qwen3 ASR | Apple Silicon + `qwen3-asr-mlx` (`[qwen3-asr]` extra), model download | On‑device, 52 languages, strong on accents/noise |
 | Ollama | Homebrew + Ollama server | Local translation, and local AI Cleanup |
 
+## Cloud Capabilities
+
+| Capability | Requires | Notes |
+|---------|----------|-------|
+| Live Speech Translation | OpenAI API key + translation enabled + supported target language | Cloud; translates speech in real time (13 target languages); $0.034/audio min, counted in stats; falls back to transcribe-then-translate |
+| Voice Assistant | OpenAI API key | Cloud, bring-your-own-key; hands-free spoken chat with barge-in; paste-only tool (opt-in); not in cost stats; can't run with dictation |
+
 ## Compatibility Notes
 
 - Parakeet and Qwen3 ASR are Apple Silicon only (M1/M2/M3/M4). Intel Macs should use Apple Speech (Built-in), Whisper Local, or cloud providers.
@@ -31,3 +38,5 @@
 - Whisper Local works on Intel and Apple Silicon, but large models may be slow on older machines.
 - Vocabulary biasing is supported on OpenAI (batch, except diarize), Whisper Local, Gemini, and Apple Speech (Advanced). Apple Speech (Built-in), Parakeet, and Qwen3 ASR ignore it.
 - AI Cleanup (local) and Ollama translation both require a local Ollama server; AI Cleanup is local-only and never sends transcripts to the cloud.
+- Live Speech Translation and the Voice Assistant are OpenAI cloud features (bring-your-own-key) and send audio to OpenAI while in use. Both are off by default.
+- The Voice Assistant and dictation cannot run at the same time — the microphone belongs to one of them.

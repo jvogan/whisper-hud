@@ -353,3 +353,49 @@ Uses Apple's Translation framework (macOS 26+). For dev builds, run:
 ```bash
 ./scripts/build-apple-translate.sh
 ```
+
+---
+
+## Live Speech Translation (OpenAI)
+
+A faster, single-step alternative to the normal transcribe-then-translate flow. While you dictate, your audio streams to OpenAI and the **translated** text comes back live and is pasted — one hop instead of two.
+
+Enable it under **Translation → Live Speech Translation (OpenAI)**.
+
+**Requirements (all three):**
+- Translation is enabled
+- An OpenAI API key is set
+- Your target language is one of the supported output languages below
+
+If any requirement is missing, the toggle has no effect and WhisperHUD quietly uses the normal transcribe-then-translate path instead. The menu shows a short hint when the toggle is on but cannot take effect (no OpenAI key, or an unsupported target language).
+
+**Supported target languages (13):** English, Spanish, Portuguese, French, German, Italian, Japanese, Korean, Chinese, Russian, Hindi, Indonesian, Vietnamese. You can speak any of 70+ input languages — the spoken language is detected automatically.
+
+**Pricing:** $0.034 per audio minute (OpenAI's listed price). This is counted toward WhisperHUD's in-app cost stats.
+
+**Notes:**
+- Your custom vocabulary and text replacements still apply to the translated text.
+- Voice commands and AI Cleanup are skipped for live-translated turns — a translated sentence that happens to read like an editing command (e.g. "new line") will never trigger one.
+- History stores the translated text, with the original-language transcript kept as the "original".
+- If the live session can't connect or fails mid-turn, WhisperHUD automatically falls back to normal transcription plus text translation for that turn, so you still get a result.
+
+---
+
+## Voice Assistant (OpenAI)
+
+A hands-free spoken conversation with OpenAI's `gpt-realtime-2` model. One click starts it: you talk, it talks back through your speakers, and you can interrupt its reply at any time just by speaking. Find it in the top-level **Voice Assistant** menu.
+
+This is a **cloud** feature and **bring-your-own-key**: it requires an OpenAI API key, and while a chat is active your audio is sent to OpenAI. The menu labels it as a cloud feature.
+
+**Options (Voice Assistant menu):**
+- **Start / Stop Voice Chat** — begin or end the conversation.
+- **Voice** — pick the assistant's spoken voice (10 OpenAI voices; default **marin**).
+- **Reasoning Effort** — low / medium / high (default **low**). Higher effort can improve answers but costs more.
+- **Allow Pasting Text** — when on, you can ask the assistant to paste text into the app you're working in. Pasting is the **only** action the assistant can perform: it cannot run commands, read files, or control anything else on your Mac.
+
+**Things to know:**
+- The menu-bar icon shows 🤖 while a chat is active.
+- Dictation and the assistant can't run at the same time — the microphone belongs to one of them. Stop one before starting the other.
+- Each exchange (your question plus the assistant's reply) is saved to history when history is enabled. **Private Mode** keeps exchanges out of history.
+
+**Pricing:** Token-based, not per-minute. OpenAI lists `gpt-realtime-2` at **$32 per 1M audio input tokens** (with a 90% discount on cached context) and **$64 per 1M audio output tokens**. Cost grows with how long the conversation runs. WhisperHUD does **not** estimate assistant costs in its in-app stats — check your OpenAI usage dashboard.
