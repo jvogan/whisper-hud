@@ -182,6 +182,124 @@ class TestConfig:
 
             assert config.history == original_history
 
+    def test_history_max_items_default_is_fifty(self):
+        """The default retention cap should be 50 entries."""
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
+            from whisper_hud.config import Config
+
+            assert Config().history_max_items == 50
+
+    def test_add_to_history_stores_new_metadata_tags(self):
+        """New kwargs (source/model/duration/mode) should be persisted on the entry."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_file = Path(tmpdir) / "config.json"
+            with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                with patch("whisper_hud.config.CONFIG_DIR", Path(tmpdir)):
+                    from whisper_hud.config import Config
+
+                    config = Config()
+                    config.history = []
+                    config.history_enabled = True
+
+                    assert config.add_to_history(
+                        "Hello from a file",
+                        provider="apple",
+                        source="file",
+                        model="en-US",
+                        duration_seconds=12.5,
+                        mode="email",
+                    )
+                    entry = config.history[0]
+                    assert entry["text"] == "Hello from a file"
+                    assert entry["source"] == "file"
+                    assert entry["model"] == "en-US"
+                    assert entry["duration_seconds"] == 12.5
+                    assert entry["mode"] == "email"
+
+    def test_add_to_history_defaults_source_to_mic(self):
+        """Omitting source should default to a 'mic' tag (back-compat default)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_file = Path(tmpdir) / "config.json"
+            with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                with patch("whisper_hud.config.CONFIG_DIR", Path(tmpdir)):
+                    from whisper_hud.config import Config
+
+                    config = Config()
+                    config.history = []
+                    config.history_enabled = True
+                    config.add_to_history("spoken text", provider="openai")
+                    entry = config.history[0]
+                    assert entry["source"] == "mic"
+                    # Optional tags omitted when not supplied.
+                    assert "model" not in entry
+                    assert "duration_seconds" not in entry
+                    assert "mode" not in entry
+
+    def test_get_history_preserves_old_entries_without_new_keys(self):
+        """Old entries lacking the new metadata keys must keep working on read."""
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
+            from whisper_hud.config import Config
+
+            config = Config()
+            # Legacy entry shape (pre-upgrade): no source/model/duration/mode.
+            config.history = [{"text": "legacy", "timestamp": 1, "provider": "openai", "translated": False}]
+            items = config.get_history(limit=10)
+            assert items[0]["text"] == "legacy"
+            assert items[0].get("source") is None  # tolerated via .get()
+
+    def test_get_all_history_returns_every_entry(self):
+        """get_all_history should return the full retained list."""
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
+            from whisper_hud.config import Config
+
+            config = Config()
+            config.history = [{"text": f"item {i}", "timestamp": i} for i in range(5)]
+            assert len(config.get_all_history()) == 5
+
+    def test_set_history_max_items_trims_and_persists(self):
+        """Lowering the cap should trim stored history and persist immediately."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_file = Path(tmpdir) / "config.json"
+            with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                with patch("whisper_hud.config.CONFIG_DIR", Path(tmpdir)):
+                    from whisper_hud.config import Config
+
+                    config = Config()
+                    config.history = [{"text": f"item {i}", "timestamp": i} for i in range(10)]
+                    assert config.set_history_max_items(3) is True
+                    assert config.history_max_items == 3
+                    assert len(config.history) == 3
+
+                    reloaded = Config.load()
+                    assert reloaded.history_max_items == 3
+
+    def test_set_history_max_items_rejects_invalid(self):
+        """Non-positive or non-numeric sizes should be rejected without changes."""
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
+            from whisper_hud.config import Config
+
+            config = Config()
+            original = config.history_max_items
+            assert config.set_history_max_items(0) is False
+            assert config.set_history_max_items("nope") is False
+            assert config.history_max_items == original
+
+    def test_set_history_max_items_rolls_back_when_save_fails(self):
+        """A failed save should leave the cap and history unchanged."""
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
+            from whisper_hud.config import Config
+
+            config = Config()
+            config.history_max_items = 50
+            config.history = [{"text": f"item {i}", "timestamp": i} for i in range(10)]
+            original_history = [item.copy() for item in config.history]
+
+            with patch.object(Config, "save", return_value=False):
+                assert config.set_history_max_items(2) is False
+
+            assert config.history_max_items == 50
+            assert config.history == original_history
+
     def test_private_mode_resets_history_and_stats(self):
         """Enabling private mode should clear retained history and stats."""
         with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
@@ -292,6 +410,50 @@ class TestConfig:
             assert loaded.anthropic_translate_model == "claude-sonnet-4-6"
             assert loaded.gemini_model == "gemini-3.1-flash-lite"
             assert loaded.gemini_translate_model == "gemini-3.1-flash-lite"
+
+    def test_load_migrates_shutdown_gemini_pro_and_preserves_new_audio_model(self):
+        """Shut-down Gemini IDs should normalize; verified current IDs must be preserved verbatim."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            config_file = config_dir / "config.json"
+            config_file.write_text(
+                json.dumps(
+                    {
+                        # "Gemini 3 Pro Preview" is marked shut down in the docs; alias -> 3.1 Pro Preview.
+                        "gemini_model": "gemini-3-pro-preview",
+                        # Realtime latest-only alias should resolve to the streaming STT default.
+                        "openai_realtime_model": "gpt-4o-transcribe-latest",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("whisper_hud.config.CONFIG_DIR", config_dir):
+                with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                    from whisper_hud.config import Config
+
+                    loaded = Config.load()
+
+            assert loaded.gemini_model == "gemini-3.1-pro-preview"
+            assert loaded.openai_realtime_model == "gpt-realtime-whisper"
+
+    def test_load_preserves_current_gemini_3_5_flash_model_id(self):
+        """A config already on a verified current ID must not be migrated away."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            config_file = config_dir / "config.json"
+            config_file.write_text(
+                json.dumps({"gemini_model": "gemini-3.5-flash"}),
+                encoding="utf-8",
+            )
+
+            with patch("whisper_hud.config.CONFIG_DIR", config_dir):
+                with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                    from whisper_hud.config import Config
+
+                    loaded = Config.load()
+
+            assert loaded.gemini_model == "gemini-3.5-flash"
 
     def test_set_provider_model_supports_openai_realtime(self):
         """Realtime provider model selection should persist like other providers."""
@@ -480,3 +642,70 @@ class TestConfig:
             assert merged.history_enabled is True
             assert merged.total_transcriptions == 7
             assert merged.total_cost == 1.25
+
+
+class TestDictationIntelligenceConfig:
+    """Tests for the dictation-intelligence config fields."""
+
+    def test_defaults(self):
+        """New dictation fields should default to safe off/empty values."""
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
+            from whisper_hud.config import Config
+
+            config = Config()
+
+            assert config.custom_vocabulary == []
+            assert config.text_replacements == []
+            assert config.voice_commands_enabled is False
+            assert config.custom_voice_commands == []
+            assert config.dictation_modes_enabled is False
+            assert config.dictation_modes == []
+            assert config.llm_cleanup_enabled is False
+            assert config.llm_cleanup_model == ""
+            assert config.llm_cleanup_timeout_seconds == 10.0
+
+    def test_defaults_are_independent_instances(self):
+        """Mutable list defaults must not be shared across Config instances."""
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
+            from whisper_hud.config import Config
+
+            a = Config()
+            b = Config()
+            a.custom_vocabulary.append("alpha")
+            a.text_replacements.append({"pattern": "x", "replacement": "y"})
+
+            assert b.custom_vocabulary == []
+            assert b.text_replacements == []
+
+    def test_persistence_round_trip(self):
+        """Dictation fields should survive a save/load cycle."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_file = Path(tmpdir) / "config.json"
+            with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                with patch("whisper_hud.config.CONFIG_DIR", Path(tmpdir)):
+                    from whisper_hud.config import Config
+
+                    config = Config()
+                    config.custom_vocabulary = ["Kubernetes", "Anthropic"]
+                    config.text_replacements = [{"pattern": "teh", "replacement": "the"}]
+                    config.voice_commands_enabled = True
+                    config.custom_voice_commands = [
+                        {"id": "smiley", "action": "insert", "phrases": ["smiley face"], "payload": ":)"}
+                    ]
+                    config.dictation_modes_enabled = True
+                    config.dictation_modes = [{"id": "term", "app_patterns": ["*term*"]}]
+                    config.llm_cleanup_enabled = True
+                    config.llm_cleanup_model = "qwen3:1.7b"
+                    config.llm_cleanup_timeout_seconds = 7.5
+                    config.save()
+
+                    loaded = Config.load()
+                    assert loaded.custom_vocabulary == ["Kubernetes", "Anthropic"]
+                    assert loaded.text_replacements == [{"pattern": "teh", "replacement": "the"}]
+                    assert loaded.voice_commands_enabled is True
+                    assert loaded.custom_voice_commands[0]["payload"] == ":)"
+                    assert loaded.dictation_modes_enabled is True
+                    assert loaded.dictation_modes[0]["id"] == "term"
+                    assert loaded.llm_cleanup_enabled is True
+                    assert loaded.llm_cleanup_model == "qwen3:1.7b"
+                    assert loaded.llm_cleanup_timeout_seconds == 7.5

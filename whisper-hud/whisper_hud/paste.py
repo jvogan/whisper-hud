@@ -277,6 +277,59 @@ def insert_text_direct(text: str) -> bool:
         return False
 
 
+# macOS System Events virtual key codes for the keys we support. We send these
+# as `key code <n>` (a numeric, non-injectable AppleScript token) rather than
+# interpolating any user-derived string, so there is no AppleScript injection
+# surface here.
+_KEY_CODES = {
+    "return": 36,
+    "enter": 36,
+    "tab": 48,
+}
+
+
+def send_keystroke(key_name: str) -> bool:
+    """Send a single special keystroke (e.g. Return or Tab) via System Events.
+
+    Used by the voice-command ``keystroke`` action and by a mode's
+    ``auto_send`` (which sends Return after pasting). Only a small, fixed set of
+    keys is supported; ``key_name`` is mapped to a numeric ``key code`` so no
+    user-controlled text is ever interpolated into the AppleScript source.
+
+    Args:
+        key_name: One of ``"return"``/``"enter"`` or ``"tab"`` (case-insensitive).
+
+    Returns:
+        True if the keystroke was dispatched successfully, False otherwise
+        (unknown key, AppleScript failure, or exception). Never raises.
+    """
+    if not key_name:
+        return False
+
+    code = _KEY_CODES.get(key_name.strip().lower())
+    if code is None:
+        logger.warning("Unsupported keystroke requested: %r", key_name)
+        return False
+
+    try:
+        applescript = f"""
+        tell application "System Events"
+            key code {code}
+        end tell
+        """
+        result = subprocess.run(["osascript", "-e", applescript], capture_output=True, timeout=5)
+        if result.returncode != 0:
+            logger.error(f"Keystroke AppleScript error: {result.stderr.decode(errors='replace')}")
+            return False
+        return True
+    except subprocess.TimeoutExpired:
+        logger.error("Keystroke operation timed out")
+        return False
+    except Exception as e:
+        logger.error(f"Keystroke error: {e}")
+        return False
+
+
 def get_frontmost_app() -> Optional[str]:
     """
     Get the name of the currently frontmost application.

@@ -446,6 +446,16 @@ def cleanup_orphaned_temp_files(prefix: str = "whisper_hud", temp_dir: Optional[
     """
     Clean up any orphaned temp files from crashed sessions.
 
+    Sweeps two families of scratch artifacts that may survive a crash or hard
+    quit, applying the same safety guards (regular file, not a symlink, single
+    hard link) before securely deleting each:
+
+    * ``{prefix}*.wav`` — orphaned audio recordings.
+    * ``{prefix}_history_*.txt`` — plaintext history-viewer exports written by
+      the "View History…"/"Search History…" feature. These contain decrypted
+      transcripts, so removing them on startup keeps the opt-in encrypted
+      history guarantee from being defeated by a stale on-disk copy.
+
     Args:
         prefix: File name prefix to match
         temp_dir: Directory to scan (defaults to the app-owned scratch directory)
@@ -458,24 +468,26 @@ def cleanup_orphaned_temp_files(prefix: str = "whisper_hud", temp_dir: Optional[
     if temp_dir is None:
         temp_dir = str(get_private_scratch_dir())
 
-    # Find matching temp files
-    pattern = os.path.join(temp_dir, f"{prefix}*.wav")
-    orphaned_files = glob.glob(pattern)
+    def _sweep(pattern: str) -> int:
+        swept = 0
+        for filepath in glob.glob(pattern):
+            try:
+                file_stat = os.lstat(filepath)
+                if stat.S_ISLNK(file_stat.st_mode) or not stat.S_ISREG(file_stat.st_mode):
+                    continue
+                if file_stat.st_nlink != 1:
+                    continue
+                deleted_securely = secure_delete(filepath)
+                if deleted_securely or not os.path.exists(filepath):
+                    swept += 1
+                    logger.debug(f"Cleaned up orphaned temp file: {filepath}")
+            except Exception as e:
+                logger.debug(f"Failed to check/clean temp file {filepath}: {e}")
+        return swept
 
-    cleaned = 0
-    for filepath in orphaned_files:
-        try:
-            file_stat = os.lstat(filepath)
-            if stat.S_ISLNK(file_stat.st_mode) or not stat.S_ISREG(file_stat.st_mode):
-                continue
-            if file_stat.st_nlink != 1:
-                continue
-            deleted_securely = secure_delete(filepath)
-            if deleted_securely or not os.path.exists(filepath):
-                cleaned += 1
-                logger.debug(f"Cleaned up orphaned temp file: {filepath}")
-        except Exception as e:
-            logger.debug(f"Failed to check/clean temp file {filepath}: {e}")
+    cleaned = _sweep(os.path.join(temp_dir, f"{prefix}*.wav"))
+    # Also remove plaintext history-viewer exports (decrypted transcripts).
+    cleaned += _sweep(os.path.join(temp_dir, f"{prefix}_history_*.txt"))
 
     if cleaned > 0:
         logger.info(f"Cleaned up {cleaned} orphaned temp file(s)")

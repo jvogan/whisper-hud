@@ -359,10 +359,11 @@ def test_build_menu_reflects_provider_availability(monkeypatch):
         "Providers & Keys",
         "Paste Target",
         "Translation",
+        "Dictation Intelligence",
         "Settings",
         "Quit WhisperHUD",
     ]
-    assert len(top_level_titles) <= 6
+    assert len(top_level_titles) <= 7
 
     provider_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Providers & Keys")
     provider_titles = _menu_titles(provider_menu)
@@ -380,6 +381,111 @@ def test_build_menu_reflects_provider_availability(monkeypatch):
     recording_menu = next(item for item in settings_menu.items if getattr(item, "title", None) == "Recording & Display")
     recording_titles = _menu_titles(recording_menu)
     assert "Reset Position" in recording_titles
+
+
+def test_dictation_intelligence_menu_lists_core_toggles(monkeypatch):
+    """The Dictation Intelligence section should expose the feature toggles."""
+    app = _build_menu_app(monkeypatch)
+
+    app._build_menu()
+
+    di_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Dictation Intelligence")
+    di_titles = _menu_titles(di_menu)
+    assert any("Voice Commands" in t for t in di_titles)
+    assert any("Dictation Modes" in t for t in di_titles)
+    assert any("AI Cleanup (Local)" in t for t in di_titles)
+    assert "Vocabulary & Replacements" in di_titles
+    # Cleanup is off by default, so the privacy note is shown instead of a probe.
+    assert any("never sent to the cloud" in t for t in di_titles)
+
+
+def test_dictation_intelligence_menu_shows_builtin_modes_when_enabled(monkeypatch):
+    """Enabling modes should reveal the built-in modes submenu."""
+    app = _build_menu_app(monkeypatch)
+    app.config.dictation_modes_enabled = True
+    app._cached_frontmost_app = None
+    app._cached_frontmost_app_checked = 9e18  # avoid a real subprocess
+
+    app._build_menu()
+
+    di_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Dictation Intelligence")
+    modes_submenu = next(item for item in di_menu.items if getattr(item, "title", "").strip() == "Built-in Modes")
+    mode_titles = _menu_titles(modes_submenu)
+    assert any("Email" in t for t in mode_titles)
+    assert any("Code" in t for t in mode_titles)
+
+
+def test_reload_dictation_config_merges_lists(monkeypatch, tmp_path):
+    """Reloading should merge only the four editable lists into config."""
+    fake_rumps = types.SimpleNamespace(alert=MagicMock())
+    monkeypatch.setattr("whisper_hud.app.rumps", fake_rumps)
+
+    app = _build_recording_app()
+    app.config.default_provider = "openai"  # untouched field sentinel
+    cfg_path = tmp_path / "dictation.json"
+    cfg_path.write_text(
+        '{"custom_vocabulary": ["Anthropic"], "text_replacements": [{"pattern": "a", "replacement": "b"}],'
+        ' "custom_voice_commands": [], "dictation_modes": [], "unknown_key": 123}',
+        encoding="utf-8",
+    )
+    app._dictation_config_path = MagicMock(return_value=cfg_path)
+
+    app._reload_dictation_config(None)
+
+    assert app.config.custom_vocabulary == ["Anthropic"]
+    assert app.config.text_replacements == [{"pattern": "a", "replacement": "b"}]
+    assert app.config.default_provider == "openai"  # not clobbered
+    app._notify.assert_called_once()
+
+
+def test_reload_dictation_config_rejects_bad_json(monkeypatch, tmp_path):
+    """Malformed JSON should alert and not change config."""
+    alert = MagicMock()
+    monkeypatch.setattr("whisper_hud.app.rumps", types.SimpleNamespace(alert=alert))
+
+    app = _build_recording_app()
+    app.config.custom_vocabulary = ["keep"]
+    cfg_path = tmp_path / "dictation.json"
+    cfg_path.write_text("{not valid json", encoding="utf-8")
+    app._dictation_config_path = MagicMock(return_value=cfg_path)
+
+    app._reload_dictation_config(None)
+
+    assert app.config.custom_vocabulary == ["keep"]
+    alert.assert_called_once()
+    assert alert.call_args.kwargs["title"] == "Invalid JSON"
+
+
+def test_write_dictation_template_is_user_only_and_parseable(monkeypatch, tmp_path):
+    """The template should be valid JSON written with 0600 permissions."""
+    import json
+    import os
+
+    app = _build_recording_app()
+    app.config.custom_vocabulary = ["seed"]
+    cfg_path = tmp_path / "dictation.json"
+    monkeypatch.setattr("whisper_hud.config.CONFIG_DIR", tmp_path)
+
+    assert app._write_dictation_template(cfg_path) is True
+    data = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert data["custom_vocabulary"] == ["seed"]
+    assert "text_replacements" in data
+    mode = os.stat(cfg_path).st_mode & 0o777
+    assert mode == 0o600
+
+
+def test_toggle_llm_cleanup_persists_and_resets_probe(monkeypatch):
+    """Toggling cleanup should flip config and force a fresh availability probe."""
+    app = _build_recording_app()
+    app._schedule_menu_rebuild = MagicMock()
+    app._cleanup_availability_last_checked = 999.0
+    assert app.config.llm_cleanup_enabled is False
+
+    app._toggle_llm_cleanup(None)
+
+    assert app.config.llm_cleanup_enabled is True
+    assert app._cleanup_availability_last_checked == 0.0
+    app._schedule_menu_rebuild.assert_called_once()
 
 
 def test_needs_setup_cloud_provider_click_opens_provider_setup(monkeypatch):
@@ -592,6 +698,338 @@ def test_transcription_failure_shows_hud_error():
     app._finish_turn_cleanup.assert_called_once_with(4)
 
 
+def test_successful_transcription_flashes_widget_success(monkeypatch):
+    """A completed transcription should drive the floating widget into success."""
+    app = _build_recording_app()
+    app.widget = MagicMock()
+    app._active_turn = ActiveTranscriptionTurn(turn_id=7, provider_id="openai")
+    app._paste_to_target = MagicMock(return_value=True)
+    monkeypatch.setattr("whisper_hud.app.threading.Thread", ImmediateThread)
+    monkeypatch.setattr("whisper_hud.app.time.sleep", lambda _: None)
+
+    result = TranscriptionResult(
+        text="hello world",
+        duration_seconds=1.0,
+        cost_estimate=0.01,
+        provider="openai",
+        model="gpt-4o",
+    )
+
+    app._process_turn_result(7, result, use_streaming=False, stats_already_recorded=True)
+
+    app.widget.set_success.assert_called_once_with()
+    app.widget.set_error.assert_not_called()
+
+
+def test_empty_transcription_flashes_widget_error(monkeypatch):
+    """A whitespace-only result should drive the floating widget into error."""
+    app = _build_recording_app()
+    app.widget = MagicMock()
+    app._active_turn = ActiveTranscriptionTurn(turn_id=8, provider_id="openai")
+    monkeypatch.setattr("whisper_hud.app.threading.Thread", ImmediateThread)
+
+    result = TranscriptionResult(
+        text="   ",
+        duration_seconds=1.0,
+        cost_estimate=0.01,
+        provider="openai",
+        model="gpt-4o",
+    )
+
+    app._process_turn_result(8, result, use_streaming=False, stats_already_recorded=True)
+
+    app.widget.set_error.assert_called_once_with()
+    app.widget.set_success.assert_not_called()
+
+
+def test_transcription_error_flashes_widget_error():
+    """Terminal transcription errors should drive the floating widget into error."""
+    app = _build_recording_app()
+    app.widget = MagicMock()
+    app._active_turn = ActiveTranscriptionTurn(turn_id=9, provider_id="openai")
+
+    app._handle_transcription_error(9, RuntimeError("boom"), use_streaming=False)
+
+    app.widget.set_error.assert_called_once_with()
+
+
+# === Dictation intelligence pipeline tests =================================
+
+
+def _result(text="hello world"):
+    return TranscriptionResult(
+        text=text,
+        duration_seconds=1.0,
+        cost_estimate=0.01,
+        provider="openai",
+        model="gpt-4o",
+    )
+
+
+def _build_pipeline_app(monkeypatch, turn_id=20):
+    """Recording app wired for finalize_result pipeline tests."""
+    app = _build_recording_app()
+    app._active_turn = ActiveTranscriptionTurn(turn_id=turn_id, provider_id="openai")
+    app._paste_to_target = MagicMock(return_value=True)
+    app.cleanup_engine = MagicMock()
+    monkeypatch.setattr("whisper_hud.app.threading.Thread", ImmediateThread)
+    monkeypatch.setattr("whisper_hud.app.time.sleep", lambda _: None)
+    return app
+
+
+def test_voice_command_discard_short_circuits(monkeypatch):
+    """A discard command must skip history and paste entirely."""
+    app = _build_pipeline_app(monkeypatch, turn_id=21)
+    app.config.voice_commands_enabled = True
+    app.config.add_to_history = MagicMock(return_value=True)
+
+    app._process_turn_result(21, _result("scratch that"), use_streaming=False, stats_already_recorded=True)
+
+    app._paste_to_target.assert_not_called()
+    app.config.add_to_history.assert_not_called()
+    app.hud.show_success.assert_called_once_with("Discarded")
+    app._finish_turn_cleanup.assert_called_once_with(21)
+
+
+def test_voice_command_keystroke_skips_paste(monkeypatch):
+    """A keystroke command performs the keystroke and skips paste/history."""
+    app = _build_pipeline_app(monkeypatch, turn_id=22)
+    app.config.voice_commands_enabled = True
+    app.config.add_to_history = MagicMock(return_value=True)
+
+    with patch("whisper_hud.app.send_keystroke") as mock_send:
+        app._process_turn_result(22, _result("press enter"), use_streaming=False, stats_already_recorded=True)
+
+    mock_send.assert_called_once_with("return")
+    app._paste_to_target.assert_not_called()
+    app.config.add_to_history.assert_not_called()
+    app._finish_turn_cleanup.assert_called_once_with(22)
+
+
+def test_voice_command_insert_becomes_final_text_skipping_processing(monkeypatch):
+    """An insert command's payload is pasted verbatim; replacements/cleanup are skipped."""
+    app = _build_pipeline_app(monkeypatch, turn_id=23)
+    app.config.voice_commands_enabled = True
+    app.config.text_replacements = [{"pattern": "x", "replacement": "y"}]
+    app.config.llm_cleanup_enabled = True
+    app._apply_text_replacements = MagicMock(side_effect=AssertionError("replacements should be skipped"))
+
+    app._process_turn_result(23, _result("new line"), use_streaming=False, stats_already_recorded=True)
+
+    # "new line" inserts a newline payload.
+    app._paste_to_target.assert_called_once_with("\n")
+    app.cleanup_engine.cleanup.assert_not_called()
+
+
+def test_voice_command_insert_payload_skips_translation(monkeypatch):
+    """An insert payload must NOT be sent through translation even when it is enabled."""
+    app = _build_pipeline_app(monkeypatch, turn_id=231)
+    app.config.voice_commands_enabled = True
+    app.config.translation_enabled = True
+    app.translator.supports_streaming.return_value = False
+
+    app._process_turn_result(231, _result("new line"), use_streaming=False, stats_already_recorded=True)
+
+    # The literal newline payload is pasted verbatim; the translator is bypassed.
+    app.translator.translate.assert_not_called()
+    app._paste_to_target.assert_called_once_with("\n")
+
+
+def test_custom_insert_command_payload_skips_translation(monkeypatch):
+    """A user-defined insert command's payload is pasted verbatim, never translated."""
+    app = _build_pipeline_app(monkeypatch, turn_id=232)
+    app.config.voice_commands_enabled = True
+    app.config.translation_enabled = True
+    app.translator.supports_streaming.return_value = False
+    app.config.custom_voice_commands = [
+        {"id": "signature", "phrase": "insert signature", "action": "insert", "payload": "Best,\nJacob"}
+    ]
+
+    app._process_turn_result(232, _result("insert signature"), use_streaming=False, stats_already_recorded=True)
+
+    app.translator.translate.assert_not_called()
+    app._paste_to_target.assert_called_once_with("Best,\nJacob")
+
+
+def test_normal_dictation_still_translates_when_enabled(monkeypatch):
+    """Inverse sanity check: ordinary dictation (no command) still goes through translation."""
+    app = _build_pipeline_app(monkeypatch, turn_id=233)
+    app.config.voice_commands_enabled = True
+    app.config.translation_enabled = True
+    translation = MagicMock()
+    translation.text = "hola mundo"
+    app.translator.supports_streaming.return_value = False
+    app.translator.translate.return_value = translation
+    app.translator.get_supported_languages.return_value = {"es": "Spanish"}
+
+    app._process_turn_result(233, _result("hello world"), use_streaming=False, stats_already_recorded=True)
+
+    app.translator.translate.assert_called_once()
+    app._paste_to_target.assert_called_once_with("hola mundo")
+
+
+def test_replacements_applied_before_paste(monkeypatch):
+    """Configured replacements should transform the transcript before pasting."""
+    app = _build_pipeline_app(monkeypatch, turn_id=24)
+    app.config.text_replacements = [{"pattern": "teh", "replacement": "the"}]
+
+    app._process_turn_result(24, _result("teh cat"), use_streaming=False, stats_already_recorded=True)
+
+    app._paste_to_target.assert_called_once_with("the cat")
+
+
+def test_llm_cleanup_runs_and_is_guarded(monkeypatch):
+    """When enabled, cleanup output (guard-checked by the engine) becomes the pasted text."""
+    app = _build_pipeline_app(monkeypatch, turn_id=25)
+    app.config.llm_cleanup_enabled = True
+    app.cleanup_engine.pick_model.return_value = "qwen3:1.7b"
+    app.cleanup_engine.cleanup.return_value = "Hello, world."
+
+    app._process_turn_result(25, _result("hello world"), use_streaming=False, stats_already_recorded=True)
+
+    app.cleanup_engine.cleanup.assert_called_once()
+    # The engine receives the raw (post-replacement) text and the timeout.
+    _, kwargs = app.cleanup_engine.cleanup.call_args
+    assert kwargs["timeout"] == app.config.llm_cleanup_timeout_seconds
+    app._paste_to_target.assert_called_once_with("Hello, world.")
+
+
+def test_llm_cleanup_failure_falls_back_to_raw(monkeypatch):
+    """If the engine returns None (failure), the raw transcript is pasted."""
+    app = _build_pipeline_app(monkeypatch, turn_id=26)
+    app.config.llm_cleanup_enabled = True
+    app.cleanup_engine.pick_model.return_value = "qwen3:1.7b"
+    app.cleanup_engine.cleanup.return_value = None
+
+    app._process_turn_result(26, _result("hello world"), use_streaming=False, stats_already_recorded=True)
+
+    app._paste_to_target.assert_called_once_with("hello world")
+
+
+def test_llm_cleanup_skipped_when_no_model(monkeypatch):
+    """No installed model means cleanup is skipped and raw text is used."""
+    app = _build_pipeline_app(monkeypatch, turn_id=27)
+    app.config.llm_cleanup_enabled = True
+    app.cleanup_engine.pick_model.return_value = None
+
+    app._process_turn_result(27, _result("hello world"), use_streaming=False, stats_already_recorded=True)
+
+    app.cleanup_engine.cleanup.assert_not_called()
+    app._paste_to_target.assert_called_once_with("hello world")
+
+
+def test_translation_receives_post_cleanup_text(monkeypatch):
+    """Translation must operate on the cleaned text, not the raw transcript."""
+    app = _build_pipeline_app(monkeypatch, turn_id=28)
+    app.config.llm_cleanup_enabled = True
+    app.config.translation_enabled = True
+    app.cleanup_engine.pick_model.return_value = "qwen3:1.7b"
+    app.cleanup_engine.cleanup.return_value = "Hola mundo crudo"
+    translation = MagicMock()
+    translation.text = "Hello raw world"
+    app.translator.supports_streaming.return_value = False
+    app.translator.translate.return_value = translation
+    app.translator.get_supported_languages.return_value = {"en": "English"}
+
+    app._process_turn_result(28, _result("hello world"), use_streaming=False, stats_already_recorded=True)
+
+    _, kwargs = app.translator.translate.call_args
+    assert kwargs["text"] == "Hola mundo crudo"
+    app._paste_to_target.assert_called_once_with("Hello raw world")
+
+
+def test_mode_auto_send_presses_return_after_paste(monkeypatch):
+    """A matching auto-send mode should press Return after a successful paste."""
+    app = _build_pipeline_app(monkeypatch, turn_id=29)
+    app.config.dictation_modes_enabled = True
+    app._active_turn.frontmost_app_name = "Slack"  # matches builtin "messages" mode (auto_send False)
+    # Use a custom mode with auto_send to be deterministic.
+    app.config.dictation_modes = [{"id": "chat", "name": "Chat", "app_patterns": ["Slack"], "auto_send": True}]
+
+    with patch("whisper_hud.app.send_keystroke") as mock_send:
+        app._process_turn_result(29, _result("hi team"), use_streaming=False, stats_already_recorded=True)
+
+    app._paste_to_target.assert_called_once_with("hi team")
+    mock_send.assert_called_once_with("return")
+
+
+def test_mode_auto_send_skipped_when_paste_fails(monkeypatch):
+    """Auto-send must not fire if the paste did not succeed."""
+    app = _build_pipeline_app(monkeypatch, turn_id=30)
+    app._paste_to_target.return_value = False
+    app.config.dictation_modes_enabled = True
+    app._active_turn.frontmost_app_name = "Slack"
+    app.config.dictation_modes = [{"id": "chat", "name": "Chat", "app_patterns": ["Slack"], "auto_send": True}]
+
+    with patch("whisper_hud.app.send_keystroke") as mock_send:
+        app._process_turn_result(30, _result("hi team"), use_streaming=False, stats_already_recorded=True)
+
+    mock_send.assert_not_called()
+
+
+def test_vocabulary_merges_custom_and_mode(monkeypatch):
+    """Resolved vocabulary should combine global vocab and the active mode's vocab."""
+    app = _build_recording_app()
+    app.config.custom_vocabulary = ["Anthropic"]
+    app.config.dictation_modes_enabled = True
+    app.config.dictation_modes = [{"id": "code", "app_patterns": ["Code"], "vocabulary": ["Kubernetes"]}]
+    turn = ActiveTranscriptionTurn(turn_id=31, provider_id="openai")
+    turn.frontmost_app_name = "Code"
+
+    vocab = app._resolve_vocabulary(turn)
+
+    assert "Anthropic" in vocab
+    assert "Kubernetes" in vocab
+
+
+def test_vocabulary_custom_only_when_modes_disabled(monkeypatch):
+    """With modes off, only the global custom vocabulary is used."""
+    app = _build_recording_app()
+    app.config.custom_vocabulary = ["Anthropic"]
+    app.config.dictation_modes_enabled = False
+    app.config.dictation_modes = [{"id": "code", "app_patterns": ["Code"], "vocabulary": ["Kubernetes"]}]
+    turn = ActiveTranscriptionTurn(turn_id=32, provider_id="openai")
+    turn.frontmost_app_name = "Code"
+
+    vocab = app._resolve_vocabulary(turn)
+
+    assert vocab == ["Anthropic"]
+
+
+def test_batch_transcription_passes_vocabulary(monkeypatch):
+    """Batch transcription should forward the resolved vocabulary to the manager."""
+    app = _build_recording_app()
+    app.config.custom_vocabulary = ["Anthropic"]
+    turn = ActiveTranscriptionTurn(turn_id=33, provider_id="openai")
+    turn.audio_bytes = b"x" * 2000
+    app._active_turn = turn
+    app.transcriber.transcribe.return_value = _result("hi")
+    app._process_turn_result = MagicMock()
+    monkeypatch.setattr("whisper_hud.app.threading.Thread", ImmediateThread)
+
+    app._start_batch_transcription(33)
+
+    _, kwargs = app.transcriber.transcribe.call_args
+    assert kwargs["vocabulary"] == ["Anthropic"]
+
+
+def test_capture_frontmost_app_only_when_modes_enabled(monkeypatch):
+    """The frontmost-app subprocess should be skipped unless modes are enabled."""
+    app = _build_recording_app()
+    turn = ActiveTranscriptionTurn(turn_id=34, provider_id="openai")
+
+    with patch("whisper_hud.app.get_frontmost_app", return_value="Code") as mock_front:
+        app.config.dictation_modes_enabled = False
+        app._capture_frontmost_app(turn)
+        mock_front.assert_not_called()
+        assert turn.frontmost_app_name is None
+
+        app.config.dictation_modes_enabled = True
+        app._capture_frontmost_app(turn)
+        mock_front.assert_called_once_with()
+        assert turn.frontmost_app_name == "Code"
+
+
 def test_select_provider_updates_config_and_rebuilds_menu():
     """Selecting a provider should persist the new default provider and rebuild the menu."""
     app = WhisperHUDApp.__new__(WhisperHUDApp)
@@ -664,3 +1102,357 @@ def test_hotkey_config_capture_saves_and_restarts_listener(monkeypatch):
     app._notify.assert_called_once_with("WhisperHUD", "Hotkey Changed", "New hotkey: ⌘⌥R")
     app._refresh_widget_tooltip.assert_called_once_with()
     app._schedule_menu_rebuild.assert_called_once_with()
+
+
+# === File transcription + history upgrade tests ============================
+
+
+def test_build_menu_exposes_transcribe_file_action(monkeypatch):
+    """The Providers & Keys menu should include the 'Transcribe Audio File…' action."""
+    app = _build_menu_app(monkeypatch)
+
+    app._build_menu()
+
+    provider_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Providers & Keys")
+    provider_titles = _menu_titles(provider_menu)
+    assert "Transcribe Audio File…" in provider_titles
+    # Top-level structure must remain unchanged (no new top-level entry).
+    assert "Transcribe Audio File…" not in _menu_titles(app.menu)
+
+
+def test_history_menu_exposes_view_search_and_size(monkeypatch):
+    """History submenu should expose View/Search and a History Size submenu."""
+    app = _build_menu_app(monkeypatch)
+    app.config.history_enabled = True
+    app.config.private_mode = False
+    app.config.history = [{"text": "hello", "timestamp": 1, "provider": "openai"}]
+
+    app._build_menu()
+
+    settings_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Settings")
+    history_menu = next(item for item in settings_menu.items if getattr(item, "title", None) == "History & Stats")
+    history_titles = _menu_titles(history_menu)
+    assert "View History…" in history_titles
+    assert "Search History…" in history_titles
+
+    size_menu = next(item for item in history_menu.items if getattr(item, "title", None) == "History Size")
+    size_titles = _menu_titles(size_menu)
+    # Default cap is 50 -> the 50 option is marked selected.
+    assert any("50 entries" in t and t.startswith("● ") for t in size_titles)
+    assert any("200 entries" in t for t in size_titles)
+
+
+def test_view_history_blocks_in_private_mode():
+    """The history viewer must refuse to render anything in private mode."""
+    app = _build_recording_app()
+    app.config.private_mode = True
+    app._open_history_view = MagicMock()
+
+    app._view_history(None)
+
+    app._open_history_view.assert_not_called()
+    app._notify.assert_called_once()
+    assert app._notify.call_args.args[1] == "Private Mode"
+
+
+def test_view_history_blocks_when_history_empty():
+    """An empty history should surface a notice instead of an empty file."""
+    app = _build_recording_app()
+    app.config.private_mode = False
+    app.config.history_enabled = True
+    app.config.history = []
+    app._open_history_view = MagicMock()
+
+    app._view_history(None)
+
+    app._open_history_view.assert_not_called()
+    assert app._notify.call_args.args[1] == "History Empty"
+
+
+def test_view_history_renders_entries_to_viewer():
+    """With saved entries, the viewer should be invoked with the decrypted list."""
+    app = _build_recording_app()
+    app.config.private_mode = False
+    app.config.history_enabled = True
+    app.config.history_encrypted = False
+    app.config.history = [
+        {"text": "first", "timestamp": 1, "provider": "openai", "source": "mic"},
+        {"text": "second", "timestamp": 2, "provider": "apple", "source": "file"},
+    ]
+    app._open_history_view = MagicMock()
+
+    app._view_history(None)
+
+    app._open_history_view.assert_called_once()
+    rendered_entries = app._open_history_view.call_args.args[0]
+    assert len(rendered_entries) == 2
+
+
+def test_write_history_view_file_is_user_only(monkeypatch, tmp_path):
+    """The history view file must be written 0600 in the scratch dir."""
+    import os
+
+    app = _build_recording_app()
+    monkeypatch.setattr(
+        "whisper_hud.encryption.get_private_scratch_dir",
+        lambda: tmp_path,
+    )
+
+    path = app._write_history_view_file("hello history\n")
+
+    assert path is not None
+    assert os.path.exists(path)
+    mode = os.stat(path).st_mode & 0o777
+    assert mode == 0o600
+    with open(path, encoding="utf-8") as f:
+        assert "hello history" in f.read()
+
+
+class FakeTimer:
+    """threading.Timer stand-in that records its schedule and fires on demand."""
+
+    instances = []
+
+    def __init__(self, interval, function, args=None, kwargs=None):
+        self.interval = interval
+        self.function = function
+        self.args = args or ()
+        self.kwargs = kwargs or {}
+        self.daemon = False
+        self.started = False
+        FakeTimer.instances.append(self)
+
+    def start(self):
+        self.started = True
+
+    def fire(self):
+        self.function(*self.args, **self.kwargs)
+
+
+def test_open_history_view_registers_and_schedules_secure_delete(monkeypatch, tmp_path):
+    """Opening the history viewer must register the export and arm a delete timer."""
+    import os
+    import subprocess
+
+    FakeTimer.instances.clear()
+    app = _build_recording_app()
+    app._history_view_files = []
+    monkeypatch.setattr("whisper_hud.encryption.get_private_scratch_dir", lambda: tmp_path)
+    monkeypatch.setattr(subprocess, "run", MagicMock())
+    monkeypatch.setattr("whisper_hud.app.threading.Timer", FakeTimer)
+
+    entries = [{"text": "secret transcript", "timestamp": 0, "provider": "openai"}]
+    app._open_history_view(entries)
+
+    # The plaintext export exists, is tracked for the quit-sweep, and a daemon
+    # timer was armed to securely delete that exact path.
+    assert len(app._history_view_files) == 1
+    path = app._history_view_files[0]
+    assert os.path.exists(path)
+    assert len(FakeTimer.instances) == 1
+    timer = FakeTimer.instances[0]
+    assert timer.started is True
+    assert timer.daemon is True
+    assert timer.args == (path,)
+    assert timer.function == app._delete_history_view_file
+
+    # Firing the timer securely deletes the export and forgets it.
+    timer.fire()
+    assert not os.path.exists(path)
+    assert path not in app._history_view_files
+
+
+def test_quit_sweeps_pending_history_view_files(monkeypatch, tmp_path):
+    """_quit must shred any history exports still on disk before quitting."""
+    import os
+    import subprocess
+
+    FakeTimer.instances.clear()
+    app = _build_recording_app()
+    app._history_view_files = []
+    monkeypatch.setattr("whisper_hud.encryption.get_private_scratch_dir", lambda: tmp_path)
+    monkeypatch.setattr(subprocess, "run", MagicMock())
+    monkeypatch.setattr("whisper_hud.app.threading.Timer", FakeTimer)
+
+    app._open_history_view([{"text": "secret", "timestamp": 0, "provider": "openai"}])
+    path = app._history_view_files[0]
+    assert os.path.exists(path)
+
+    # Stub out the rest of the shutdown path so _quit only exercises the sweep.
+    app._active_turn = None
+    app.hotkey_listener = MagicMock()
+    app._detach_menu_observers = MagicMock()
+    with (
+        patch("whisper_hud.app.lock_passphrase_store"),
+        patch("whisper_hud.app.lock_history_encryption"),
+        patch("whisper_hud.app.rumps.quit_application") as mock_quit,
+    ):
+        app._quit(None)
+
+    mock_quit.assert_called_once()
+    assert not os.path.exists(path)
+    assert app._history_view_files == []
+
+
+def test_render_history_entries_includes_tags_and_full_text():
+    """Rendering should include source/provider/model tags and full text."""
+    entries = [
+        {
+            "text": "the full transcript body",
+            "timestamp": 0,
+            "provider": "apple",
+            "source": "file",
+            "model": "en-US",
+            "duration_seconds": 65,
+        }
+    ]
+    rendered = WhisperHUDApp._render_history_entries(entries, header="2 matches for 'x'")
+    assert "2 matches for 'x'" in rendered
+    assert "source: file" in rendered
+    assert "provider: apple" in rendered
+    assert "model: en-US" in rendered
+    assert "duration: 1:05" in rendered
+    assert "the full transcript body" in rendered
+
+
+def test_render_history_entries_tolerates_legacy_entries():
+    """Old entries without the new keys should still render without error."""
+    entries = [{"text": "legacy", "timestamp": 0, "provider": "openai", "translated": False}]
+    rendered = WhisperHUDApp._render_history_entries(entries)
+    assert "legacy" in rendered
+    # No crash and no source tag rendered for the missing key.
+    assert "source:" not in rendered
+
+
+def test_search_history_filters_and_opens_matches(monkeypatch):
+    """Search should case-insensitively match text/provider/source and open matches."""
+    app = _build_recording_app()
+    app.config.private_mode = False
+    app.config.history_enabled = True
+    app.config.history_encrypted = False
+    app.config.history = [
+        {"text": "Buy milk and eggs", "timestamp": 1, "provider": "openai", "source": "mic"},
+        {"text": "Meeting notes", "timestamp": 2, "provider": "apple", "source": "file"},
+    ]
+    app._applescript_input_dialog = MagicMock(return_value="MILK")
+    app._open_history_view = MagicMock()
+
+    app._search_history(None)
+
+    app._open_history_view.assert_called_once()
+    matches = app._open_history_view.call_args.args[0]
+    assert len(matches) == 1
+    assert matches[0]["text"] == "Buy milk and eggs"
+    header = app._open_history_view.call_args.kwargs.get("header", "")
+    assert "1 match" in header
+
+
+def test_search_history_reports_no_matches(monkeypatch):
+    """A query with no hits should notify and not open the viewer."""
+    app = _build_recording_app()
+    app.config.private_mode = False
+    app.config.history_enabled = True
+    app.config.history_encrypted = False
+    app.config.history = [{"text": "hello", "timestamp": 1, "provider": "openai", "source": "mic"}]
+    app._applescript_input_dialog = MagicMock(return_value="zzz")
+    app._open_history_view = MagicMock()
+
+    app._search_history(None)
+
+    app._open_history_view.assert_not_called()
+    assert app._notify.call_args.args[1] == "No Matches"
+
+
+def test_set_history_size_persists_and_notifies():
+    """Selecting a new history size should persist and notify."""
+    app = _build_recording_app()
+    app.config.set_history_max_items = MagicMock(return_value=True)
+
+    app._set_history_size(100)
+
+    app.config.set_history_max_items.assert_called_once_with(100)
+    app._schedule_menu_rebuild.assert_called_once()
+    assert app._notify.call_args.args[1] == "History Size Updated"
+
+
+def test_transcribe_audio_file_blocks_when_cloud_keys_locked():
+    """File transcription must not run when required cloud keys are locked."""
+    app = _build_recording_app()
+    app._ensure_cloud_credentials_ready = MagicMock(return_value=False)
+    app._pick_audio_file = MagicMock()
+
+    app._transcribe_audio_file(None)
+
+    app._pick_audio_file.assert_not_called()
+    app._notify.assert_called_once()
+    assert app._notify.call_args.args[1] == "Cloud Keys Locked"
+
+
+def test_transcribe_audio_file_rejects_invalid_file(monkeypatch):
+    """An unsupported file should surface an error and never transcribe."""
+    app = _build_recording_app()
+    app._ensure_cloud_credentials_ready = MagicMock(return_value=True)
+    app._pick_audio_file = MagicMock(return_value="/tmp/notes.txt")
+    monkeypatch.setattr("whisper_hud.app.threading.Thread", ImmediateThread)
+
+    app._transcribe_audio_file(None)
+
+    app.transcriber.transcribe.assert_not_called()
+    app.hud.show_error.assert_called_once_with("Unsupported file")
+    assert app._notify.call_args.args[1] == "Cannot Transcribe File"
+
+
+def test_transcribe_audio_file_happy_path_copies_and_stores(monkeypatch):
+    """A successful file transcription copies to clipboard and stores with source=file."""
+    app = _build_recording_app()
+    app._ensure_cloud_credentials_ready = MagicMock(return_value=True)
+    app._pick_audio_file = MagicMock(return_value="/tmp/clip.mp3")
+    app._resolve_vocabulary = MagicMock(return_value=["Anthropic"])
+    app.config.add_to_history = MagicMock(return_value=True)
+    app._reset_title_after_delay = MagicMock()
+    monkeypatch.setattr("whisper_hud.app.validate_audio_file", lambda path: (True, ""))
+    monkeypatch.setattr("whisper_hud.app.threading.Thread", ImmediateThread)
+    monkeypatch.setattr("whisper_hud.app.time.sleep", lambda _: None)
+
+    fake_outcome = {
+        "text": "decoded transcript",
+        "char_count": len("decoded transcript"),
+        "duration_seconds": 65,
+        "provider": "apple",
+        "model": "en-US",
+    }
+    monkeypatch.setattr("whisper_hud.app.transcribe_file", lambda path, **kwargs: fake_outcome)
+    fake_pyperclip = types.SimpleNamespace(copy=MagicMock())
+    monkeypatch.setitem(sys.modules, "pyperclip", fake_pyperclip)
+
+    app._transcribe_audio_file(None)
+
+    fake_pyperclip.copy.assert_called_once_with("decoded transcript")
+    app.config.add_to_history.assert_called_once()
+    kwargs = app.config.add_to_history.call_args.kwargs
+    assert kwargs["source"] == "file"
+    assert kwargs["provider"] == "apple"
+    app.hud.show_success.assert_called_once()
+
+
+def test_transcribe_audio_file_surfaces_decode_error(monkeypatch):
+    """A FileTranscriptionError should be turned into a user-facing error."""
+    from whisper_hud.file_transcription import FileTranscriptionError
+
+    app = _build_recording_app()
+    app._ensure_cloud_credentials_ready = MagicMock(return_value=True)
+    app._pick_audio_file = MagicMock(return_value="/tmp/clip.mp3")
+    app._resolve_vocabulary = MagicMock(return_value=None)
+    app._reset_title_after_delay = MagicMock()
+    monkeypatch.setattr("whisper_hud.app.validate_audio_file", lambda path: (True, ""))
+    monkeypatch.setattr("whisper_hud.app.threading.Thread", ImmediateThread)
+
+    def boom(path, **kwargs):
+        raise FileTranscriptionError("Could not decode that audio file.")
+
+    monkeypatch.setattr("whisper_hud.app.transcribe_file", boom)
+
+    app._transcribe_audio_file(None)
+
+    app.hud.show_error.assert_called_once_with("File transcription failed")
+    assert app._notify.call_args.args[1] == "File Transcription Failed"

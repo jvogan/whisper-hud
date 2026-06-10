@@ -197,8 +197,39 @@ class TestOrphanedTempCleanup:
             assert cleaned == 1
             assert not os.path.exists(temp_file)
 
+    def test_cleanup_temp_files_removes_history_view_exports(self):
+        """Plaintext history-viewer .txt exports must also be swept on cleanup."""
+        from whisper_hud.encryption import cleanup_orphaned_temp_files
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            history_file = os.path.join(tmpdir, "whisper_hud_history_abc123.txt")
+            with open(history_file, "w") as f:
+                f.write("decrypted transcript body")
+
+            cleaned = cleanup_orphaned_temp_files(prefix="whisper_hud", temp_dir=tmpdir)
+
+            assert cleaned == 1
+            assert not os.path.exists(history_file)
+
+    def test_cleanup_temp_files_sweeps_both_wav_and_history_txt(self):
+        """A single cleanup pass should remove both orphaned audio and history exports."""
+        from whisper_hud.encryption import cleanup_orphaned_temp_files
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wav_file = os.path.join(tmpdir, "whisper_hud_rec.wav")
+            txt_file = os.path.join(tmpdir, "whisper_hud_history_xyz.txt")
+            for path in (wav_file, txt_file):
+                with open(path, "w") as f:
+                    f.write("data")
+
+            cleaned = cleanup_orphaned_temp_files(prefix="whisper_hud", temp_dir=tmpdir)
+
+            assert cleaned == 2
+            assert not os.path.exists(wav_file)
+            assert not os.path.exists(txt_file)
+
     def test_cleanup_skips_non_regular_or_multi_link_files(self):
-        """Cleanup should refuse to zero linked scratch files."""
+        """Cleanup should refuse to zero linked scratch files (audio and history alike)."""
         from whisper_hud.encryption import cleanup_orphaned_temp_files
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -208,11 +239,20 @@ class TestOrphanedTempCleanup:
             linked_temp_file = os.path.join(tmpdir, "whisper_hud_recent.wav")
             os.link(source_file, linked_temp_file)
 
+            # A multi-linked .txt history export must likewise be skipped.
+            txt_source = os.path.join(tmpdir, "source.txt")
+            with open(txt_source, "w") as f:
+                f.write("decrypted transcript body")
+            linked_history_file = os.path.join(tmpdir, "whisper_hud_history_linked.txt")
+            os.link(txt_source, linked_history_file)
+
             cleaned = cleanup_orphaned_temp_files(prefix="whisper_hud", temp_dir=tmpdir)
 
             assert cleaned == 0
             assert os.path.exists(linked_temp_file)
             assert os.path.exists(source_file)
+            assert os.path.exists(linked_history_file)
+            assert os.path.exists(txt_source)
 
 
 class TestPrivacyConfig:

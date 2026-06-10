@@ -14,8 +14,17 @@ from datetime import datetime
 from typing import List, Optional
 
 from .logging_config import get_logger
+from .providers import registry
 
 logger = get_logger("config")
+
+# Map of transcription provider id -> Config field storing its selected model,
+# derived from the central provider registry. These field names must match the
+# Config dataclass attributes below; the registry is the single source of truth
+# for which provider uses which field.
+_TRANSCRIPTION_MODEL_FIELDS = {
+    spec.id: spec.config_model_field for spec in registry.TRANSCRIPTION_SPECS if spec.config_model_field is not None
+}
 
 CONFIG_DIR = Path.home() / ".config" / "whisper-hud"
 CONFIG_FILE = CONFIG_DIR / "config.json"
@@ -106,6 +115,8 @@ class Config:
     apple_model: str = "en-US"
     whisper_local_model: str = "large-v3-turbo"
     parakeet_model: str = "parakeet-tdt-0.6b-v3"
+    qwen3_asr_model: str = "qwen3-asr-0.6b"
+    apple_analyzer_model: str = "system"
 
     # Hotkey (stored as key names)
     hotkey: List[str] = field(default_factory=lambda: ["cmd", "shift", "space"])
@@ -143,6 +154,25 @@ class Config:
     target_language: str = "en"  # Default: English (neutral first-run choice)
     source_language: str = "auto"  # "auto" or specific ISO 639-1 code
 
+    # Dictation intelligence
+    # These power the post-transcription text pipeline (modes, vocabulary,
+    # replacements, voice commands, local LLM cleanup). All are additive and
+    # default to "off" so existing installs see no behavior change.
+    custom_vocabulary: List[str] = field(default_factory=list)  # Words/names/jargon to bias transcription toward
+    text_replacements: List[dict] = field(default_factory=list)  # textproc Rule dicts (find/replace fix-ups)
+    voice_commands_enabled: bool = False  # Recognize spoken editing commands ("scratch that", "new line", ...)
+    custom_voice_commands: List[dict] = field(default_factory=list)  # User-defined voice command dicts
+    dictation_modes_enabled: bool = False  # Per-app dictation profiles (formatting/auto-send/vocabulary)
+    dictation_modes: List[dict] = field(
+        default_factory=list
+    )  # Custom modes; builtins are always available when enabled
+    # LLM cleanup is LOCAL-ONLY in this version: it talks to a local Ollama daemon
+    # on 127.0.0.1 and NEVER sends transcripts to any cloud service. There is no
+    # cloud cleanup path by design (privacy invariant).
+    llm_cleanup_enabled: bool = False  # Tidy transcripts with a local Ollama model (formatting only, guard-checked)
+    llm_cleanup_model: str = ""  # Ollama model id; empty = auto-pick from installed models
+    llm_cleanup_timeout_seconds: float = 10.0  # Max seconds to wait for local cleanup before falling back to raw text
+
     # Stats
     total_transcriptions: int = 0
     total_cost: float = 0.0
@@ -170,8 +200,10 @@ class Config:
 
     # Transcription history
     history_enabled: bool = False  # Store transcription history
-    history_max_items: int = 20  # Maximum number of history items to keep
-    history: List[dict] = field(default_factory=list)  # [{text, timestamp, provider, translated}]
+    history_max_items: int = 50  # Maximum number of history items to keep
+    history: List[dict] = field(
+        default_factory=list
+    )  # [{text, timestamp, provider, translated, source?, model?, duration_seconds?, mode?}]
 
     # Privacy settings
     private_mode: bool = False  # No transcription storage at all (overrides history_enabled)
@@ -272,30 +304,16 @@ class Config:
 
     def get_provider_model(self, provider: str) -> str:
         """Get the configured model for a provider."""
-        model_map = {
-            "openai": self.openai_model,
-            "openai_realtime": self.openai_realtime_model,
-            "gemini": self.gemini_model,
-            "apple": self.apple_model,
-            "whisper_local": self.whisper_local_model,
-            "parakeet": self.parakeet_model,
-        }
-        return model_map.get(provider, "")
+        field_name = _TRANSCRIPTION_MODEL_FIELDS.get(provider)
+        if field_name is None:
+            return ""
+        return getattr(self, field_name, "")
 
     def set_provider_model(self, provider: str, model: str) -> None:
         """Set the model for a provider."""
-        if provider == "openai":
-            self.openai_model = model
-        elif provider == "openai_realtime":
-            self.openai_realtime_model = model
-        elif provider == "gemini":
-            self.gemini_model = model
-        elif provider == "apple":
-            self.apple_model = model
-        elif provider == "whisper_local":
-            self.whisper_local_model = model
-        elif provider == "parakeet":
-            self.parakeet_model = model
+        field_name = _TRANSCRIPTION_MODEL_FIELDS.get(provider)
+        if field_name is not None:
+            setattr(self, field_name, model)
         self.save()
 
     def add_transcription_stats(self, cost: float) -> bool:
@@ -328,7 +346,18 @@ class Config:
         self.total_cost = original_total_cost
         return False
 
-    def add_to_history(self, text: str, provider: str = "", translated: bool = False, original_text: str = "") -> bool:
+    def add_to_history(
+        self,
+        text: str,
+        provider: str = "",
+        translated: bool = False,
+        original_text: str = "",
+        *,
+        source: str = "mic",
+        model: str = "",
+        duration_seconds: Optional[float] = None,
+        mode: str = "",
+    ) -> bool:
         """
         Add a transcription to history.
 
@@ -337,6 +366,14 @@ class Config:
             provider: The provider used for transcription
             translated: Whether the text was translated
             original_text: Original text before translation (if translated)
+            source: Where the audio came from ("mic" or "file"). Stored as a
+                non-sensitive tag (never encrypted).
+            model: The model id used, if known. Non-sensitive tag.
+            duration_seconds: Audio duration in seconds, if known. Non-sensitive tag.
+            mode: Dictation mode name that applied, if any. Non-sensitive tag.
+
+        These metadata kwargs are additive: older entries that lack them keep
+        working everywhere they are read (callers must use ``.get()``).
         """
         # Private mode: never store any transcription data
         if self.private_mode:
@@ -374,7 +411,17 @@ class Config:
             "provider": provider,
             "translated": translated,
             "encrypted": encrypted_ok,  # Mark if entry is encrypted
+            # Non-sensitive metadata tags (never encrypted). Always present on new
+            # entries so the viewer/search can rely on them; old entries fall back
+            # via .get() at read sites.
+            "source": source or "mic",
         }
+        if model:
+            entry["model"] = model
+        if duration_seconds is not None:
+            entry["duration_seconds"] = duration_seconds
+        if mode:
+            entry["mode"] = mode
         if translated and store_original:
             entry["original_text"] = store_original
 
@@ -425,6 +472,43 @@ class Config:
                 result.append(item)
 
         return result
+
+    def get_all_history(self) -> List[dict]:
+        """Return every history entry, decrypting any encrypted ones.
+
+        Convenience wrapper over :meth:`get_history` with no cap, used by the
+        history viewer and search so they see the full retained list. Returns an
+        empty list when history is disabled or empty.
+        """
+        return self.get_history(limit=len(self.history))
+
+    def set_history_max_items(self, count: int) -> bool:
+        """Set the maximum number of history items to retain.
+
+        Trims the stored history to the new cap immediately and persists. On a
+        failed save, both the cap and the (possibly trimmed) history roll back so
+        memory matches disk.
+        """
+        try:
+            new_count = int(count)
+        except (TypeError, ValueError):
+            return False
+        if new_count < 1:
+            return False
+
+        original_max = self.history_max_items
+        original_history = [item.copy() if isinstance(item, dict) else item for item in self.history]
+
+        self.history_max_items = new_count
+        if len(self.history) > new_count:
+            self.history = self.history[:new_count]
+
+        if self.save():
+            return True
+
+        self.history_max_items = original_max
+        self.history = original_history
+        return False
 
     def clear_history(self) -> bool:
         """Clear all history."""

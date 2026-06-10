@@ -293,6 +293,64 @@ class TestPaste:
 
         assert result is False
 
+    @patch("whisper_hud.paste.subprocess.run")
+    def test_send_keystroke_return_uses_key_code_36(self, mock_run):
+        """Return/Enter should emit System Events key code 36."""
+        from whisper_hud.paste import send_keystroke
+
+        mock_run.return_value = MagicMock(returncode=0, stderr=b"")
+
+        assert send_keystroke("return") is True
+        script = mock_run.call_args.args[0][2]
+        assert mock_run.call_args.args[0][0:2] == ["osascript", "-e"]
+        assert "key code 36" in script
+        assert 'tell application "System Events"' in script
+
+    @patch("whisper_hud.paste.subprocess.run")
+    def test_send_keystroke_enter_alias_maps_to_return(self, mock_run):
+        """'enter' is an alias for 'return' (key code 36)."""
+        from whisper_hud.paste import send_keystroke
+
+        mock_run.return_value = MagicMock(returncode=0, stderr=b"")
+
+        assert send_keystroke("enter") is True
+        assert "key code 36" in mock_run.call_args.args[0][2]
+
+    @patch("whisper_hud.paste.subprocess.run")
+    def test_send_keystroke_tab_uses_key_code_48(self, mock_run):
+        """Tab should emit System Events key code 48."""
+        from whisper_hud.paste import send_keystroke
+
+        mock_run.return_value = MagicMock(returncode=0, stderr=b"")
+
+        assert send_keystroke("Tab") is True  # case-insensitive
+        assert "key code 48" in mock_run.call_args.args[0][2]
+
+    @patch("whisper_hud.paste.subprocess.run")
+    def test_send_keystroke_unknown_key_returns_false_without_subprocess(self, mock_run):
+        """Unknown keys must not be interpolated into AppleScript at all."""
+        from whisper_hud.paste import send_keystroke
+
+        assert send_keystroke("rm -rf /") is False
+        assert send_keystroke("") is False
+        mock_run.assert_not_called()
+
+    @patch("whisper_hud.paste.subprocess.run")
+    def test_send_keystroke_returns_false_on_applescript_failure(self, mock_run):
+        """A non-zero osascript return should yield False."""
+        from whisper_hud.paste import send_keystroke
+
+        mock_run.return_value = MagicMock(returncode=1, stderr=b"denied")
+
+        assert send_keystroke("return") is False
+
+    @patch("whisper_hud.paste.subprocess.run", side_effect=RuntimeError("boom"))
+    def test_send_keystroke_fails_closed_on_exception(self, _mock_run):
+        """send_keystroke should never raise into the caller."""
+        from whisper_hud.paste import send_keystroke
+
+        assert send_keystroke("return") is False
+
     @patch("subprocess.run")
     def test_open_accessibility_settings_success(self, mock_run):
         """Opening accessibility settings should return True on success."""

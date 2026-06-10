@@ -24,16 +24,30 @@ from .logging_config import get_logger
 from .recorder import AudioRecorder
 from .transcribe import TranscriptionManager
 from .translate import TranslationManager
+from .providers import registry as provider_registry
 from .providers.base import LiveTranscriptionSession, TranscriptionResult
 from .hotkey import HotkeyCapturePanel, HotkeyListener, format_hotkey_display, string_to_key
 from .hud import create_hud
 from .paste import (
     insert_text,
+    send_keystroke,
+    get_frontmost_app,
     check_accessibility_permission,
     get_accessibility_error_message,
     open_accessibility_settings,
     escape_applescript_string,
 )
+from .cleanup import LocalCleanupEngine, DEFAULT_CLEANUP_PROMPT, merge_vocabulary
+from .file_transcription import (
+    ALLOWED_AUDIO_EXTENSIONS,
+    FileTranscriptionError,
+    format_duration,
+    transcribe_file,
+    validate_audio_file,
+)
+from .textproc.replacements import rules_from_config, apply_replacements
+from .textproc.voice_commands import match_command
+from .textproc.modes import BUILTIN_MODES, modes_from_config, resolve_mode
 from .paste_targets import PasteTargetManager, PasteTarget, TargetType
 from .config import Config
 from .keychain import (
@@ -95,6 +109,12 @@ class ActiveTranscriptionTurn:
     batch_fallback_started: bool = False
     result_processing_started: bool = False
     batch_thread: Optional[threading.Thread] = None
+    # Frontmost app captured AT RECORDING START so dictation-mode resolution and
+    # vocabulary biasing reflect where the user was when they spoke (not where
+    # focus happens to be at paste time). Bundle id is not cheaply available via
+    # the AppleScript helper, so it stays None and resolve_mode matches on name.
+    frontmost_app_name: Optional[str] = None
+    frontmost_bundle_id: Optional[str] = None
 
 
 class WhisperHUDApp(rumps.App):
@@ -143,11 +163,20 @@ class WhisperHUDApp(rumps.App):
         self.recorder = AudioRecorder(device=self.config.audio_input_device)
         self.transcriber = TranscriptionManager(self.config)
         self.translator = TranslationManager(self.config)
+
+        # Local-only LLM cleanup engine (talks to a loopback Ollama daemon).
+        # Constructed eagerly but does no network work until actually used.
+        self.cleanup_engine = LocalCleanupEngine()
         self.hud = create_hud()
         self.hud.set_enabled(self.config.show_hud)
 
         # Clean up any orphaned temp files from crashed sessions
         self._cleanup_orphaned_temp_files()
+
+        # Plaintext history-viewer exports awaiting secure deletion. Each open
+        # also arms a short timer; this list is the backstop swept on _quit so
+        # decrypted transcripts never outlive the process.
+        self._history_view_files: list = []
 
         # Streaming panel for live display
         self.streaming_panel = create_streaming_panel()
@@ -197,6 +226,15 @@ class WhisperHUDApp(rumps.App):
         self._translation_availability_last_checked = 0.0
         self._menu_rebuild_scheduled = False
 
+        # Dictation intelligence: cached local-cleanup availability (refreshed in
+        # the background so the menu never blocks on an Ollama probe) and a cached
+        # frontmost-app snapshot for the modes submenu's display-only checkmark.
+        self._cleanup_available: Optional[bool] = None
+        self._cleanup_availability_inflight = False
+        self._cleanup_availability_last_checked = 0.0
+        self._cached_frontmost_app: Optional[str] = None
+        self._cached_frontmost_app_checked = 0.0
+
         # Attach menu delegate to avoid rebuilding while menu is open
         self._attach_menu_delegate()
 
@@ -235,19 +273,22 @@ class WhisperHUDApp(rumps.App):
     @staticmethod
     def _is_cloud_transcription_provider(provider_id: str) -> bool:
         """Return True for transcription providers that require API keys."""
-        return provider_id in {"openai", "openai_realtime", "gemini"}
+        spec = provider_registry.specs_by_id("transcription").get(provider_id)
+        return spec is not None and spec.category == "cloud"
 
     @staticmethod
     def _transcription_credential_provider(provider_id: str) -> str:
         """Map providers to the API key they rely on."""
-        if provider_id == "openai_realtime":
-            return "openai"
+        spec = provider_registry.specs_by_id("transcription").get(provider_id)
+        if spec is not None and spec.credential_vendor is not None:
+            return spec.credential_vendor
         return provider_id
 
     @staticmethod
     def _is_cloud_translation_provider(provider_id: str) -> bool:
         """Return True for translation providers that require API keys."""
-        return provider_id in {"openai", "gemini", "anthropic"}
+        spec = provider_registry.specs_by_id("translation").get(provider_id)
+        return spec is not None and spec.category == "cloud"
 
     def _should_query_keychain(self) -> bool:
         """
@@ -645,6 +686,9 @@ class WhisperHUDApp(rumps.App):
         # === Providers & Keys ===
         providers_menu = rumps.MenuItem("Providers & Keys")
         providers_menu.add(rumps.MenuItem(f"Current: {provider_name}", callback=None))
+        # Primary one-off action: transcribe an existing audio/video file using the
+        # current provider. Lives here next to the transcription engine controls.
+        providers_menu.add(rumps.MenuItem("Transcribe Audio File…", callback=self._transcribe_audio_file))
         providers_menu.add(rumps.separator)
         providers_menu.add(rumps.MenuItem("── Providers ──", callback=None))
         providers = self.transcriber.get_available_providers(configured_providers=configured)
@@ -1619,6 +1663,11 @@ class WhisperHUDApp(rumps.App):
 
         self.menu.add(translation_menu)
 
+        self.menu.add(rumps.separator)
+
+        # === Dictation Intelligence ===
+        self._build_dictation_intelligence_menu()
+
         stats = self.transcriber.get_stats()
         history_menu = rumps.MenuItem("History & Stats")
         history_menu.add(
@@ -1665,6 +1714,25 @@ class WhisperHUDApp(rumps.App):
             history_menu.add(rumps.separator)
         else:
             history_menu.add(rumps.MenuItem("History (empty)", callback=None))
+
+        # View / Search the full history (read-only viewer file). Only useful when
+        # history is being saved and not in private mode.
+        if not self.config.private_mode and self.config.history_enabled:
+            history_menu.add(rumps.MenuItem("View History…", callback=self._view_history))
+            history_menu.add(rumps.MenuItem("Search History…", callback=self._search_history))
+            history_menu.add(rumps.separator)
+
+        # History size submenu (how many entries to retain).
+        size_menu = rumps.MenuItem("History Size")
+        for size_option in (20, 50, 100, 200):
+            prefix = "● " if self.config.history_max_items == size_option else "   "
+            size_menu.add(
+                rumps.MenuItem(
+                    f"{prefix}{size_option} entries",
+                    callback=lambda s, n=size_option: self._set_history_size(n),
+                )
+            )
+        history_menu.add(size_menu)
 
         history_menu.add(rumps.separator)
         if self.config.private_mode:
@@ -1773,6 +1841,99 @@ class WhisperHUDApp(rumps.App):
         # Update menu bar icon to reflect target lock status
         if not self._is_recording and not self._is_downloading:
             self._set_title(self._get_idle_icon())
+
+    def _build_dictation_intelligence_menu(self) -> None:
+        """Build the 'Dictation Intelligence' section.
+
+        Groups voice commands, dictation modes, local AI cleanup, and the
+        vocabulary/replacements editor. Availability probes are never run inline
+        (they would block the main thread while the menu is open); the cleanup
+        status reflects the last cached probe and a background refresh is kicked
+        off, mirroring how the translation menu handles availability.
+        """
+        di_menu = rumps.MenuItem("Dictation Intelligence")
+
+        # --- Voice commands -------------------------------------------------
+        di_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.voice_commands_enabled else '   '}Voice Commands",
+                callback=self._toggle_voice_commands,
+            )
+        )
+        di_menu.add(rumps.MenuItem('   e.g. "scratch that", "new line", "press enter"', callback=None))
+
+        di_menu.add(rumps.separator)
+
+        # --- Dictation modes ------------------------------------------------
+        di_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.dictation_modes_enabled else '   '}Dictation Modes",
+                callback=self._toggle_dictation_modes,
+            )
+        )
+        if self.config.dictation_modes_enabled:
+            modes_submenu = rumps.MenuItem("   Built-in Modes")
+            # Display-only: mark whichever mode would match the frontmost app now.
+            # This is informational; resolution at record time uses the captured
+            # app. Use a cached snapshot to avoid a subprocess on every rebuild.
+            current_app = self._cached_frontmost_app_name()
+            active = resolve_mode(current_app, None, self._active_modes()) if current_app else None
+            active_id = active.id if active else None
+            for mode in BUILTIN_MODES:
+                mark = "● " if mode.id == active_id else "   "
+                auto = " (auto-send)" if mode.auto_send else ""
+                modes_submenu.add(rumps.MenuItem(f"{mark}{mode.name}{auto}", callback=None))
+            user_mode_count = len(modes_from_config(self.config.dictation_modes))
+            if user_mode_count:
+                modes_submenu.add(rumps.separator)
+                modes_submenu.add(rumps.MenuItem(f"+ {user_mode_count} custom mode(s)", callback=None))
+            if current_app:
+                modes_submenu.add(rumps.separator)
+                modes_submenu.add(rumps.MenuItem(f"Frontmost: {current_app}", callback=None))
+            di_menu.add(modes_submenu)
+
+        di_menu.add(rumps.separator)
+
+        # --- Local AI cleanup ----------------------------------------------
+        di_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.llm_cleanup_enabled else '   '}AI Cleanup (Local)",
+                callback=self._toggle_llm_cleanup,
+            )
+        )
+        if self.config.llm_cleanup_enabled:
+            available = self._cleanup_available  # cached; may be None until first probe
+            self._refresh_cleanup_availability_async()
+            if available is None:
+                status = "   Ollama: checking…"
+            elif available:
+                model = self.config.llm_cleanup_model or "auto"
+                status = f"   Ollama: ready • {model}"
+            else:
+                status = "   Ollama: not reachable (start ollama serve)"
+            di_menu.add(rumps.MenuItem(status, callback=None))
+            di_menu.add(rumps.MenuItem("   Check Cleanup Status…", callback=self._check_cleanup_status))
+        else:
+            di_menu.add(rumps.MenuItem("   Local-only • never sent to the cloud", callback=None))
+
+        di_menu.add(rumps.separator)
+
+        # --- Vocabulary & replacements -------------------------------------
+        vocab_menu = rumps.MenuItem("Vocabulary & Replacements")
+        vocab_count = len([v for v in self.config.custom_vocabulary if isinstance(v, str) and v.strip()])
+        repl_count = len(self.config.text_replacements) if isinstance(self.config.text_replacements, list) else 0
+        cmd_count = len(self.config.custom_voice_commands) if isinstance(self.config.custom_voice_commands, list) else 0
+        mode_count = len(self.config.dictation_modes) if isinstance(self.config.dictation_modes, list) else 0
+        vocab_menu.add(rumps.MenuItem(f"Vocabulary words: {vocab_count}", callback=None))
+        vocab_menu.add(rumps.MenuItem(f"Replacement rules: {repl_count}", callback=None))
+        vocab_menu.add(rumps.MenuItem(f"Custom commands: {cmd_count}", callback=None))
+        vocab_menu.add(rumps.MenuItem(f"Custom modes: {mode_count}", callback=None))
+        vocab_menu.add(rumps.separator)
+        vocab_menu.add(rumps.MenuItem("Edit in editor…", callback=self._edit_dictation_config))
+        vocab_menu.add(rumps.MenuItem("Reload from file", callback=self._reload_dictation_config))
+        di_menu.add(vocab_menu)
+
+        self.menu.add(di_menu)
 
     def _schedule_menu_rebuild(self, delay: float = 0.5) -> None:
         """Rebuild menu after a short delay to avoid blocking menu callbacks."""
@@ -2259,6 +2420,162 @@ class WhisperHUDApp(rumps.App):
             return "openai"
         return provider_id
 
+    # --- Dictation intelligence helpers --------------------------------------
+
+    def _capture_frontmost_app(self, turn: ActiveTranscriptionTurn) -> None:
+        """Record the frontmost app on the turn if a feature will consume it.
+
+        Called at recording start. Skips the AppleScript subprocess entirely
+        unless dictation modes are enabled (the only consumer that needs the
+        focused-app identity); custom vocabulary alone does not require it.
+        """
+        if not self.config.dictation_modes_enabled:
+            return
+        try:
+            turn.frontmost_app_name = get_frontmost_app()
+        except Exception:
+            logger.debug("Could not capture frontmost app at recording start", exc_info=True)
+            turn.frontmost_app_name = None
+
+    def _active_modes(self) -> list:
+        """Return the ordered mode list (user modes first, then builtins).
+
+        Returns an empty list when dictation modes are disabled. User-defined
+        modes take precedence over builtins, matching ``resolve_mode`` semantics.
+        """
+        if not self.config.dictation_modes_enabled:
+            return []
+        user_modes = modes_from_config(self.config.dictation_modes)
+        return user_modes + BUILTIN_MODES
+
+    def _resolve_active_mode(self, turn: Optional[ActiveTranscriptionTurn]):
+        """Resolve the dictation mode for the turn's captured frontmost app.
+
+        Returns ``None`` when modes are disabled or nothing matches.
+        """
+        modes = self._active_modes()
+        if not modes:
+            return None
+        app_name = turn.frontmost_app_name if turn else None
+        bundle_id = turn.frontmost_bundle_id if turn else None
+        return resolve_mode(app_name, bundle_id, modes)
+
+    def _resolve_vocabulary(self, turn: Optional[ActiveTranscriptionTurn]) -> list:
+        """Build the biasing vocabulary for a turn.
+
+        Combines the global ``custom_vocabulary`` with the active mode's
+        vocabulary (when modes are enabled and one matches the captured frontmost
+        app), de-duplicated and capped at 200 entries. Never raises.
+        """
+        try:
+            mode = self._resolve_active_mode(turn)
+            mode_vocab = mode.vocabulary if mode else None
+            return merge_vocabulary(self.config.custom_vocabulary, mode_vocab, cap=200)
+        except Exception:
+            logger.debug("Vocabulary resolution failed", exc_info=True)
+            return []
+
+    def _apply_text_replacements(self, text: str) -> str:
+        """Apply the configured personal-dictionary replacements to ``text``.
+
+        Defensive: a malformed replacement config never breaks the paste path;
+        on any error the input text is returned unchanged.
+        """
+        if not text or not self.config.text_replacements:
+            return text
+        try:
+            rules = rules_from_config(self.config.text_replacements)
+            return apply_replacements(text, rules)
+        except Exception:
+            logger.debug("Text replacement failed; using unmodified text", exc_info=True)
+            return text
+
+    def _run_llm_cleanup(self, text: str, mode) -> str:
+        """Run local LLM cleanup on ``text`` when enabled, returning the result.
+
+        Uses the active mode's ``llm_prompt`` when present, otherwise a default
+        "fix formatting only" prompt. The engine enforces the anti-paraphrase
+        guardrail internally and returns ``None`` on any failure, in which case
+        the original text is used. Shows a 'Polishing…' HUD state while running,
+        mirroring how the translation step surfaces progress. Never raises.
+        """
+        if not self.config.llm_cleanup_enabled or not text or not text.strip():
+            return text
+
+        prompt = (mode.llm_prompt if mode and mode.llm_prompt else "") or DEFAULT_CLEANUP_PROMPT
+
+        try:
+            model = self.cleanup_engine.pick_model(self.config.llm_cleanup_model)
+            if not model:
+                logger.debug("LLM cleanup skipped: no local model available")
+                return text
+
+            if self.config.show_hud:
+                self.hud.show_processing("Polishing…")
+
+            cleaned = self.cleanup_engine.cleanup(
+                text,
+                prompt=prompt,
+                model=model,
+                timeout=self.config.llm_cleanup_timeout_seconds,
+            )
+        except Exception:
+            logger.debug("LLM cleanup raised unexpectedly; using original text", exc_info=True)
+            return text
+
+        # cleanup() returns None on failure (fall back to raw) or the guarded
+        # result (which may itself be the original when the guardrail rejected it).
+        return cleaned if cleaned is not None else text
+
+    def _handle_voice_command(self, turn_id: int, raw_text: str) -> Optional[str]:
+        """Check the RAW transcript for a voice command and act on it.
+
+        Returns one of:
+          * ``"discard"`` -- the utterance was a discard command; the caller must
+            skip history/paste entirely (HUD shows 'Discarded').
+          * ``"handled"`` -- a keystroke command fired and was performed; the
+            caller must skip paste (and downstream text processing).
+          * a string -- the replacement text for an ``insert`` command; the caller
+            should treat this as the final text and skip replacements/cleanup.
+          * ``None`` -- no command matched; continue the normal pipeline.
+
+        Never raises; on error it returns ``None`` so dictation still pastes.
+        """
+        if not self.config.voice_commands_enabled or not raw_text or not raw_text.strip():
+            return None
+
+        try:
+            match = match_command(raw_text, custom_commands=self.config.custom_voice_commands)
+        except Exception:
+            logger.debug("Voice-command matching failed; ignoring", exc_info=True)
+            return None
+
+        if match is None:
+            return None
+
+        if match.action == "discard":
+            logger.debug("Voice command '%s' -> discard", match.command_id)
+            self._set_title(self.ICON_SUCCESS)
+            if self.config.show_hud:
+                self.hud.show_success("Discarded")
+            if self.widget:
+                self.widget.set_success()
+            return "discard"
+
+        if match.action == "keystroke":
+            logger.debug("Voice command '%s' -> keystroke", match.command_id)
+            send_keystroke(match.payload)
+            self._set_title(self.ICON_SUCCESS)
+            if self.config.show_hud:
+                self.hud.show_success("Done!")
+            if self.widget:
+                self.widget.set_success()
+            return "handled"
+
+        # insert: the payload text becomes the final text (skip replacements/cleanup).
+        logger.debug("Voice command '%s' -> insert", match.command_id)
+        return match.payload
+
     def _start_live_connect_timer(self, turn_id: int) -> threading.Timer:
         """Downgrade to batch if the live provider never becomes ready."""
 
@@ -2366,6 +2683,7 @@ class WhisperHUDApp(rumps.App):
         audio_bytes = turn.audio_bytes
         provider_id = self._get_batch_provider_id(turn.provider_id)
         use_streaming = self.config.streaming_enabled
+        vocabulary = self._resolve_vocabulary(turn) or None
 
         def do_transcribe():
             try:
@@ -2375,9 +2693,10 @@ class WhisperHUDApp(rumps.App):
                         audio_bytes,
                         on_chunk=self.streaming_panel.update_transcription,
                         provider_id=provider_id,
+                        vocabulary=vocabulary,
                     )
                 else:
-                    result = self.transcriber.transcribe(audio_bytes, provider_id=provider_id)
+                    result = self.transcriber.transcribe(audio_bytes, provider_id=provider_id, vocabulary=vocabulary)
 
                 self._process_turn_result(
                     turn_id,
@@ -2421,10 +2740,48 @@ class WhisperHUDApp(rumps.App):
                 has_transcription = bool(result.text and result.text.strip())
 
                 if has_transcription:
-                    final_text = result.text
+                    # === Dictation intelligence pipeline ===
+                    # (a) Voice command on the RAW transcript (highest priority).
+                    command_result = self._handle_voice_command(turn_id, result.text)
+                    if command_result == "discard":
+                        # Throw the whole utterance away: no history, no paste.
+                        # HUD feedback already shown by the handler.
+                        if use_streaming:
+                            self.streaming_panel.hide()
+                        self._finish_turn_cleanup(turn_id)
+                        return
+                    if command_result == "handled":
+                        # A keystroke command fired; nothing to paste or store.
+                        if use_streaming:
+                            self.streaming_panel.show_complete()
+                        if self.config.play_sound:
+                            self._play_completion_sound()
+                        self._finish_turn_cleanup(turn_id)
+                        return
+
+                    active_mode = None
+                    if command_result is not None:
+                        # 'insert' command: payload is the final text verbatim;
+                        # skip replacements and cleanup (it is not dictation).
+                        processed_text = command_result
+                    else:
+                        # (b) Personal-dictionary replacements.
+                        processed_text = self._apply_text_replacements(result.text)
+                        # (c) Resolve the active mode for the captured frontmost
+                        #     app, then (d) local LLM cleanup (guarded) using its
+                        #     prompt (or a default formatting-only prompt). The
+                        #     resolved mode is reused for auto-send below.
+                        active_mode = self._resolve_active_mode(turn)
+                        processed_text = self._run_llm_cleanup(processed_text, active_mode)
+
+                    final_text = processed_text
                     did_translate = False
 
-                    if self.config.translation_enabled:
+                    # Gate translation on ``command_result is None``: an 'insert'
+                    # voice-command payload (e.g. "new line" -> "\n") is literal
+                    # text the user asked to insert verbatim and must never be
+                    # shipped to the (often cloud BYOK) translation provider.
+                    if command_result is None and self.config.translation_enabled:
                         try:
                             if self.config.show_hud:
                                 self.hud.show_processing("Translating...")
@@ -2440,14 +2797,16 @@ class WhisperHUDApp(rumps.App):
 
                             if use_translation_streaming:
                                 translation = self.translator.translate_streaming(
-                                    text=result.text,
+                                    text=processed_text,
                                     on_chunk=self.streaming_panel.update_translation,
                                     source_lang=source_lang,
                                     target_lang=self.config.target_language,
                                 )
                             else:
                                 translation = self.translator.translate(
-                                    text=result.text, source_lang=source_lang, target_lang=self.config.target_language
+                                    text=processed_text,
+                                    source_lang=source_lang,
+                                    target_lang=self.config.target_language,
                                 )
                                 if use_streaming:
                                     self.streaming_panel.update_translation(translation.text)
@@ -2464,7 +2823,7 @@ class WhisperHUDApp(rumps.App):
 
                         except Exception as e:
                             logger.warning("Translation failed (%s)", type(e).__name__)
-                            final_text = result.text
+                            final_text = processed_text
                             self._notify(
                                 "WhisperHUD",
                                 "Translation Failed",
@@ -2480,6 +2839,9 @@ class WhisperHUDApp(rumps.App):
 
                     self._play_completion_sound()
 
+                    if self.widget:
+                        self.widget.set_success()
+
                     if use_streaming:
                         self.streaming_panel.show_complete()
 
@@ -2490,13 +2852,23 @@ class WhisperHUDApp(rumps.App):
                         original_text=result.text if did_translate else "",
                     )
 
+                    paste_ok = False
                     if self.config.auto_paste:
                         time.sleep(0.1)
-                        self._paste_to_target(final_text)
+                        paste_ok = self._paste_to_target(final_text)
+
+                    # (g) Mode auto-send: press Return after a successful paste so
+                    #     e.g. a chat message is sent. Only fires when a mode
+                    #     matched and opted in, and only after paste succeeds.
+                    if paste_ok and active_mode and active_mode.auto_send:
+                        logger.debug("Mode '%s' auto_send: sending Return", active_mode.id)
+                        send_keystroke("return")
                 else:
                     self._set_title(self.ICON_ERROR)
                     if self.config.show_hud:
                         self.hud.show_error("No speech detected")
+                    if self.widget:
+                        self.widget.set_error()
                     if use_streaming:
                         self.streaming_panel.hide()
             except Exception as e:
@@ -2572,6 +2944,8 @@ class WhisperHUDApp(rumps.App):
 
         if self.config.show_hud:
             self.hud.show_error(display_error)
+        if self.widget:
+            self.widget.set_error()
         if use_streaming:
             self.streaming_panel.hide()
 
@@ -2625,6 +2999,12 @@ class WhisperHUDApp(rumps.App):
                 )
                 self._active_turn = turn
 
+            # Capture the frontmost app NOW (at recording start) so dictation
+            # mode resolution and per-mode vocabulary reflect where the user was
+            # speaking, not where focus lands at paste time. Only pay the
+            # subprocess cost when a feature actually consumes it.
+            self._capture_frontmost_app(turn)
+
             self._set_title(self.ICON_RECORDING)
 
             if self.config.show_hud:
@@ -2643,6 +3023,7 @@ class WhisperHUDApp(rumps.App):
                         on_error=lambda error, tid=turn.turn_id: self._on_live_session_error(tid, error),
                         on_ready=lambda tid=turn.turn_id: self._on_live_session_ready(tid),
                         language=self._selected_live_language(),
+                        vocabulary=self._resolve_vocabulary(turn) or None,
                     )
 
                     def live_audio_chunk_handler(chunk, rate, tid=turn.turn_id):
@@ -2786,6 +3167,170 @@ class WhisperHUDApp(rumps.App):
     def _stop_recording(self):
         """Called when hotkey is released."""
         self._request_stop("manual_release")
+
+    # === File transcription ("Transcribe Audio File…") =======================
+
+    def _pick_audio_file(self) -> Optional[str]:
+        """Show the native open panel for an audio/video file.
+
+        Mirrors the import/export dialogs (NSOpenPanel) already used in the app
+        and restricts selection to the supported extensions. Returns the chosen
+        path or None if cancelled/unavailable.
+        """
+        try:
+            from AppKit import NSOpenPanel
+
+            panel = NSOpenPanel.openPanel()
+            panel.setTitle_("Choose Audio or Video File to Transcribe")
+            panel.setAllowedFileTypes_(list(ALLOWED_AUDIO_EXTENSIONS))
+            panel.setCanChooseFiles_(True)
+            panel.setCanChooseDirectories_(False)
+            panel.setAllowsMultipleSelection_(False)
+
+            if panel.runModal() == 1:  # OK
+                return str(panel.URL().path())
+        except Exception as e:
+            logger.error(f"Audio file picker error: {e}")
+            rumps.alert(title="File Picker Unavailable", message="Could not open the file picker.")
+        return None
+
+    def _transcribe_audio_file(self, sender):
+        """Menu action: pick an audio/video file and transcribe it locally.
+
+        File transcriptions reuse the same provider + custom vocabulary as the
+        mic pipeline and apply personal-dictionary replacements, but deliberately
+        SKIP voice commands, LLM cleanup, paste, and auto-send (a file is not a
+        live dictation). The result is copied to the clipboard and added to
+        history (respecting private mode / history enabled).
+        """
+        # Ensure cloud credentials are unlocked when the active provider needs them,
+        # matching the start-of-recording behavior.
+        if not self._ensure_cloud_credentials_ready(allow_create=False):
+            self._notify(
+                "WhisperHUD",
+                "Cloud Keys Locked",
+                "Unlock passphrase storage to use cloud providers, or switch to Apple local.",
+            )
+            return
+
+        path = self._pick_audio_file()
+        if not path:
+            return
+
+        ok, message = validate_audio_file(path)
+        if not ok:
+            if self.config.show_hud:
+                self.hud.show_error("Unsupported file")
+            self._notify("WhisperHUD", "Cannot Transcribe File", message)
+            return
+
+        # Unlock history encryption session up front (best-effort) so the result
+        # can be stored, mirroring _start_recording.
+        if self.config.history_encrypted:
+            self._ensure_history_encryption_session(create_if_missing=False, prompt_unlock=False)
+
+        self._set_title(self.ICON_PROCESSING)
+        if self.config.show_hud:
+            self.hud.show_processing("Transcribing file…")
+
+        provider_id = self.config.default_provider
+        vocabulary = self._resolve_vocabulary(None) or None
+
+        def worker():
+            from pathlib import Path
+            from .encryption import create_private_temp_file, secure_delete
+            import subprocess
+
+            def run_command(argv):
+                return subprocess.run(argv, capture_output=True, text=True, timeout=600)
+
+            def do_transcribe(wav_bytes):
+                return self.transcriber.transcribe(wav_bytes, provider_id=provider_id, vocabulary=vocabulary)
+
+            try:
+                outcome = transcribe_file(
+                    path,
+                    transcribe=do_transcribe,
+                    run_command=run_command,
+                    create_temp_file=lambda data: create_private_temp_file(data, prefix="whisper_hud_file_"),
+                    secure_delete=secure_delete,
+                    read_bytes=lambda p: Path(p).read_bytes(),
+                    apply_replacements=self._apply_text_replacements,
+                    vocabulary=vocabulary,
+                )
+            except FileTranscriptionError as e:
+                self._handle_file_transcription_error(str(e))
+                return
+            except Exception as e:
+                logger.error("Unexpected file transcription failure: %s", type(e).__name__)
+                self._handle_file_transcription_error("Transcription failed for that file.")
+                return
+
+            self._finish_file_transcription(outcome)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_file_transcription(self, outcome: dict) -> None:
+        """Handle a successful file transcription: clipboard, history, HUD."""
+        text = outcome.get("text", "") or ""
+        if not text.strip():
+            self._set_title(self.ICON_ERROR)
+            if self.config.show_hud:
+                self.hud.show_error("No speech detected")
+            self._notify("WhisperHUD", "Nothing to Transcribe", "No speech was detected in that file.")
+            self._reset_title_after_delay()
+            return
+
+        # Copy to clipboard using the same helper the history copy path uses.
+        try:
+            import pyperclip
+
+            pyperclip.copy(text)
+        except Exception as e:
+            logger.debug(f"Clipboard copy failed for file transcription: {e}")
+
+        # Store in history (respects private_mode / history_enabled internally).
+        self.config.add_to_history(
+            text=text,
+            provider=outcome.get("provider", ""),
+            translated=False,
+            source="file",
+            model=outcome.get("model", ""),
+            duration_seconds=outcome.get("duration_seconds"),
+        )
+
+        char_count = outcome.get("char_count", len(text))
+        duration_label = format_duration(outcome.get("duration_seconds"))
+        suffix = f" • {duration_label}" if duration_label else ""
+        self._set_title(self.ICON_SUCCESS)
+        if self.config.show_hud:
+            self.hud.show_success(f"Copied {char_count} chars{suffix}")
+        self._notify(
+            "WhisperHUD",
+            "File Transcribed",
+            f"{char_count} characters copied to the clipboard{suffix}.",
+        )
+        self._play_completion_sound()
+        self._reset_title_after_delay()
+        self._schedule_menu_rebuild()
+
+    def _handle_file_transcription_error(self, message: str) -> None:
+        """Surface a file-transcription error via HUD + notification."""
+        self._set_title(self.ICON_ERROR)
+        if self.config.show_hud:
+            self.hud.show_error("File transcription failed")
+        self._notify("WhisperHUD", "File Transcription Failed", message)
+        self._reset_title_after_delay()
+
+    def _reset_title_after_delay(self, delay: float = 1.5) -> None:
+        """Return the menu bar icon to idle after a short delay (off main thread)."""
+
+        def _reset():
+            time.sleep(delay)
+            if not self._is_recording and not self._is_downloading:
+                self._set_title(self._get_idle_icon())
+
+        threading.Thread(target=_reset, daemon=True).start()
 
     def _show_apple_setup_help(self):
         """Show setup help for Apple Speech Recognition."""
@@ -3850,6 +4395,227 @@ class WhisperHUDApp(rumps.App):
             self._schedule_menu_rebuild()
             self._notify("WhisperHUD", "History Cleared", "All transcription history has been cleared.")
 
+    def _set_history_size(self, count: int):
+        """Change how many history entries are retained."""
+        if self.config.history_max_items == count:
+            return
+        if not self.config.set_history_max_items(count):
+            rumps.alert(
+                title="History Size Update Failed",
+                message="WhisperHUD could not persist the new history size.",
+            )
+            return
+        self._schedule_menu_rebuild()
+        self._notify("WhisperHUD", "History Size Updated", f"Keeping up to {count} entries.")
+
+    @staticmethod
+    def _render_history_entries(entries: list, *, header: str = "") -> str:
+        """Render decrypted history entries to a read-only text document.
+
+        Pure formatting (no I/O) so it is easy to test. Each entry shows its
+        timestamp, source/provider/model/mode tags, translation marker, and the
+        full text. Missing tags on older entries are tolerated via ``.get()``.
+        """
+        import datetime
+
+        lines: list[str] = []
+        lines.append("WhisperHUD — Transcription History")
+        if header:
+            lines.append(header)
+        lines.append(f"{len(entries)} entr{'y' if len(entries) == 1 else 'ies'}")
+        lines.append("=" * 60)
+        lines.append("")
+
+        if not entries:
+            lines.append("(no entries)")
+            return "\n".join(lines) + "\n"
+
+        for idx, item in enumerate(entries, start=1):
+            ts = item.get("timestamp", 0)
+            try:
+                when = datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                when = "unknown time"
+
+            tags = []
+            source = item.get("source")
+            if source:
+                tags.append(f"source: {source}")
+            provider = item.get("provider")
+            if provider:
+                tags.append(f"provider: {provider}")
+            model = item.get("model")
+            if model:
+                tags.append(f"model: {model}")
+            mode = item.get("mode")
+            if mode:
+                tags.append(f"mode: {mode}")
+            duration = item.get("duration_seconds")
+            if duration is not None:
+                tags.append(f"duration: {format_duration(duration)}")
+            if item.get("translated"):
+                tags.append("translated")
+
+            tag_str = "  •  ".join(tags)
+            lines.append(f"[{idx}] {when}" + (f"  ({tag_str})" if tag_str else ""))
+            if item.get("translated") and item.get("original_text"):
+                lines.append(f"    original: {item.get('original_text')}")
+            lines.append(item.get("text", ""))
+            lines.append("-" * 60)
+            lines.append("")
+
+        return "\n".join(lines) + "\n"
+
+    def _write_history_view_file(self, content: str):
+        """Write ``content`` to a private 0600 file in the scratch dir.
+
+        Returns the path on success or None on failure. Mirrors the dictation
+        "Edit in editor…" write pattern (atomic temp + chmod 0600).
+        """
+        import tempfile
+        from .encryption import get_private_scratch_dir
+
+        try:
+            scratch_dir = get_private_scratch_dir()
+            fd, tmp_path = tempfile.mkstemp(prefix="whisper_hud_history_", suffix=".txt", dir=str(scratch_dir))
+            try:
+                os.fchmod(fd, 0o600)
+            except Exception:
+                pass
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            try:
+                os.chmod(tmp_path, 0o600)
+            except Exception:
+                pass
+            return tmp_path
+        except Exception as e:
+            logger.error(f"Failed to write history view file: {e}")
+            return None
+
+    # Seconds to leave a history-viewer export on disk before securely deleting
+    # it. ``open`` returns before the editor has finished reading the file, so a
+    # short grace window lets the editor load it; after that the plaintext copy
+    # is shredded. Any export still present at quit is swept by ``_quit``.
+    _HISTORY_VIEW_TTL_SECONDS = 60.0
+
+    def _open_history_view(self, entries: list, header: str = "") -> None:
+        """Render ``entries`` to a 0600 file and open it in the default editor.
+
+        The export contains DECRYPTED transcripts, so it is only allowed to live
+        on disk briefly: the path is registered for the quit-time sweep and a
+        daemon timer securely deletes it after ``_HISTORY_VIEW_TTL_SECONDS`` (the
+        editor needs a moment to read the file because ``open`` returns before
+        the editor finishes loading it). Whichever fires first wins; the other
+        becomes a harmless no-op.
+        """
+        content = self._render_history_entries(entries, header=header)
+        path = self._write_history_view_file(content)
+        if not path:
+            rumps.alert(
+                title="Could Not Open History",
+                message="WhisperHUD could not create the history view file.",
+            )
+            return
+
+        # Register for the quit-time backstop sweep before opening, so the
+        # plaintext copy is tracked even if the open call or timer setup fails.
+        try:
+            self._history_view_files.append(path)
+        except AttributeError:
+            self._history_view_files = [path]
+
+        try:
+            import subprocess
+
+            subprocess.run(["open", str(path)], capture_output=True, timeout=5)
+        except Exception as e:
+            logger.error(f"Failed to open history view: {e}")
+            rumps.alert(title="Could Not Open History", message=f"The history was written to:\n{path}")
+
+        # Arm a daemon timer to shred the plaintext export after the grace window.
+        try:
+            timer = threading.Timer(self._HISTORY_VIEW_TTL_SECONDS, self._delete_history_view_file, args=(path,))
+            timer.daemon = True
+            timer.start()
+        except Exception as e:
+            logger.debug(f"Failed to schedule history view cleanup: {e}")
+
+    def _delete_history_view_file(self, path) -> None:
+        """Securely delete a tracked history-viewer export and forget it.
+
+        Safe to call more than once for the same path (timer + quit sweep both
+        target it). Never logs file content.
+        """
+        try:
+            from .encryption import secure_delete
+
+            secure_delete(str(path))
+        except Exception as e:
+            logger.debug(f"Failed to delete history view file: {e}")
+        try:
+            self._history_view_files.remove(path)
+        except (AttributeError, ValueError):
+            pass
+
+    def _history_view_guard(self) -> bool:
+        """Return True if the history viewer can run; otherwise show a HUD/notice.
+
+        Blocks when private mode is on, history saving is off, or there are no
+        entries — surfacing an informative message instead of an empty file.
+        """
+        if self.config.private_mode:
+            self._notify("WhisperHUD", "Private Mode", "History is not saved while Private Mode is on.")
+            return False
+        if not self.config.history_enabled:
+            self._notify("WhisperHUD", "History Disabled", "Turn on 'Save transcription history' first.")
+            return False
+        if not self.config.history:
+            self._notify("WhisperHUD", "History Empty", "There are no saved transcriptions yet.")
+            return False
+        # Make sure encrypted entries can be decrypted for the view.
+        if self.config.history_encrypted:
+            self._ensure_history_encryption_session(create_if_missing=False, prompt_unlock=True)
+        return True
+
+    def _view_history(self, sender):
+        """Open a read-only rendering of the full transcription history."""
+        if not self._history_view_guard():
+            return
+        entries = self.config.get_all_history()
+        self._open_history_view(entries)
+
+    def _search_history(self, sender):
+        """Prompt for a query and open matching history entries in the viewer.
+
+        Case-insensitive substring match over text, provider, and source.
+        """
+        if not self._history_view_guard():
+            return
+
+        query = self._applescript_input_dialog(
+            "Search History",
+            "Enter text to search for in your transcription history.",
+            default="",
+        )
+        if query is None or not query.strip():
+            return
+        needle = query.strip().lower()
+
+        matches = []
+        for item in self.config.get_all_history():
+            haystack = " ".join(str(item.get(field, "")) for field in ("text", "provider", "source")).lower()
+            if needle in haystack:
+                matches.append(item)
+
+        if not matches:
+            self._notify("WhisperHUD", "No Matches", f"No history entries matched '{query.strip()}'.")
+            return
+
+        count = len(matches)
+        header = f"{count} match{'es' if count != 1 else ''} for '{query.strip()}'"
+        self._open_history_view(matches, header=header)
+
     def _reset_statistics(self, sender):
         """Reset transcription statistics."""
         stats = self.transcriber.get_stats()
@@ -4180,6 +4946,253 @@ class WhisperHUDApp(rumps.App):
         self.config.save()
         self._schedule_menu_rebuild()
 
+    # === Dictation Intelligence callbacks ===================================
+
+    def _toggle_voice_commands(self, sender):
+        """Toggle deterministic voice-command recognition."""
+        self.config.voice_commands_enabled = not self.config.voice_commands_enabled
+        self.config.save()
+        self._schedule_menu_rebuild()
+
+    def _toggle_dictation_modes(self, sender):
+        """Toggle per-app dictation modes."""
+        self.config.dictation_modes_enabled = not self.config.dictation_modes_enabled
+        self.config.save()
+        self._schedule_menu_rebuild()
+
+    def _toggle_llm_cleanup(self, sender):
+        """Toggle local LLM cleanup of transcripts (Ollama, local-only)."""
+        self.config.llm_cleanup_enabled = not self.config.llm_cleanup_enabled
+        self.config.save()
+        # Force a fresh availability probe next render so the status line is current.
+        self._cleanup_availability_last_checked = 0.0
+        self._schedule_menu_rebuild()
+
+    def _cached_frontmost_app_name(self) -> Optional[str]:
+        """Return a short-lived cached frontmost-app name for menu display.
+
+        Re-queries at most every few seconds so opening the menu does not spawn
+        an AppleScript subprocess each rebuild. Display-only; never raises.
+        """
+        now = time.time()
+        if now - self._cached_frontmost_app_checked > 3.0:
+            self._cached_frontmost_app_checked = now
+            try:
+                self._cached_frontmost_app = get_frontmost_app()
+            except Exception:
+                self._cached_frontmost_app = None
+        return self._cached_frontmost_app
+
+    def _refresh_cleanup_availability_async(self) -> None:
+        """Probe local cleanup availability off the main thread (throttled).
+
+        Updates ``self._cleanup_available`` in the background so the next menu
+        render shows a current status without ever blocking the UI on a network
+        probe. Mirrors the translation-availability pattern.
+        """
+        if self._cleanup_availability_inflight:
+            return
+        now = time.time()
+        if now - self._cleanup_availability_last_checked < 10.0:
+            return
+        self._cleanup_availability_inflight = True
+        self._cleanup_availability_last_checked = now
+
+        def _probe():
+            try:
+                available = self.cleanup_engine.is_available()
+            except Exception:
+                available = False
+
+            def _apply():
+                self._cleanup_available = available
+                self._cleanup_availability_inflight = False
+
+            try:
+                from PyObjCTools import AppHelper
+
+                AppHelper.callAfter(_apply)
+            except Exception:
+                _apply()
+
+        threading.Thread(target=_probe, daemon=True).start()
+
+    def _check_cleanup_status(self, sender):
+        """Probe Ollama now (user clicked) and report cleanup readiness."""
+
+        def _probe():
+            try:
+                available = self.cleanup_engine.is_available()
+                model = self.cleanup_engine.pick_model(self.config.llm_cleanup_model) if available else None
+            except Exception:
+                available = False
+                model = None
+
+            def _report():
+                self._cleanup_available = available
+                if not available:
+                    rumps.alert(
+                        title="Local AI Cleanup",
+                        message=(
+                            "No local Ollama server is reachable on 127.0.0.1:11434.\n\n"
+                            "Start it with: ollama serve\n"
+                            "Then pull a small model, e.g.: ollama pull qwen3:1.7b"
+                        ),
+                    )
+                elif model:
+                    rumps.alert(
+                        title="Local AI Cleanup Ready",
+                        message=(
+                            f"Ollama is reachable and will use model: {model}\n\n"
+                            "Transcripts are processed locally and never sent to the cloud."
+                        ),
+                    )
+                else:
+                    rumps.alert(
+                        title="Local AI Cleanup",
+                        message=(
+                            "Ollama is running but no suitable model is installed.\n\n"
+                            "Pull one, e.g.: ollama pull qwen3:1.7b"
+                        ),
+                    )
+                self._schedule_menu_rebuild()
+
+            try:
+                from PyObjCTools import AppHelper
+
+                AppHelper.callAfter(_report)
+            except Exception:
+                _report()
+
+        threading.Thread(target=_probe, daemon=True).start()
+
+    def _dictation_config_path(self):
+        """Return the path to the user-editable dictation-intelligence JSON file."""
+        from .config import CONFIG_DIR
+
+        return CONFIG_DIR / "dictation.json"
+
+    def _write_dictation_template(self, path) -> bool:
+        """Write a commented JSON template to ``path`` (atomic, 0600). Never raises.
+
+        The template documents the editable lists (vocabulary, replacements,
+        voice commands, modes). Returns True on success.
+        """
+        import json
+        import tempfile
+        from .config import CONFIG_DIR
+
+        # Snapshot current config values so the user edits real data, not blanks.
+        template = {
+            "_README": [
+                "WhisperHUD dictation intelligence. Edit the lists below, save, then",
+                "use 'Reload from file' in the Dictation Intelligence menu.",
+                "LLM cleanup is LOCAL-ONLY (Ollama on 127.0.0.1); transcripts are",
+                "never sent to the cloud.",
+            ],
+            "_help": {
+                "custom_vocabulary": "List of words/names/jargon to bias transcription (max 200 used).",
+                "text_replacements": "Each: {pattern, replacement, is_regex?, case_sensitive?, whole_word?}.",
+                "custom_voice_commands": "Each: {id, action: insert|keystroke|discard, phrases:[...], payload?}.",
+                "dictation_modes": "Each: {id, name?, app_patterns:[...], format_style?, llm_prompt?, auto_send?, vocabulary?}.",
+            },
+            "custom_vocabulary": list(self.config.custom_vocabulary),
+            "text_replacements": list(self.config.text_replacements),
+            "custom_voice_commands": list(self.config.custom_voice_commands),
+            "dictation_modes": list(self.config.dictation_modes),
+        }
+
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            try:
+                os.chmod(CONFIG_DIR, 0o700)
+            except Exception:
+                pass
+            fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(template, f, indent=2)
+                os.replace(tmp_path, str(path))
+            except BaseException:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+            try:
+                os.chmod(path, 0o600)
+            except Exception:
+                pass
+            return True
+        except Exception as e:
+            logger.error(f"Failed to write dictation template: {e}")
+            return False
+
+    def _edit_dictation_config(self, sender):
+        """Open the dictation-intelligence JSON in the user's editor.
+
+        Writes a commented template on first use (or if the file is missing),
+        then opens it with `open`. Robust: surfaces an alert if it cannot be
+        written or opened.
+        """
+        path = self._dictation_config_path()
+        if not path.exists():
+            if not self._write_dictation_template(path):
+                rumps.alert(
+                    title="Could Not Create File",
+                    message="WhisperHUD could not create the dictation settings file.",
+                )
+                return
+        try:
+            import subprocess
+
+            subprocess.run(["open", str(path)], capture_output=True, timeout=5)
+        except Exception as e:
+            logger.error(f"Failed to open dictation config: {e}")
+            rumps.alert(title="Could Not Open File", message=f"Edit it manually at:\n{path}")
+
+    def _reload_dictation_config(self, sender):
+        """Reload the dictation-intelligence lists from the JSON file into config.
+
+        Only the four editable lists are merged in; everything else in config is
+        left untouched. Malformed JSON surfaces an alert and changes nothing.
+        """
+        import json
+
+        path = self._dictation_config_path()
+        if not path.exists():
+            rumps.alert(
+                title="No File Yet",
+                message="Use 'Edit in editor…' first to create the dictation settings file.",
+            )
+            return
+
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except json.JSONDecodeError as e:
+            rumps.alert(title="Invalid JSON", message=f"Could not parse the file:\n{e}")
+            return
+        except Exception as e:
+            rumps.alert(title="Could Not Read File", message=str(e))
+            return
+
+        if not isinstance(data, dict):
+            rumps.alert(title="Invalid File", message="Expected a JSON object at the top level.")
+            return
+
+        # Only accept the four editable lists; ignore unknown/_help keys.
+        for key in ("custom_vocabulary", "text_replacements", "custom_voice_commands", "dictation_modes"):
+            value = data.get(key)
+            if isinstance(value, list):
+                setattr(self.config, key, value)
+
+        if self.config.save():
+            self._notify("WhisperHUD", "Dictation Settings Reloaded", "Your vocabulary and rules were updated.")
+        else:
+            self._notify("WhisperHUD", "Reload Failed", "Could not persist the reloaded settings.")
+        self._schedule_menu_rebuild()
+
     def _show_ollama_setup(self, sender):
         """Show Ollama setup options based on current status."""
         # Check status (OK to block here since user clicked)
@@ -4455,6 +5468,13 @@ class WhisperHUDApp(rumps.App):
 
         lock_passphrase_store()
         lock_history_encryption()
+
+        # Backstop: shred any plaintext history-viewer exports that have not yet
+        # been removed by their per-open timer, so decrypted transcripts never
+        # outlive the process.
+        for path in list(getattr(self, "_history_view_files", [])):
+            self._delete_history_view_file(path)
+
         self.hotkey_listener.stop()
         self.hud.hide()
         self.streaming_panel.hide()
