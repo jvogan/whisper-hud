@@ -1,0 +1,76 @@
+{
+  "id": "crt-terminal",
+  "name": "CRT Terminal",
+  "description": "A green-phosphor CRT terminal: scanlined screen, blinking cursor, scrolling waveform while recording, ASCII spinner, and glitchy errors.",
+  "author": "WhisperHUD",
+  "version": "1.0.0",
+  "preview_image": "idle_0.png",
+  "states": {
+    "idle": {
+      "file": "idle_0.png",
+      "description": "Blinking block cursor at a terminal prompt",
+      "frames": [
+        "idle_0.png",
+        "idle_1.png"
+      ],
+      "fps": 2.0
+    },
+    "recording": {
+      "file": "recording_0.png",
+      "description": "REC indicator with a scrolling green waveform",
+      "frames": [
+        "recording_0.png",
+        "recording_1.png",
+        "recording_2.png",
+        "recording_3.png",
+        "recording_4.png",
+        "recording_5.png"
+      ],
+      "fps": 8.0,
+      "sound": "beep.wav"
+    },
+    "processing": {
+      "file": "processing_0.png",
+      "description": "Classic ASCII spinner cycling on the screen",
+      "frames": [
+        "processing_0.png",
+        "processing_1.png",
+        "processing_2.png",
+        "processing_3.png"
+      ],
+      "fps": 8.0
+    },
+    "success": {
+      "file": "success_0.png",
+      "description": "OK with a check, opening on a bright phosphor flash",
+      "frames": [
+        "success_0.png",
+        "success_1.png",
+        "success_2.png",
+        "success_3.png",
+        "success_4.png"
+      ],
+      "fps": 10.0,
+      "sound": "success.wav"
+    },
+    "error": {
+      "file": "error_0.png",
+      "description": "ERR with horizontal glitch/tear lines",
+      "frames": [
+        "error_0.png",
+        "error_1.png",
+        "error_2.png",
+        "error_3.png",
+        "error_4.png"
+      ],
+      "fps": 10.0,
+      "sound": "error.wav"
+    }
+  },
+  "settings": {
+    "shape_mode": "alpha",
+    "apply_state_tint": false,
+    "recommended_size": "large",
+    "interpolation": "nearest"
+  }
+}
