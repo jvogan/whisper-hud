@@ -17,6 +17,9 @@ class TranscriptionResult:
     provider: str
     model: str
     language: Optional[str] = None
+    # Source-language transcript when ``text`` is a translation produced
+    # directly by the session (live speech translation). None otherwise.
+    source_text: Optional[str] = None
 
 
 class TranscriptionProvider(ABC):

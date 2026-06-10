@@ -7,20 +7,17 @@ incremental transcript deltas and a final committed turn transcript.
 
 from __future__ import annotations
 
-import base64
-import math
 import threading
 from collections import deque
 from typing import Any, Callable, Optional, Sequence
 
-import numpy as np
 from openai import OpenAI
-from scipy.signal import resample_poly
 
 from .base import LiveTranscriptionSession, TranscriptionProvider, TranscriptionResult
 from .error_utils import build_provider_error_message
 from .http_client_utils import OPENAI_API_BASE_URL, OPENAI_WEBSOCKET_BASE_URL, build_hardened_http_client
 from .openai_whisper import OpenAITranscribeProvider
+from .realtime_audio import REALTIME_SAMPLE_RATE, encode_pcm16_chunk
 from .vocabulary_utils import format_vocabulary_glossary
 from ..keychain import get_api_key
 from ..logging_config import get_logger
@@ -31,10 +28,15 @@ logger = get_logger("providers.openai_realtime")
 class OpenAIRealtimeSession(LiveTranscriptionSession):
     """One-shot live transcription session for a single recording turn."""
 
-    TARGET_SAMPLE_RATE = 24000
+    TARGET_SAMPLE_RATE = REALTIME_SAMPLE_RATE
     PRECONNECT_BUFFER_SECONDS = 2.0
     CLIENT_TIMEOUT_SECONDS = 30.0
     CLIENT_MAX_RETRIES = 0
+    # A one-shot dictation turn keeps its audio in the server-side input
+    # buffer; an SDK auto-reconnect would silently drop that buffer and
+    # truncate the transcript. Failing fast hands the turn to the local
+    # batch-fallback path, which still has the full recording.
+    CONNECT_MAX_RETRIES = 0
     INPUT_AUDIO_FORMAT = {"type": "audio/pcm", "rate": TARGET_SAMPLE_RATE}
     NOISE_REDUCTION = {"type": "near_field"}
 
@@ -140,7 +142,7 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
     def _run(self) -> None:
         """Own the websocket lifetime and process incoming events."""
         try:
-            with self._client.realtime.connect() as connection:
+            with self._client.realtime.connect(max_retries=self.CONNECT_MAX_RETRIES) as connection:
                 self._connection = connection
                 connection.session.update(session=self._build_session_update())
 
@@ -335,30 +337,7 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
     @classmethod
     def _encode_audio_chunk(cls, audio_chunk: Any, sample_rate: int) -> tuple[str, float]:
         """Resample float32 microphone audio to 24 kHz mono PCM16 and base64-encode it."""
-        if audio_chunk is None or sample_rate <= 0:
-            return "", 0.0
-
-        chunk = np.asarray(audio_chunk, dtype=np.float32)
-        if chunk.size == 0:
-            return "", 0.0
-
-        if chunk.ndim == 2:
-            mono = chunk.mean(axis=1)
-        else:
-            mono = chunk.reshape(-1)
-
-        mono = np.clip(mono, -1.0, 1.0)
-
-        if sample_rate != cls.TARGET_SAMPLE_RATE:
-            gcd = math.gcd(sample_rate, cls.TARGET_SAMPLE_RATE)
-            up = cls.TARGET_SAMPLE_RATE // gcd
-            down = sample_rate // gcd
-            mono = resample_poly(mono, up, down).astype(np.float32)
-
-        pcm16 = (mono * 32767.0).astype("<i2")
-        encoded = base64.b64encode(pcm16.tobytes()).decode("ascii")
-        duration_seconds = len(mono) / float(cls.TARGET_SAMPLE_RATE)
-        return encoded, duration_seconds
+        return encode_pcm16_chunk(audio_chunk, sample_rate, cls.TARGET_SAMPLE_RATE)
 
 
 class OpenAIRealtimeProvider(TranscriptionProvider):
