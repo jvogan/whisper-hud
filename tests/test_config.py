@@ -709,3 +709,42 @@ class TestDictationIntelligenceConfig:
                     assert loaded.llm_cleanup_enabled is True
                     assert loaded.llm_cleanup_model == "qwen3:1.7b"
                     assert loaded.llm_cleanup_timeout_seconds == 7.5
+
+
+class TestRealtimeFeatureConfig:
+    """Tests for the live-translation and voice-assistant config fields."""
+
+    def test_defaults(self):
+        """New realtime fields should default to safe values."""
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
+            from whisper_hud.config import Config
+
+            config = Config()
+
+            assert config.live_translation_enabled is False
+            assert config.assistant_model == "gpt-realtime-2"
+            assert config.assistant_voice == "marin"
+            assert config.assistant_reasoning_effort == "low"
+            assert config.assistant_paste_tool_enabled is True
+
+    def test_persistence_round_trip(self):
+        """Realtime fields should survive a save/load cycle."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_file = Path(tmpdir) / "config.json"
+            with patch("whisper_hud.config.CONFIG_FILE", config_file):
+                with patch("whisper_hud.config.CONFIG_DIR", Path(tmpdir)):
+                    from whisper_hud.config import Config
+
+                    config = Config()
+                    config.live_translation_enabled = True
+                    config.assistant_model = "gpt-realtime-2"
+                    config.assistant_voice = "cedar"
+                    config.assistant_reasoning_effort = "high"
+                    config.assistant_paste_tool_enabled = False
+                    config.save()
+
+                    loaded = Config.load()
+                    assert loaded.live_translation_enabled is True
+                    assert loaded.assistant_voice == "cedar"
+                    assert loaded.assistant_reasoning_effort == "high"
+                    assert loaded.assistant_paste_tool_enabled is False

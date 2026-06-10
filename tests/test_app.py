@@ -79,6 +79,8 @@ def _build_recording_app():
     app._active_turn = None
     app._is_capturing_hotkey = False
     app._hotkey_capture_panel = None
+    app._voice_assistant = None
+    app._assistant_error_notified = False
     app.ICON_RECORDING = "recording"
     app.ICON_ERROR = "error"
     app.ICON_SUCCESS = "success"
@@ -360,10 +362,12 @@ def test_build_menu_reflects_provider_availability(monkeypatch):
         "Paste Target",
         "Translation",
         "Dictation Intelligence",
+        "Voice Assistant",
         "Settings",
         "Quit WhisperHUD",
     ]
-    assert len(top_level_titles) <= 7
+    # Bumped from <= 7: the "Voice Assistant" top-level item is a deliberate add.
+    assert len(top_level_titles) <= 8
 
     provider_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Providers & Keys")
     provider_titles = _menu_titles(provider_menu)

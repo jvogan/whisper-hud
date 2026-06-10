@@ -272,6 +272,7 @@ class MenuBarIcons:
     ERROR = "❌"
     DOWNLOADING = "⬇️"
     PRIVATE = "🔒"  # Private mode indicator
+    ASSISTANT = "🤖"  # Voice assistant active indicator
 
 
 # ============================================================================

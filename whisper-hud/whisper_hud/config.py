@@ -154,6 +154,12 @@ class Config:
     target_language: str = "en"  # Default: English (neutral first-run choice)
     source_language: str = "auto"  # "auto" or specific ISO 639-1 code
 
+    # Live speech translation: translate spoken audio in real time via OpenAI's
+    # streaming translation model instead of the batch transcribe-then-translate
+    # path. Additive and off by default; only engages when translation is enabled,
+    # an OpenAI key is present, and the target language is supported.
+    live_translation_enabled: bool = False
+
     # Dictation intelligence
     # These power the post-transcription text pipeline (modes, vocabulary,
     # replacements, voice commands, local LLM cleanup). All are additive and
@@ -185,6 +191,13 @@ class Config:
 
     # Streaming display
     streaming_enabled: bool = False  # Show live streaming display panel
+
+    # Voice assistant: a spoken conversation with OpenAI's gpt-realtime model.
+    # All additive with safe defaults; the assistant is opt-in from its own menu.
+    assistant_model: str = "gpt-realtime-2"  # OpenAI realtime conversation model
+    assistant_voice: str = "marin"  # Output voice
+    assistant_reasoning_effort: str = "low"  # low / medium / high
+    assistant_paste_tool_enabled: bool = True  # Allow the assistant to paste text into the focused app
 
     # Paste target lock
     paste_target_enabled: bool = False  # Lock transcription to specific target

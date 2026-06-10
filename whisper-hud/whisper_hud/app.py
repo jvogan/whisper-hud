@@ -26,6 +26,11 @@ from .transcribe import TranscriptionManager
 from .translate import TranslationManager
 from .providers import registry as provider_registry
 from .providers.base import LiveTranscriptionSession, TranscriptionResult
+from .providers.openai_translate_live import (
+    create_live_translation_session,
+    is_supported_target_language,
+)
+from .assistant import VoiceAssistant
 from .hotkey import HotkeyCapturePanel, HotkeyListener, format_hotkey_display, string_to_key
 from .hud import create_hud
 from .paste import (
@@ -106,6 +111,10 @@ class ActiveTranscriptionTurn:
     finalize_timer: Optional[threading.Timer] = None
     audio_bytes: bytes = b""
     stop_reason: str = ""
+    # True when this turn's live session is the OpenAI live-translation session
+    # (deltas are translated text, not a source transcript). Reset on batch
+    # degradation is not needed: finalize gates on result.provider, not this flag.
+    live_translation: bool = False
     batch_fallback_started: bool = False
     result_processing_started: bool = False
     batch_thread: Optional[threading.Thread] = None
@@ -127,6 +136,7 @@ class WhisperHUDApp(rumps.App):
     ICON_SUCCESS = MenuBarIcons.SUCCESS
     ICON_ERROR = MenuBarIcons.ERROR
     ICON_DOWNLOADING = MenuBarIcons.DOWNLOADING
+    ICON_ASSISTANT = MenuBarIcons.ASSISTANT
 
     def __init__(self):
         super().__init__("WhisperHUD", icon=None, title=self.ICON_IDLE, quit_button=None)  # We'll add our own quit
@@ -213,6 +223,10 @@ class WhisperHUDApp(rumps.App):
         # State
         self._is_recording = False
         self._is_downloading = False
+        # Voice assistant (spoken conversation). Lazily constructed on first start;
+        # _assistant_error_notified de-dupes the per-run error notification.
+        self._voice_assistant: Optional[VoiceAssistant] = None
+        self._assistant_error_notified = False
         self._lock = threading.Lock()
         self._recording_lock = threading.Lock()  # Dedicated lock for recording operations
         self._turn_counter = 0
@@ -1360,6 +1374,26 @@ class WhisperHUDApp(rumps.App):
             )
         )
 
+        # Live speech translation: translate audio in real time via OpenAI instead
+        # of the batch transcribe-then-translate pipeline.
+        translation_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.live_translation_enabled else '   '}Live Speech Translation (OpenAI)",
+                callback=self._toggle_live_translation,
+            )
+        )
+        # Only surface the blockers when translation is on and live translation is
+        # requested but cannot take effect (missing key or unsupported target).
+        if self.config.translation_enabled and self.config.live_translation_enabled:
+            if get_api_key("openai") is None:
+                translation_menu.add(
+                    rumps.MenuItem("   Add an OpenAI key to use live speech translation", callback=None)
+                )
+            elif not is_supported_target_language(self.config.target_language):
+                translation_menu.add(
+                    rumps.MenuItem("   Target language not supported for live translation", callback=None)
+                )
+
         translation_menu.add(rumps.separator)
 
         current_trans_provider = self.translator.get_current_provider()
@@ -1668,6 +1702,11 @@ class WhisperHUDApp(rumps.App):
         # === Dictation Intelligence ===
         self._build_dictation_intelligence_menu()
 
+        self.menu.add(rumps.separator)
+
+        # === Voice Assistant ===
+        self._build_voice_assistant_menu()
+
         stats = self.transcriber.get_stats()
         history_menu = rumps.MenuItem("History & Stats")
         history_menu.add(
@@ -1934,6 +1973,61 @@ class WhisperHUDApp(rumps.App):
         di_menu.add(vocab_menu)
 
         self.menu.add(di_menu)
+
+    # Available realtime output voices and reasoning levels for the assistant.
+    ASSISTANT_VOICES = ("marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse")
+    ASSISTANT_REASONING_EFFORTS = ("low", "medium", "high")
+
+    def _assistant_is_active(self) -> bool:
+        """Return True while the voice assistant owns a live conversation."""
+        return self._voice_assistant is not None and self._voice_assistant.is_active()
+
+    def _build_voice_assistant_menu(self) -> None:
+        """Build the top-level 'Voice Assistant' menu (spoken conversation)."""
+        va_menu = rumps.MenuItem("Voice Assistant")
+
+        # Single Start/Stop item whose title reflects current state.
+        active = self._assistant_is_active()
+        va_menu.add(
+            rumps.MenuItem(
+                "Stop Voice Chat" if active else "Start Voice Chat",
+                callback=self._toggle_voice_assistant,
+            )
+        )
+
+        va_menu.add(rumps.separator)
+
+        # Voice picker (persists config.assistant_voice).
+        voice_menu = rumps.MenuItem("Voice")
+        for voice in self.ASSISTANT_VOICES:
+            prefix = "● " if self.config.assistant_voice == voice else "   "
+            voice_menu.add(rumps.MenuItem(f"{prefix}{voice}", callback=lambda s, v=voice: self._set_assistant_voice(v)))
+        va_menu.add(voice_menu)
+
+        # Reasoning effort picker (persists config.assistant_reasoning_effort).
+        effort_menu = rumps.MenuItem("Reasoning Effort")
+        for effort in self.ASSISTANT_REASONING_EFFORTS:
+            prefix = "● " if self.config.assistant_reasoning_effort == effort else "   "
+            effort_menu.add(
+                rumps.MenuItem(
+                    f"{prefix}{effort.capitalize()}",
+                    callback=lambda s, e=effort: self._set_assistant_reasoning_effort(e),
+                )
+            )
+        va_menu.add(effort_menu)
+
+        # Allow the assistant to paste text into the focused app.
+        va_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.assistant_paste_tool_enabled else '   '}Allow Pasting Text",
+                callback=self._toggle_assistant_paste_tool,
+            )
+        )
+
+        va_menu.add(rumps.separator)
+        va_menu.add(rumps.MenuItem("Talks to OpenAI gpt-realtime-2 (cloud)", callback=None))
+
+        self.menu.add(va_menu)
 
     def _schedule_menu_rebuild(self, delay: float = 0.5) -> None:
         """Rebuild menu after a short delay to avoid blocking menu callbacks."""
@@ -2740,27 +2834,45 @@ class WhisperHUDApp(rumps.App):
                 has_transcription = bool(result.text and result.text.strip())
 
                 if has_transcription:
+                    # Gate the live-translation path on result.provider, NOT turn
+                    # state: a turn that started live-translated but degraded to
+                    # batch carries the batch provider here and must take the
+                    # normal transcribe-then-translate path.
+                    is_live_translated = result.provider == "openai_translate_live"
+
                     # === Dictation intelligence pipeline ===
-                    # (a) Voice command on the RAW transcript (highest priority).
-                    command_result = self._handle_voice_command(turn_id, result.text)
-                    if command_result == "discard":
-                        # Throw the whole utterance away: no history, no paste.
-                        # HUD feedback already shown by the handler.
-                        if use_streaming:
-                            self.streaming_panel.hide()
-                        self._finish_turn_cleanup(turn_id)
-                        return
-                    if command_result == "handled":
-                        # A keystroke command fired; nothing to paste or store.
-                        if use_streaming:
-                            self.streaming_panel.show_complete()
-                        if self.config.play_sound:
-                            self._play_completion_sound()
-                        self._finish_turn_cleanup(turn_id)
-                        return
+                    if is_live_translated:
+                        # The text is an already-translated foreign-language
+                        # sentence. SKIP voice commands entirely: a translation
+                        # that happens to read like "new line"/"scratch that" must
+                        # never trigger an editing command the speaker didn't issue.
+                        command_result = None
+                    else:
+                        # (a) Voice command on the RAW transcript (highest priority).
+                        command_result = self._handle_voice_command(turn_id, result.text)
+                        if command_result == "discard":
+                            # Throw the whole utterance away: no history, no paste.
+                            # HUD feedback already shown by the handler.
+                            if use_streaming:
+                                self.streaming_panel.hide()
+                            self._finish_turn_cleanup(turn_id)
+                            return
+                        if command_result == "handled":
+                            # A keystroke command fired; nothing to paste or store.
+                            if use_streaming:
+                                self.streaming_panel.show_complete()
+                            if self.config.play_sound:
+                                self._play_completion_sound()
+                            self._finish_turn_cleanup(turn_id)
+                            return
 
                     active_mode = None
-                    if command_result is not None:
+                    if is_live_translated:
+                        # Already translated: apply personal-dictionary replacements
+                        # (still useful), but SKIP mode resolution + LLM cleanup so
+                        # active_mode stays None and auto-send never fires.
+                        processed_text = self._apply_text_replacements(result.text)
+                    elif command_result is not None:
                         # 'insert' command: payload is the final text verbatim;
                         # skip replacements and cleanup (it is not dictation).
                         processed_text = command_result
@@ -2781,7 +2893,10 @@ class WhisperHUDApp(rumps.App):
                     # voice-command payload (e.g. "new line" -> "\n") is literal
                     # text the user asked to insert verbatim and must never be
                     # shipped to the (often cloud BYOK) translation provider.
-                    if command_result is None and self.config.translation_enabled:
+                    # Also skip when ``is_live_translated``: the text is already in
+                    # the target language, so re-running the TEXT translator would
+                    # be wrong (and wasteful).
+                    if command_result is None and self.config.translation_enabled and not is_live_translated:
                         try:
                             if self.config.show_hud:
                                 self.hud.show_processing("Translating...")
@@ -2832,6 +2947,17 @@ class WhisperHUDApp(rumps.App):
                             self._set_title(self.ICON_SUCCESS)
                             if self.config.show_hud:
                                 self.hud.show_success(self._hud_success_message(final_text, " (translation failed)"))
+                    elif is_live_translated:
+                        # Text already arrived translated from the live session.
+                        # Mark it translated (history original_text = source) and
+                        # show the same target-language suffix as the TEXT path.
+                        did_translate = True
+                        lang_name = self.translator.get_supported_languages().get(
+                            self.config.target_language, self.config.target_language
+                        )
+                        self._set_title(self.ICON_SUCCESS)
+                        if self.config.show_hud:
+                            self.hud.show_success(self._hud_success_message(final_text, f" -> {lang_name}"))
                     else:
                         self._set_title(self.ICON_SUCCESS)
                         if self.config.show_hud:
@@ -2845,11 +2971,19 @@ class WhisperHUDApp(rumps.App):
                     if use_streaming:
                         self.streaming_panel.show_complete()
 
+                    # History original_text: for live translation the source
+                    # transcript lives on result.source_text (result.text is
+                    # already the translation); for the TEXT path the original is
+                    # the pre-translation transcript (result.text).
+                    if is_live_translated:
+                        history_original = result.source_text or ""
+                    else:
+                        history_original = result.text if did_translate else ""
                     self.config.add_to_history(
                         text=final_text,
                         provider=result.provider,
                         translated=did_translate,
-                        original_text=result.text if did_translate else "",
+                        original_text=history_original,
                     )
 
                     paste_ok = False
@@ -2974,8 +3108,33 @@ class WhisperHUDApp(rumps.App):
             self.widget.set_idle()
         self._schedule_menu_rebuild()
 
+    def _live_translation_active(self) -> bool:
+        """Return True when this turn should stream live speech translation.
+
+        Requires translation enabled, the live-translation toggle on, a supported
+        target language, and an OpenAI key present. When any precondition fails the
+        normal transcribe-then-translate path runs unchanged.
+        """
+        return (
+            self.config.translation_enabled
+            and self.config.live_translation_enabled
+            and is_supported_target_language(self.config.target_language)
+            and get_api_key("openai") is not None
+        )
+
     def _start_recording(self):
         """Called when hotkey is pressed."""
+        # Mic mutual exclusion: the voice assistant owns the microphone while
+        # active, so dictation must not start underneath it. getattr keeps this
+        # safe for partially-constructed instances (mirrors _quit's pattern).
+        # This early check is a fast UX path; the authoritative, race-free check
+        # is repeated below under self._recording_lock (the lock the assistant
+        # toggle also holds) so the two mic owners cannot interleave.
+        assistant = getattr(self, "_voice_assistant", None)
+        if assistant is not None and assistant.is_active():
+            self._notify("WhisperHUD", "Voice Assistant Active", "Stop the voice assistant before dictating.")
+            return
+
         if not self._ensure_cloud_credentials_ready(allow_create=False):
             self._notify(
                 "WhisperHUD",
@@ -2988,6 +3147,13 @@ class WhisperHUDApp(rumps.App):
             self._ensure_history_encryption_session(create_if_missing=False, prompt_unlock=False)
 
         with self._recording_lock:
+            # Re-check the assistant under the lock the assistant toggle also
+            # holds, closing the window where a menu-started assistant could
+            # grab the mic between the early check above and _is_recording=True.
+            assistant = getattr(self, "_voice_assistant", None)
+            if assistant is not None and assistant.is_active():
+                self._notify("WhisperHUD", "Voice Assistant Active", "Stop the voice assistant before dictating.")
+                return
             with self._lock:
                 if self._is_recording:
                     return
@@ -3015,7 +3181,25 @@ class WhisperHUDApp(rumps.App):
 
             on_audio_chunk = None
             try:
-                if self.transcriber.supports_live_input(turn.provider_id):
+                # Live speech translation takes priority over the per-provider live
+                # transcription session. provider_id stays the configured default so
+                # a degrade-to-batch fallback transcribes-then-translates normally.
+                if self._live_translation_active():
+
+                    def live_audio_chunk_handler(chunk, rate, tid=turn.turn_id):
+                        self._on_live_audio_chunk(tid, chunk, rate)
+
+                    turn.live_session = create_live_translation_session(
+                        api_key=get_api_key("openai"),
+                        target_language=self.config.target_language,
+                        on_partial=lambda text, tid=turn.turn_id: self._on_live_session_partial(tid, text),
+                        on_final=lambda result, tid=turn.turn_id: self._on_live_session_final(tid, result),
+                        on_error=lambda error, tid=turn.turn_id: self._on_live_session_error(tid, error),
+                        on_ready=lambda tid=turn.turn_id: self._on_live_session_ready(tid),
+                    )
+                    turn.live_translation = True
+                    on_audio_chunk = live_audio_chunk_handler
+                elif self.transcriber.supports_live_input(turn.provider_id):
                     turn.live_session = self.transcriber.create_live_session(
                         provider_id=turn.provider_id,
                         on_partial=lambda text, tid=turn.turn_id: self._on_live_session_partial(tid, text),
@@ -3040,11 +3224,18 @@ class WhisperHUDApp(rumps.App):
                     self.hud.show_error("Provider setup required")
                 if self.widget:
                     self.widget.set_idle()
-                self._notify(
-                    "WhisperHUD",
-                    "Configuration Required",
-                    "Add or unlock your OpenAI API key before using OpenAI Realtime.",
-                )
+                if turn.live_translation:
+                    self._notify(
+                        "WhisperHUD",
+                        "Live Translation Unavailable",
+                        "Check your OpenAI API key and live speech translation setup.",
+                    )
+                else:
+                    self._notify(
+                        "WhisperHUD",
+                        "Configuration Required",
+                        "Add or unlock your OpenAI API key before using OpenAI Realtime.",
+                    )
                 return
 
             try:
@@ -3077,7 +3268,10 @@ class WhisperHUDApp(rumps.App):
 
             if turn.live_session:
                 if self.config.streaming_enabled:
-                    self.streaming_panel.show_transcribing(show_translation=self.config.translation_enabled)
+                    # For live translation the streamed deltas ARE the translation,
+                    # so the panel needs only the single (translated) text lane.
+                    show_translation = self.config.translation_enabled and not turn.live_translation
+                    self.streaming_panel.show_transcribing(show_translation=show_translation)
                 turn.connect_timer = self._start_live_connect_timer(turn.turn_id)
                 turn.live_session.start()
 
@@ -4797,6 +4991,12 @@ class WhisperHUDApp(rumps.App):
 
         threading.Thread(target=_check_availability, daemon=True).start()
 
+    def _toggle_live_translation(self, sender):
+        """Toggle live speech translation (OpenAI streaming translation)."""
+        self.config.live_translation_enabled = not self.config.live_translation_enabled
+        self.config.save()
+        self._schedule_menu_rebuild()
+
     def _set_translation_provider(self, provider_id: str):
         """Set the translation provider."""
         if not self._ensure_translation_provider_credentials(provider_id):
@@ -4945,6 +5145,106 @@ class WhisperHUDApp(rumps.App):
         self.config.ollama_auto_start = not self.config.ollama_auto_start
         self.config.save()
         self._schedule_menu_rebuild()
+
+    # === Voice Assistant callbacks ==========================================
+
+    def _set_assistant_voice(self, voice: str) -> None:
+        """Persist the selected assistant output voice."""
+        self.config.assistant_voice = voice
+        self.config.save()
+        self._schedule_menu_rebuild()
+
+    def _set_assistant_reasoning_effort(self, effort: str) -> None:
+        """Persist the selected assistant reasoning effort."""
+        self.config.assistant_reasoning_effort = effort
+        self.config.save()
+        self._schedule_menu_rebuild()
+
+    def _toggle_assistant_paste_tool(self, sender) -> None:
+        """Toggle whether the assistant may paste text into the focused app."""
+        self.config.assistant_paste_tool_enabled = not self.config.assistant_paste_tool_enabled
+        self.config.save()
+        self._schedule_menu_rebuild()
+
+    def _toggle_voice_assistant(self, sender=None) -> None:
+        """Start or stop the spoken conversation with the OpenAI realtime model."""
+        if self._assistant_is_active():
+            self._voice_assistant.stop()
+            self._schedule_menu_rebuild()
+            return
+
+        # Refuse to start without a key or while dictation owns the microphone.
+        api_key = get_api_key("openai")
+        if api_key is None:
+            self._notify("WhisperHUD", "OpenAI Key Required", "Add your OpenAI API key to use the voice assistant.")
+            return
+
+        # The dictation guard reads self._is_recording, which a hotkey-started
+        # _start_recording flips under self._recording_lock. Take the same lock
+        # around the check + construct + start so the two mic owners serialize
+        # and cannot both grab the device. start() only spawns a thread (no
+        # network I/O), so holding the lock across it is safe.
+        with self._recording_lock:
+            if self._is_recording:
+                self._notify(
+                    "WhisperHUD", "Dictation Active", "Stop dictation before starting the voice assistant."
+                )
+                return
+
+            # Honor the user's configured input device, exactly like dictation
+            # (app.py builds self.recorder with the same device). The factory
+            # closure is the seam: the assistant takes no config dependency.
+            input_device = self.config.audio_input_device
+            self._voice_assistant = VoiceAssistant(
+                api_key=api_key,
+                model=self.config.assistant_model,
+                voice=self.config.assistant_voice,
+                reasoning_effort=self.config.assistant_reasoning_effort,
+                paste_tool_enabled=self.config.assistant_paste_tool_enabled,
+                paste_callback=self._paste_to_target,
+                on_state=self._on_assistant_state,
+                on_user_text=lambda _text: None,  # panel integration is future work
+                on_assistant_text=lambda _text: None,
+                on_exchange=self._on_assistant_exchange,
+                on_error=self._on_assistant_error,
+                recorder_factory=lambda: AudioRecorder(device=input_device),
+            )
+            self._assistant_error_notified = False
+            self._voice_assistant.start()
+
+        self._schedule_menu_rebuild()
+
+    def _on_assistant_state(self, state: str) -> None:
+        """Reflect assistant state in the menu-bar icon and Start/Stop title.
+
+        Fires from the assistant's session thread for most states and from the
+        caller's thread for 'connecting'/'stopped'; _set_title already dispatches
+        to the main thread, matching how recording callbacks update the title.
+        """
+        if state in ("connecting", "listening", "responding"):
+            self._set_title(self.ICON_ASSISTANT)
+        elif state in ("stopped", "error"):
+            self._set_title(self._get_idle_icon())
+        # Keep the Start/Stop menu item title in sync with live state.
+        self._schedule_menu_rebuild()
+
+    def _on_assistant_exchange(self, user_text: str, assistant_text: str) -> None:
+        """Store one finalized assistant exchange in history (gated internally)."""
+        self.config.add_to_history(
+            text=assistant_text,
+            provider="openai_assistant",
+            translated=False,
+            original_text=user_text,
+            source="assistant",
+            model=self.config.assistant_model,
+        )
+
+    def _on_assistant_error(self, error: Exception) -> None:
+        """Notify once per assistant run that the conversation failed."""
+        if self._assistant_error_notified:
+            return
+        self._assistant_error_notified = True
+        self._notify("WhisperHUD", "Voice Assistant Error", str(error)[:120])
 
     # === Dictation Intelligence callbacks ===================================
 
@@ -5461,6 +5761,15 @@ class WhisperHUDApp(rumps.App):
 
     def _quit(self, _):
         """Clean shutdown."""
+        # Tear down the voice assistant first so it releases the mic and its
+        # connection before the rest of teardown runs.
+        assistant = getattr(self, "_voice_assistant", None)
+        if assistant is not None:
+            try:
+                assistant.stop()
+            except Exception as e:
+                logger.debug("Voice assistant stop during quit raised: %s", e)
+
         turn = self._active_turn
         if turn and turn.batch_thread and turn.batch_thread.is_alive():
             logger.info("Waiting briefly for active transcription cleanup before quitting")
