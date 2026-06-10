@@ -71,6 +71,24 @@ def test_provider_initialization_and_model_helpers():
     assert GeminiProvider.normalize_model_id("gemini-3.1-flash-lite-preview") == "gemini-3.1-flash-lite"
 
 
+def test_provider_exposes_current_audio_model_ids():
+    """The Gemini model registry should include the verified June 2026 audio-capable IDs."""
+    model_ids = [model["id"] for model in GeminiProvider.MODELS]
+
+    # gemini-3.5-flash is the newest stable audio-capable Flash model (released 2026-05-19).
+    assert "gemini-3.5-flash" in model_ids
+    # Default stays the lowest-latency stable model for menu-bar dictation.
+    assert GeminiProvider.DEFAULT_MODEL == "gemini-3.1-flash-lite"
+
+    # The new model is directly selectable (it is a real ID, not an alias target).
+    provider = GeminiProvider()
+    provider.set_model("gemini-3.5-flash")
+    assert provider.get_current_model() == "gemini-3.5-flash"
+
+    # No stale Gemini IDs should remain in the registry.
+    assert "gemini-live-2.5-flash-preview-native-audio-09-2025" not in model_ids
+
+
 def test_provider_reports_unavailable_when_api_key_is_not_set(monkeypatch):
     """Providers without an API key should report unconfigured."""
     monkeypatch.setattr("whisper_hud.providers.gemini.get_api_key", lambda _: None)
@@ -311,3 +329,64 @@ def test_transcribe_streaming_raises_runtime_error_on_api_error(
 
     with pytest.raises(RuntimeError, match="Gemini transcription failed: rate limited"):
         provider.transcribe_streaming(sample_audio_bytes, lambda _chunk: None)
+
+
+def test_vocabulary_appends_hint_line_to_prompt(monkeypatch, sample_audio_bytes, fake_gemini_sdk):
+    """Vocabulary should append a hint line listing the expected terms to the instruction."""
+    provider = GeminiProvider(model="gemini-3.1-flash-lite")
+    captured = {}
+
+    class FakeModels:
+        def generate_content(self, *, model, contents):
+            captured["prompt"] = contents[0]
+            return {"text": "ok"}
+
+    monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(models=FakeModels()))
+
+    provider.transcribe(sample_audio_bytes, vocabulary=["Kubernetes", "Anthropic"])
+
+    # The base instruction is preserved and a vocabulary hint line is appended.
+    assert captured["prompt"].startswith("Transcribe this audio exactly as spoken.")
+    assert "Kubernetes, Anthropic" in captured["prompt"]
+    assert "exact spelling" in captured["prompt"]
+
+
+def test_no_vocabulary_hint_when_vocabulary_absent(monkeypatch, sample_audio_bytes, fake_gemini_sdk):
+    """Without vocabulary the prompt should be the unmodified base instruction."""
+    provider = GeminiProvider(model="gemini-3.1-flash-lite")
+    captured = {}
+
+    class FakeModels:
+        def generate_content(self, *, model, contents):
+            captured["prompt"] = contents[0]
+            return {"text": "ok"}
+
+    monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(models=FakeModels()))
+
+    provider.transcribe(sample_audio_bytes, vocabulary=None)
+
+    assert "exact spelling" not in captured["prompt"]
+    assert captured["prompt"] == (
+        "Transcribe this audio exactly as spoken.\n"
+        "Output ONLY the transcription text, nothing else.\n"
+        "Do not add any commentary, labels, or formatting.\n"
+        "Preserve natural punctuation."
+    )
+
+
+def test_streaming_vocabulary_appends_hint_line_to_prompt(monkeypatch, sample_audio_bytes, fake_gemini_sdk):
+    """Streaming transcription should also append the vocabulary hint line."""
+    provider = GeminiProvider(model="gemini-3.1-flash-lite")
+    captured = {}
+
+    class FakeModels:
+        def generate_content_stream(self, *, model, contents):
+            captured["prompt"] = contents[0]
+            return [SimpleNamespace(text="ok")]
+
+    monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(models=FakeModels()))
+
+    provider.transcribe_streaming(sample_audio_bytes, lambda _c: None, vocabulary=["gRPC"])
+
+    assert "gRPC" in captured["prompt"]
+    assert "exact spelling" in captured["prompt"]

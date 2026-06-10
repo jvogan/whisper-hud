@@ -16,7 +16,13 @@ Features:
 """
 
 import platform
+from typing import Optional, Sequence
 from .base import TranscriptionProvider, TranscriptionResult
+from .vocabulary_utils import normalize_vocabulary_phrases
+
+# SFSpeechRecognitionRequest.contextualStrings is meant for a small set of hint
+# phrases; cap the list passed to the recognizer to keep accuracy/latency sane.
+MAX_CONTEXTUAL_STRINGS = 100
 
 
 class AppleSpeechProvider(TranscriptionProvider):
@@ -113,12 +119,15 @@ class AppleSpeechProvider(TranscriptionProvider):
             self._recognizer = SFSpeechRecognizer.alloc().initWithLocale_(self._get_locale(self.model))
         return self._recognizer
 
-    def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
+    def transcribe(self, audio_bytes: bytes, vocabulary: Optional[Sequence[str]] = None) -> TranscriptionResult:
         """
         Transcribe audio using Apple Speech Framework.
 
         Args:
             audio_bytes: WAV file contents
+            vocabulary: Optional words/phrases mapped directly to the recognition
+                request's ``contextualStrings`` (a list of hint phrases SFSpeech
+                biases toward), capped at ``MAX_CONTEXTUAL_STRINGS``.
 
         Returns:
             TranscriptionResult with transcribed text
@@ -153,6 +162,13 @@ class AppleSpeechProvider(TranscriptionProvider):
             # Use on-device recognition if available
             if hasattr(request, "setRequiresOnDeviceRecognition_"):
                 request.setRequiresOnDeviceRecognition_(True)
+
+            # Bias recognition toward user vocabulary via contextualStrings
+            # (a plain list of hint phrases). Only set it when non-empty so the
+            # default recognizer behavior is unchanged.
+            contextual_strings = normalize_vocabulary_phrases(vocabulary, max_phrases=MAX_CONTEXTUAL_STRINGS)
+            if contextual_strings and hasattr(request, "setContextualStrings_"):
+                request.setContextualStrings_(contextual_strings)
 
             recognizer = self._get_recognizer()
             if not recognizer or not recognizer.isAvailable():

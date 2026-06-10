@@ -79,7 +79,10 @@ whisper-local = [
     "huggingface_hub>=0.20.0",
 ]
 parakeet = [
-    "parakeet-mlx>=0.1.0",
+    "parakeet-mlx>=0.5.1",
+]
+qwen3-asr = [
+    "qwen3-asr-mlx>=0.1.1",
 ]
 
 [project.urls]

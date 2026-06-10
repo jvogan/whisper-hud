@@ -11,7 +11,7 @@ import base64
 import math
 import threading
 from collections import deque
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 import numpy as np
 from openai import OpenAI
@@ -21,6 +21,7 @@ from .base import LiveTranscriptionSession, TranscriptionProvider, Transcription
 from .error_utils import build_provider_error_message
 from .http_client_utils import OPENAI_API_BASE_URL, OPENAI_WEBSOCKET_BASE_URL, build_hardened_http_client
 from .openai_whisper import OpenAITranscribeProvider
+from .vocabulary_utils import format_vocabulary_glossary
 from ..keychain import get_api_key
 from ..logging_config import get_logger
 
@@ -378,7 +379,7 @@ class OpenAIRealtimeProvider(TranscriptionProvider):
             "id": "gpt-realtime-whisper",
             "name": "GPT Realtime Whisper",
             "description": "Lowest-latency live dictation model for Realtime transcription sessions",
-            "cost_per_minute": 0.003,
+            "cost_per_minute": 0.017,
             "recommended": True,
         },
         {
@@ -398,11 +399,15 @@ class OpenAIRealtimeProvider(TranscriptionProvider):
     def __init__(self, model: str = DEFAULT_MODEL):
         self.model = self._normalize_model(model)
 
-    def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
-        """Fallback one-shot transcription if the app calls this provider synchronously."""
+    def transcribe(self, audio_bytes: bytes, vocabulary: Optional[Sequence[str]] = None) -> TranscriptionResult:
+        """Fallback one-shot transcription if the app calls this provider synchronously.
+
+        Delegates to the OpenAI batch provider, threading ``vocabulary`` through
+        so the batch ``prompt`` glossary biasing is applied on the fallback path.
+        """
         batch_model = self.BATCH_FALLBACK_MODELS.get(self.model, self.model)
         batch_provider = OpenAITranscribeProvider(model=batch_model)
-        result = batch_provider.transcribe(audio_bytes)
+        result = batch_provider.transcribe(audio_bytes, vocabulary=vocabulary)
         return TranscriptionResult(
             text=result.text,
             duration_seconds=result.duration_seconds,
@@ -441,11 +446,19 @@ class OpenAIRealtimeProvider(TranscriptionProvider):
         on_ready: Optional[Callable[[], None]] = None,
         language: Optional[str] = None,
         prompt: Optional[str] = None,
+        vocabulary: Optional[Sequence[str]] = None,
     ) -> LiveTranscriptionSession:
-        """Create a live OpenAI Realtime session for a single turn."""
+        """Create a live OpenAI Realtime session for a single turn.
+
+        ``vocabulary`` is folded into the session ``prompt`` (which the Realtime
+        transcription session forwards to the model) as a glossary string,
+        appended to any caller-supplied ``prompt`` text.
+        """
         api_key = get_api_key("openai")
         if not api_key:
             raise ValueError("OpenAI API key not configured")
+
+        prompt = self._merge_prompt_with_vocabulary(prompt, vocabulary)
 
         model_config = self._get_model_config(self.model)
         return OpenAIRealtimeSession(
@@ -460,6 +473,23 @@ class OpenAIRealtimeProvider(TranscriptionProvider):
             language=language,
             prompt=prompt,
         )
+
+    @staticmethod
+    def _merge_prompt_with_vocabulary(
+        prompt: Optional[str], vocabulary: Optional[Sequence[str]]
+    ) -> Optional[str]:
+        """Append a vocabulary glossary to the session prompt (if any).
+
+        Returns the original prompt unchanged when there is no usable
+        vocabulary; otherwise appends ``"Vocabulary: ..."`` to the existing
+        prompt text (or uses the glossary alone when no prompt was supplied).
+        """
+        glossary = format_vocabulary_glossary(vocabulary)
+        if not glossary:
+            return prompt
+        if prompt:
+            return f"{prompt} {glossary}"
+        return glossary
 
     @classmethod
     def _normalize_model(cls, model_id: str) -> str:

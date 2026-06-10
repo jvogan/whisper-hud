@@ -8,37 +8,64 @@ Supports both local (Ollama) and cloud (Gemini, OpenAI) providers.
 from typing import Optional, Callable, Dict, Type
 from .providers.translation.base import TranslationProvider, TranslationResult
 from .providers.translation.ollama import OllamaTranslateProvider
-from .providers.translation.apple_translate import AppleTranslateProvider
-from .providers.translation.gemini_translate import GeminiTranslateProvider
-from .providers.translation.openai_translate import OpenAITranslateProvider
-from .providers.translation.anthropic_translate import AnthropicTranslateProvider
+
+# Translation provider classes are imported into the module namespace so the
+# registry-driven structures below can resolve them via ``globals()`` by their
+# registry ``class_name``. They are also test monkeypatch targets, so they must
+# remain importable module attributes even when not referenced by name.
+from .providers.translation.apple_translate import AppleTranslateProvider  # noqa: F401
+from .providers.translation.gemini_translate import GeminiTranslateProvider  # noqa: F401
+from .providers.translation.openai_translate import OpenAITranslateProvider  # noqa: F401
+from .providers.translation.anthropic_translate import AnthropicTranslateProvider  # noqa: F401
+from .providers import registry
 from .config import Config
+
+
+def _resolve_translation_classes() -> Dict[str, Type[TranslationProvider]]:
+    """Resolve translation provider classes from this module's namespace.
+
+    Classes are looked up by their registry ``class_name`` against the module
+    globals, so a spec whose class cannot be resolved is skipped gracefully and
+    tests that monkeypatch the module-level imports keep working.
+    """
+    classes: Dict[str, Type[TranslationProvider]] = {}
+    for spec in registry.TRANSLATION_SPECS:
+        provider_class = globals().get(spec.class_name)
+        if provider_class is not None:
+            classes[spec.id] = provider_class
+    return classes
+
+
+def _build_translation_categories() -> Dict[str, list]:
+    """Group registered translation provider ids by category."""
+    categories: Dict[str, list] = {"local": [], "cloud": []}
+    for spec in registry.TRANSLATION_SPECS:
+        categories.setdefault(spec.category, []).append(spec.id)
+    return categories
+
+
+def _build_translation_model_fields() -> Dict[str, str]:
+    """Map translation provider ids to their config model field.
+
+    Providers without a persisted model field (e.g. Apple, which always uses the
+    ``"system"`` model) are omitted, matching the historical field map.
+    """
+    return {
+        spec.id: spec.config_model_field for spec in registry.TRANSLATION_SPECS if spec.config_model_field is not None
+    }
 
 
 class TranslationManager:
     """Manages translation providers and requests."""
 
-    # Registry of available providers
-    PROVIDER_CLASSES: Dict[str, Type[TranslationProvider]] = {
-        "ollama": OllamaTranslateProvider,
-        "apple": AppleTranslateProvider,
-        "gemini": GeminiTranslateProvider,
-        "openai": OpenAITranslateProvider,
-        "anthropic": AnthropicTranslateProvider,
-    }
+    # Registry of available providers, derived from the central provider
+    # registry. Specs whose class cannot be resolved are skipped.
+    PROVIDER_CLASSES: Dict[str, Type[TranslationProvider]] = _resolve_translation_classes()
 
     # Provider categories for UI organization
-    PROVIDER_CATEGORIES = {
-        "local": ["ollama", "apple"],
-        "cloud": ["gemini", "openai", "anthropic"],
-    }
+    PROVIDER_CATEGORIES = _build_translation_categories()
 
-    MODEL_CONFIG_FIELDS = {
-        "ollama": "translation_model",
-        "gemini": "gemini_translate_model",
-        "openai": "openai_translate_model",
-        "anthropic": "anthropic_translate_model",
-    }
+    MODEL_CONFIG_FIELDS = _build_translation_model_fields()
 
     def __init__(self, config: Optional[Config] = None):
         self.config = config or Config.load()
@@ -146,6 +173,7 @@ class TranslationManager:
             List of dicts with provider info, status, and category
         """
         providers = []
+        download_specs = {spec.id for spec in registry.TRANSLATION_SPECS if spec.requires_download}
 
         for provider_id, provider_class in self.PROVIDER_CLASSES.items():
             provider = self.get_provider(provider_id)
@@ -166,7 +194,7 @@ class TranslationManager:
                     "available": is_available,
                     "category": category,
                     "models": provider.get_models() if provider else [],
-                    "requires_download": provider_id == "ollama",
+                    "requires_download": provider_id in download_specs,
                 }
             )
 
@@ -260,15 +288,11 @@ class TranslationManager:
         self.provider.set_model(model_id)
         normalized_model = self.provider.get_current_model()
 
-        # Save to config
-        if provider_id == "ollama":
-            self.config.translation_model = normalized_model
-        elif provider_id == "gemini":
-            self.config.gemini_translate_model = normalized_model
-        elif provider_id == "openai":
-            self.config.openai_translate_model = normalized_model
-        elif provider_id == "anthropic":
-            self.config.anthropic_translate_model = normalized_model
+        # Save to config. Providers without a model field (e.g. Apple, which
+        # always uses the "system" model) are simply not persisted.
+        field_name = self.MODEL_CONFIG_FIELDS.get(provider_id)
+        if field_name is not None:
+            setattr(self.config, field_name, normalized_model)
 
         self.config.save()
 

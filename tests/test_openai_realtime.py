@@ -189,6 +189,65 @@ def test_provider_normalizes_models_and_uses_batch_fallback_for_supported_model(
     assert result.text == "hello"
 
 
+def test_realtime_model_registry_uses_official_per_minute_pricing():
+    """Streaming and batch-fallback model costs should match OpenAI's published per-minute rates."""
+    costs = {model["id"]: model["cost_per_minute"] for model in OpenAIRealtimeProvider.MODELS}
+
+    # gpt-realtime-whisper is billed at $0.017/min (dedicated streaming STT model),
+    # which is distinct from the batch gpt-4o-(mini-)transcribe rate card.
+    assert costs["gpt-realtime-whisper"] == pytest.approx(0.017)
+    assert costs["gpt-4o-mini-transcribe"] == pytest.approx(0.003)
+    assert costs["gpt-4o-transcribe"] == pytest.approx(0.006)
+
+
+def test_batch_fallback_threads_vocabulary_to_batch_provider():
+    """The batch fallback path should forward vocabulary to the OpenAI batch provider."""
+    with patch("whisper_hud.providers.openai_realtime.OpenAITranscribeProvider") as batch_cls:
+        batch_cls.return_value.transcribe.return_value = SimpleNamespace(
+            text="hello",
+            duration_seconds=1.25,
+            cost_estimate=0.006,
+            model="gpt-4o-mini-transcribe",
+            language="en",
+        )
+        provider = OpenAIRealtimeProvider(model="gpt-realtime-whisper")
+        provider.transcribe(b"wav", vocabulary=["Kubernetes", "Anthropic"])
+
+    batch_cls.return_value.transcribe.assert_called_once_with(b"wav", vocabulary=["Kubernetes", "Anthropic"])
+
+
+def test_create_live_session_folds_vocabulary_into_prompt():
+    """Live-session vocabulary should be appended to the session prompt glossary."""
+    with patch("whisper_hud.providers.openai_realtime.get_api_key", return_value="sk-test"):
+        with patch("whisper_hud.providers.openai_realtime.OpenAIRealtimeSession") as session_cls:
+            provider = OpenAIRealtimeProvider(model="gpt-4o-transcribe")
+            provider.create_live_session(
+                on_partial=lambda _: None,
+                on_final=lambda _: None,
+                on_error=lambda _: None,
+                prompt="Use punctuation.",
+                vocabulary=["Kubernetes", "gRPC"],
+            )
+
+    kwargs = session_cls.call_args.kwargs
+    assert kwargs["prompt"] == "Use punctuation. Vocabulary: Kubernetes, gRPC."
+
+
+def test_create_live_session_uses_vocabulary_only_when_no_prompt():
+    """With no caller prompt, vocabulary alone becomes the session prompt glossary."""
+    with patch("whisper_hud.providers.openai_realtime.get_api_key", return_value="sk-test"):
+        with patch("whisper_hud.providers.openai_realtime.OpenAIRealtimeSession") as session_cls:
+            provider = OpenAIRealtimeProvider(model="gpt-4o-transcribe")
+            provider.create_live_session(
+                on_partial=lambda _: None,
+                on_final=lambda _: None,
+                on_error=lambda _: None,
+                vocabulary=["Anthropic"],
+            )
+
+    assert session_cls.call_args.kwargs["prompt"] == "Vocabulary: Anthropic."
+
+
 def test_provider_create_live_session_uses_openai_key_and_selected_model():
     """Provider session creation should pass through the configured OpenAI key and session options."""
     with patch("whisper_hud.providers.openai_realtime.get_api_key", return_value="sk-test"):

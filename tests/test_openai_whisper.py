@@ -220,3 +220,54 @@ def test_set_model_updates_known_models_and_resets_cached_client():
 def test_normalize_model_id_maps_realtime_latest_alias():
     """Batch transcription should coerce realtime-only alias slugs to supported batch models."""
     assert OpenAITranscribeProvider.normalize_model_id("gpt-4o-transcribe-latest") == "gpt-4o-transcribe"
+
+
+def test_vocabulary_is_mapped_to_prompt_glossary(monkeypatch, sample_audio_bytes):
+    """Vocabulary should reach the API as a natural-language ``prompt`` glossary string."""
+    fake_client = _FakeClient(response=SimpleNamespace(text="ok"))
+    monkeypatch.setattr("whisper_hud.providers.openai_whisper.get_api_key", lambda _: "sk-test")
+    monkeypatch.setattr(
+        OpenAITranscribeProvider,
+        "_get_openai_client_class",
+        staticmethod(lambda: lambda **_: fake_client),
+    )
+
+    provider = OpenAITranscribeProvider(model="gpt-4o-mini-transcribe")
+    provider.transcribe(sample_audio_bytes, vocabulary=["Kubernetes", "Anthropic", "gRPC"])
+
+    assert fake_client.calls[0]["prompt"] == "Vocabulary: Kubernetes, Anthropic, gRPC."
+
+
+def test_no_prompt_sent_when_vocabulary_absent_or_empty(monkeypatch, sample_audio_bytes):
+    """No ``prompt`` artifact should be sent for None or empty vocabulary."""
+    monkeypatch.setattr("whisper_hud.providers.openai_whisper.get_api_key", lambda _: "sk-test")
+
+    for vocabulary in (None, [], ["", "  "]):
+        fake_client = _FakeClient(response=SimpleNamespace(text="ok"))
+        monkeypatch.setattr(
+            OpenAITranscribeProvider,
+            "_get_openai_client_class",
+            staticmethod(lambda fc=fake_client: lambda **_: fc),
+        )
+        OpenAITranscribeProvider(model="gpt-4o-mini-transcribe").transcribe(
+            sample_audio_bytes, vocabulary=vocabulary
+        )
+        assert "prompt" not in fake_client.calls[0]
+
+
+def test_diarize_model_never_sends_prompt(monkeypatch, sample_audio_bytes):
+    """The diarize model rejects ``prompt``, so vocabulary must be skipped for it."""
+    fake_client = _FakeClient(response={"text": "Hello world"})
+    monkeypatch.setattr("whisper_hud.providers.openai_whisper.get_api_key", lambda _: "sk-test")
+    monkeypatch.setattr(
+        OpenAITranscribeProvider,
+        "_get_openai_client_class",
+        staticmethod(lambda: lambda **_: fake_client),
+    )
+
+    OpenAITranscribeProvider(model="gpt-4o-transcribe-diarize").transcribe(
+        sample_audio_bytes, vocabulary=["Kubernetes", "Anthropic"]
+    )
+
+    assert "prompt" not in fake_client.calls[0]
+    assert fake_client.calls[0]["response_format"] == "diarized_json"

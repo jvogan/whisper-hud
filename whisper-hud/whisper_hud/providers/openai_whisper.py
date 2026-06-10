@@ -1,22 +1,24 @@
 """
 OpenAI Transcription API provider.
 
-Models (May 2026):
-- gpt-4o-mini-transcribe: OpenAI currently recommends this over gpt-4o-transcribe
+Models (verified June 2026 against developers.openai.com pricing/model docs):
+- gpt-4o-mini-transcribe: OpenAI currently recommends this over gpt-4o-transcribe ($0.003/min)
 - gpt-4o-mini-transcribe-2025-12-15: pinned mini snapshot
-- gpt-4o-transcribe: Higher-cost batch transcription
-- gpt-4o-transcribe-diarize: Speaker-aware transcripts (diarization)
-- whisper-1: Classic Whisper v2, still available
+- gpt-4o-transcribe: Higher-cost batch transcription ($0.006/min)
+- gpt-4o-transcribe-diarize: Speaker-aware transcripts; /v1/audio/transcriptions only,
+  needs chunking_strategy="auto" for audio >30s, same $0.006/min as gpt-4o-transcribe
+- whisper-1: Classic Whisper v2, still available ($0.006/min)
 
 API endpoint: POST https://api.openai.com/v1/audio/transcriptions
 """
 
 import io
 from importlib import import_module
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional, Sequence
 from .base import TranscriptionProvider, TranscriptionResult
 from .error_utils import build_provider_error_message
 from .http_client_utils import OPENAI_API_BASE_URL, build_hardened_http_client
+from .vocabulary_utils import format_vocabulary_glossary
 from ..keychain import get_api_key
 
 if TYPE_CHECKING:
@@ -32,6 +34,11 @@ class OpenAITranscribeProvider(TranscriptionProvider):
     CLIENT_MAX_RETRIES = 0
 
     DEFAULT_MODEL = "gpt-4o-mini-transcribe"
+
+    # The diarize model is served on /v1/audio/transcriptions but does NOT accept
+    # the ``prompt`` parameter (the API rejects the request). Vocabulary biasing
+    # via prompt must be skipped when this model is active.
+    DIARIZE_MODEL = "gpt-4o-transcribe-diarize"
 
     # Available models with pricing (per minute)
     MODELS = [
@@ -119,8 +126,14 @@ class OpenAITranscribeProvider(TranscriptionProvider):
             return False
         return bool(get_api_key("openai"))
 
-    def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
-        """Transcribe audio using OpenAI API."""
+    def transcribe(self, audio_bytes: bytes, vocabulary: Optional[Sequence[str]] = None) -> TranscriptionResult:
+        """Transcribe audio using OpenAI API.
+
+        ``vocabulary`` is mapped to the API ``prompt`` parameter as a
+        natural-language glossary string (e.g. ``"Vocabulary: X, Y, Z."``) to
+        bias recognition toward the listed terms. The ``prompt`` parameter is
+        omitted for the diarize model, which does not support it.
+        """
         if not audio_bytes:
             return TranscriptionResult(
                 text="", duration_seconds=0, cost_estimate=0, provider=self.name, model=self.model
@@ -133,6 +146,14 @@ class OpenAITranscribeProvider(TranscriptionProvider):
         # Get the model config for cost calculation
         model_config = next((m for m in self.MODELS if m["id"] == self.model), self.MODELS[0])
 
+        # Map vocabulary to the API ``prompt`` parameter as a glossary string.
+        # gpt-4o-transcribe-diarize rejects ``prompt``, so omit it there.
+        prompt_kwargs: dict = {}
+        if self.model != self.DIARIZE_MODEL:
+            glossary = format_vocabulary_glossary(vocabulary)
+            if glossary:
+                prompt_kwargs["prompt"] = glossary
+
         # Call transcription API
         # gpt-4o-transcribe models support json or text output
         # gpt-4o-transcribe-diarize supports json/text/diarized_json
@@ -140,12 +161,13 @@ class OpenAITranscribeProvider(TranscriptionProvider):
         try:
             if self.model == "whisper-1":
                 response = self.client.audio.transcriptions.create(
-                    model=self.model, file=audio_file, response_format="verbose_json"
+                    model=self.model, file=audio_file, response_format="verbose_json", **prompt_kwargs
                 )
                 duration = response.duration
                 text = response.text.strip()
                 language = response.language
-            elif self.model == "gpt-4o-transcribe-diarize":
+            elif self.model == self.DIARIZE_MODEL:
+                # No prompt support on the diarize model (see DIARIZE_MODEL note).
                 response = self.client.audio.transcriptions.create(
                     model=self.model, file=audio_file, response_format="diarized_json", chunking_strategy="auto"
                 )
@@ -156,7 +178,7 @@ class OpenAITranscribeProvider(TranscriptionProvider):
             else:
                 # gpt-4o-transcribe models
                 response = self.client.audio.transcriptions.create(
-                    model=self.model, file=audio_file, response_format="json"
+                    model=self.model, file=audio_file, response_format="json", **prompt_kwargs
                 )
                 text = response.text.strip()
                 # Estimate duration from audio bytes (16kHz, 16-bit mono = 32KB/sec)

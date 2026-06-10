@@ -6,18 +6,111 @@ Supports both cloud (OpenAI, Gemini) and local (Apple Speech, Whisper, Parakeet)
 """
 
 from copy import deepcopy
+import inspect
 import platform
-from typing import Callable, NotRequired, Optional, TypedDict, cast
+from typing import Any, Callable, NotRequired, Optional, Sequence, TypedDict, cast
 
 from .providers.base import TranscriptionProvider, TranscriptionResult, LiveTranscriptionSession
-from .providers.openai_whisper import OpenAITranscribeProvider
-from .providers.openai_realtime import OpenAIRealtimeProvider
-from .providers.gemini import GeminiProvider
-from .providers.apple_speech import AppleSpeechProvider
-from .providers.whisper_local import WhisperLocalProvider
-from .providers.parakeet import ParakeetProvider
+
+# Provider classes are imported into the module namespace so the registry-driven
+# builders can resolve them via ``globals()`` by their registry ``class_name``.
+# They are also the monkeypatch targets used by the test suite, so they must
+# remain importable module attributes even though they are not referenced by name.
+from .providers.openai_whisper import OpenAITranscribeProvider  # noqa: F401
+from .providers.openai_realtime import OpenAIRealtimeProvider  # noqa: F401
+from .providers.gemini import GeminiProvider  # noqa: F401
+from .providers.apple_speech import AppleSpeechProvider  # noqa: F401
+from .providers.whisper_local import WhisperLocalProvider  # noqa: F401
+from .providers.parakeet import ParakeetProvider  # noqa: F401
+from .providers.qwen3_asr import Qwen3ASRProvider  # noqa: F401
+from .providers.apple_speechanalyzer import AppleSpeechAnalyzerProvider  # noqa: F401
+from .providers import registry
 from .config import Config
 from .keychain import get_configured_providers
+
+
+def _resolve_transcription_classes() -> dict[str, type[TranscriptionProvider]]:
+    """Resolve transcription provider classes from this module's namespace.
+
+    Classes are looked up by their registry ``class_name`` against the module
+    globals (rather than via ``registry.resolve_provider_class``) so that tests
+    which monkeypatch the module-level imports keep working, and so a spec whose
+    class cannot be resolved is skipped gracefully.
+    """
+    classes: dict[str, type[TranscriptionProvider]] = {}
+    for spec in registry.TRANSCRIPTION_SPECS:
+        provider_class = globals().get(spec.class_name)
+        if provider_class is not None:
+            classes[spec.id] = provider_class
+    return classes
+
+
+def _build_provider_categories() -> dict[str, list[str]]:
+    """Group registered transcription provider ids by category."""
+    categories: dict[str, list[str]] = {"cloud": [], "local": []}
+    for spec in registry.TRANSCRIPTION_SPECS:
+        categories.setdefault(spec.category, []).append(spec.id)
+    return categories
+
+
+def _build_generic_cache_entry(
+    provider_class: type[TranscriptionProvider], spec: registry.ProviderSpec
+) -> "ProviderInfo":
+    """Build a cache entry for a standard provider from its spec and class.
+
+    Cloud providers report ``configured: False`` here (their real status is
+    filled in later from the credential store). Local providers report their own
+    ``is_configured()``. ``availability_message`` and ``is_installed`` are
+    attached only when the provider exposes the corresponding classmethods, so
+    cloud providers (which do not) keep their original metadata shape.
+    """
+    provider = provider_class()
+    info: ProviderInfo = {
+        "id": spec.id,
+        "name": spec.display_name,
+        "display_name": spec.display_name,
+        "configured": provider.is_configured() if spec.category == "local" else False,
+        "category": spec.category,
+        "requires_download": spec.requires_download,
+        "models": provider.get_models(),
+    }
+
+    installed_check = getattr(provider_class, "is_faster_whisper_installed", None)
+    if callable(installed_check):
+        info["is_installed"] = installed_check()
+
+    availability = getattr(provider_class, "get_availability_message", None)
+    if callable(availability):
+        info["availability_message"] = availability()
+
+    return info
+
+
+def _build_parakeet_cache_entry(
+    provider_class: type[TranscriptionProvider], spec: registry.ProviderSpec
+) -> "ProviderInfo":
+    """Build Parakeet's cache entry, gated on Apple Silicon availability."""
+    parakeet_class = cast(type[ParakeetProvider], provider_class)
+    provider = parakeet_class()
+    is_apple_silicon = parakeet_class.is_apple_silicon()
+    return {
+        "id": spec.id,
+        "name": spec.display_name + (" (Apple Silicon)" if is_apple_silicon else " (requires Apple Silicon)"),
+        "display_name": spec.display_name,
+        "configured": provider.is_configured() if is_apple_silicon else False,
+        "category": spec.category,
+        "requires_download": spec.requires_download,
+        "models": provider.get_models() if is_apple_silicon else [],
+        "is_installed": parakeet_class.is_parakeet_installed() if is_apple_silicon else False,
+        "availability_message": parakeet_class.get_availability_message(),
+    }
+
+
+# Per-provider cache-entry hooks for providers whose availability metadata is
+# too bespoke for the generic builder. Anything not listed uses the generic path.
+_CACHE_ENTRY_HOOKS = {
+    "parakeet": _build_parakeet_cache_entry,
+}
 
 
 class ProviderInfo(TypedDict):
@@ -45,21 +138,13 @@ class DownloadInfo(TypedDict, total=False):
 class TranscriptionManager:
     """Manages transcription providers and requests."""
 
-    # Registry of available providers
-    PROVIDER_CLASSES: dict[str, type[TranscriptionProvider]] = {
-        "openai": OpenAITranscribeProvider,
-        "openai_realtime": OpenAIRealtimeProvider,
-        "gemini": GeminiProvider,
-        "apple": AppleSpeechProvider,
-        "whisper_local": WhisperLocalProvider,
-        "parakeet": ParakeetProvider,
-    }
+    # Registry of available providers, derived from the central provider
+    # registry. Specs whose class cannot be resolved are skipped, so a future
+    # spec pointing at a not-yet-implemented module simply hides that provider.
+    PROVIDER_CLASSES: dict[str, type[TranscriptionProvider]] = _resolve_transcription_classes()
 
     # Provider categories for UI organization
-    PROVIDER_CATEGORIES = {
-        "cloud": ["openai", "openai_realtime", "gemini"],
-        "local": ["apple", "whisper_local", "parakeet"],
-    }
+    PROVIDER_CATEGORIES = _build_provider_categories()
 
     def __init__(self, config: Optional[Config] = None) -> None:
         self.config = config or Config.load()
@@ -92,93 +177,28 @@ class TranscriptionManager:
         return self._available_providers_cache
 
     def _build_available_providers_cache(self) -> list[ProviderInfo]:
-        """Build provider metadata that is expensive to recompute on every menu open."""
+        """Build provider metadata that is expensive to recompute on every menu open.
+
+        Driven by the central registry: one entry is produced per spec whose
+        provider class resolves from this module's namespace. Most metadata is
+        derived generically from the spec and the provider's optional classmethods
+        (``is_configured``/``get_availability_message``/``is_faster_whisper_installed``);
+        Parakeet keeps a bespoke hook for its Apple-Silicon gating.
+        """
         providers: list[ProviderInfo] = []
 
-        openai_provider = OpenAITranscribeProvider()
-        providers.append(
-            {
-                "id": "openai",
-                "name": "OpenAI",
-                "display_name": "OpenAI",
-                "configured": False,
-                "category": "cloud",
-                "requires_download": False,
-                "models": openai_provider.get_models(),
-            }
-        )
+        for spec in registry.TRANSCRIPTION_SPECS:
+            if spec.platform_gate == "darwin" and platform.system() != "Darwin":
+                continue
 
-        openai_realtime_provider = OpenAIRealtimeProvider()
-        providers.append(
-            {
-                "id": "openai_realtime",
-                "name": "OpenAI Realtime",
-                "display_name": "OpenAI Realtime",
-                "configured": False,
-                "category": "cloud",
-                "requires_download": False,
-                "models": openai_realtime_provider.get_models(),
-            }
-        )
+            # Resolve from the module namespace (not PROVIDER_CLASSES) so tests
+            # that monkeypatch the module-level provider imports are honored.
+            provider_class = globals().get(spec.class_name)
+            if provider_class is None:
+                continue
 
-        gemini_provider = GeminiProvider()
-        providers.append(
-            {
-                "id": "gemini",
-                "name": "Google Gemini",
-                "display_name": "Google Gemini",
-                "configured": False,
-                "category": "cloud",
-                "requires_download": False,
-                "models": gemini_provider.get_models(),
-            }
-        )
-
-        apple_provider = AppleSpeechProvider()
-        providers.append(
-            {
-                "id": "apple",
-                "name": "Apple (Built-in)",
-                "display_name": "Apple (Built-in)",
-                "configured": apple_provider.is_configured(),
-                "category": "local",
-                "requires_download": False,
-                "models": apple_provider.get_models(),
-                "availability_message": AppleSpeechProvider.get_availability_message(),
-            }
-        )
-
-        whisper_provider = WhisperLocalProvider()
-        providers.append(
-            {
-                "id": "whisper_local",
-                "name": "Whisper Local",
-                "display_name": "Whisper Local",
-                "configured": whisper_provider.is_configured(),
-                "category": "local",
-                "requires_download": True,
-                "models": whisper_provider.get_models(),
-                "is_installed": WhisperLocalProvider.is_faster_whisper_installed(),
-                "availability_message": WhisperLocalProvider.get_availability_message(),
-            }
-        )
-
-        if platform.system() == "Darwin":
-            parakeet_provider = ParakeetProvider()
-            is_apple_silicon = ParakeetProvider.is_apple_silicon()
-            providers.append(
-                {
-                    "id": "parakeet",
-                    "name": "Parakeet" + (" (Apple Silicon)" if is_apple_silicon else " (requires Apple Silicon)"),
-                    "display_name": "Parakeet",
-                    "configured": parakeet_provider.is_configured() if is_apple_silicon else False,
-                    "category": "local",
-                    "requires_download": True,
-                    "models": parakeet_provider.get_models() if is_apple_silicon else [],
-                    "is_installed": ParakeetProvider.is_parakeet_installed() if is_apple_silicon else False,
-                    "availability_message": ParakeetProvider.get_availability_message(),
-                }
-            )
+            hook = _CACHE_ENTRY_HOOKS.get(spec.id, _build_generic_cache_entry)
+            providers.append(hook(provider_class, spec))
 
         return providers
 
@@ -223,13 +243,21 @@ class TranscriptionManager:
             self.config.set_provider_model(provider_id, current_model)
             self._invalidate_available_providers_cache()
 
-    def transcribe(self, audio_bytes: bytes, provider_id: Optional[str] = None) -> TranscriptionResult:
+    def transcribe(
+        self,
+        audio_bytes: bytes,
+        provider_id: Optional[str] = None,
+        vocabulary: Optional[Sequence[str]] = None,
+    ) -> TranscriptionResult:
         """
         Transcribe audio using specified or default provider.
 
         Args:
             audio_bytes: WAV audio data
             provider_id: Provider to use (or None for default)
+            vocabulary: Optional words/phrases to bias recognition toward; passed
+                through to the provider, which applies it via its native biasing
+                mechanism (providers without support ignore it).
 
         Returns:
             TranscriptionResult with text and metadata
@@ -254,7 +282,7 @@ class TranscriptionManager:
                     f"Provider '{provider_id}' is not configured. " f"Please configure it in the settings menu."
                 )
 
-        result = provider.transcribe(audio_bytes)
+        result = provider.transcribe(audio_bytes, vocabulary=vocabulary)
         self._sync_provider_model_to_config(provider_id, provider)
 
         # Update stats
@@ -278,8 +306,14 @@ class TranscriptionManager:
         provider_id: Optional[str] = None,
         language: Optional[str] = None,
         prompt: Optional[str] = None,
+        vocabulary: Optional[Sequence[str]] = None,
     ) -> LiveTranscriptionSession:
-        """Create a live transcription session for the selected provider."""
+        """Create a live transcription session for the selected provider.
+
+        ``vocabulary`` is forwarded to the provider's native biasing mechanism
+        (e.g. folded into the Realtime session prompt); providers without support
+        ignore it.
+        """
         provider_id = provider_id or self.config.default_provider
         provider = self.get_provider(provider_id)
         if not provider:
@@ -289,7 +323,7 @@ class TranscriptionManager:
         if not provider.is_configured():
             raise ValueError(f"Provider '{provider_id}' is not configured.")
 
-        return provider.create_live_session(
+        kwargs: dict[str, Any] = dict(
             on_partial=on_partial,
             on_final=on_final,
             on_error=on_error,
@@ -297,18 +331,34 @@ class TranscriptionManager:
             language=language,
             prompt=prompt,
         )
+        # Forward vocabulary only to providers whose live-session factory accepts
+        # it, so providers that predate the kwarg (e.g. local streaming ones) are
+        # not broken by an unexpected argument.
+        if "vocabulary" in inspect.signature(provider.create_live_session).parameters:
+            kwargs["vocabulary"] = vocabulary
+
+        return provider.create_live_session(**kwargs)
 
     def _find_fallback_provider(self, current_provider: str) -> Optional[TranscriptionProvider]:
         """Find a fallback provider if the current one isn't configured."""
-        local_providers = {"apple", "whisper_local", "parakeet"}
+        local_providers = set(self.PROVIDER_CATEGORIES.get("local", []))
 
         # Respect provider boundaries for privacy. If a user selected a cloud
         # provider, do not silently route microphone audio to a different vendor.
         if current_provider not in local_providers:
             return None
 
-        # Local providers may still fall back to other local options.
-        fallback_order = ["apple", "whisper_local", "parakeet"]
+        # Local providers may still fall back to other local options, in the
+        # priority order declared by the registry.
+        fallback_order = [
+            spec.id
+            for spec in sorted(
+                (s for s in registry.TRANSCRIPTION_SPECS if s.fallback_priority is not None),
+                # The generator above filters out None priorities; `or 0` keeps
+                # the lambda total for the type checker without changing order.
+                key=lambda s: s.fallback_priority or 0,
+            )
+        ]
 
         for pid in fallback_order:
             if pid == current_provider:
@@ -320,7 +370,11 @@ class TranscriptionManager:
         return None
 
     def transcribe_streaming(
-        self, audio_bytes: bytes, on_chunk: Callable[[str], None], provider_id: Optional[str] = None
+        self,
+        audio_bytes: bytes,
+        on_chunk: Callable[[str], None],
+        provider_id: Optional[str] = None,
+        vocabulary: Optional[Sequence[str]] = None,
     ) -> TranscriptionResult:
         """
         Transcribe audio with streaming output.
@@ -329,6 +383,8 @@ class TranscriptionManager:
             audio_bytes: WAV audio data
             on_chunk: Callback for streaming text updates
             provider_id: Provider to use (or None for default)
+            vocabulary: Optional words/phrases to bias recognition toward; passed
+                through to the provider's native biasing mechanism.
 
         Returns:
             TranscriptionResult with text and metadata
@@ -347,10 +403,10 @@ class TranscriptionManager:
                 raise ValueError(f"Provider '{provider_id}' is not configured.")
 
         if provider.supports_streaming():
-            result = provider.transcribe_streaming(audio_bytes, on_chunk)
+            result = provider.transcribe_streaming(audio_bytes, on_chunk, vocabulary=vocabulary)
         else:
             # Fallback to non-streaming
-            result = provider.transcribe(audio_bytes)
+            result = provider.transcribe(audio_bytes, vocabulary=vocabulary)
             if result.text:
                 on_chunk(result.text)
 
@@ -404,9 +460,10 @@ class TranscriptionManager:
         if not provider:
             return {"error": f"Unknown provider: {provider_id}"}
 
+        download_specs = {spec.id for spec in registry.TRANSCRIPTION_SPECS if spec.requires_download}
         info: DownloadInfo = {
             "provider_id": provider_id,
-            "requires_download": provider_id in ["whisper_local", "parakeet"],
+            "requires_download": provider_id in download_specs,
         }
 
         if hasattr(provider, "is_model_downloaded"):

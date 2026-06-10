@@ -42,7 +42,7 @@ class DummyLiveProvider(TranscriptionProvider):
         self.model = model
         self.session = DummyLiveSession()
 
-    def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
+    def transcribe(self, audio_bytes: bytes, vocabulary=None) -> TranscriptionResult:
         return TranscriptionResult(
             text="",
             duration_seconds=0.0,
@@ -81,6 +81,7 @@ class StubProvider(TranscriptionProvider):
     instances = 0
     transcribe_calls = 0
     last_audio_bytes = None
+    last_vocabulary = None
 
     def __init__(self, model: str = ""):
         type(self).instances += 1
@@ -91,10 +92,12 @@ class StubProvider(TranscriptionProvider):
         cls.instances = 0
         cls.transcribe_calls = 0
         cls.last_audio_bytes = None
+        cls.last_vocabulary = None
 
-    def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
+    def transcribe(self, audio_bytes: bytes, vocabulary=None) -> TranscriptionResult:
         type(self).transcribe_calls += 1
         type(self).last_audio_bytes = audio_bytes
+        type(self).last_vocabulary = vocabulary
         return TranscriptionResult(
             text=self.transcribed_text,
             duration_seconds=1.25,
@@ -212,7 +215,7 @@ class RuntimeFallbackModelProvider(StubProvider):
     name = "gemini"
     display_name = "Gemini"
 
-    def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
+    def transcribe(self, audio_bytes: bytes, vocabulary=None) -> TranscriptionResult:
         self.model = "stable-model"
         return TranscriptionResult(
             text="fallback result",
@@ -447,3 +450,22 @@ def test_transcription_manager_persists_runtime_model_fallback(mock_config, monk
 
     assert result.model == "stable-model"
     assert mock_config.gemini_model == "stable-model"
+
+
+def test_manager_passes_vocabulary_through_to_provider(mock_config, monkeypatch, sample_audio_bytes):
+    """The manager should forward vocabulary to the provider on transcribe and transcribe_streaming."""
+    reset_provider_classes(StubProvider)
+    monkeypatch.setattr(TranscriptionManager, "PROVIDER_CLASSES", {"stub": StubProvider})
+    mock_config.default_provider = "stub"
+
+    manager = TranscriptionManager(mock_config)
+
+    manager.transcribe(sample_audio_bytes, vocabulary=["Kubernetes", "Anthropic"])
+    assert StubProvider.last_vocabulary == ["Kubernetes", "Anthropic"]
+
+    # The streaming path (here falling back to transcribe) also forwards vocabulary.
+    StubProvider.last_vocabulary = None
+    manager.transcribe_streaming(sample_audio_bytes, lambda _c: None, vocabulary=["gRPC"])
+    assert StubProvider.last_vocabulary == ["gRPC"]
+
+    reset_provider_classes(StubProvider)

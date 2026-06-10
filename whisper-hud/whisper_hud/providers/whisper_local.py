@@ -16,8 +16,9 @@ import os
 import platform
 import time
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional, Callable, Sequence
 from .base import TranscriptionProvider, TranscriptionResult
+from .vocabulary_utils import format_vocabulary_glossary
 
 # Model cache directory
 CACHE_DIR = Path.home() / ".cache" / "whisper-hud" / "models"
@@ -240,17 +241,21 @@ class WhisperLocalProvider(TranscriptionProvider):
 
         return self._whisper_model
 
-    def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
+    def transcribe(self, audio_bytes: bytes, vocabulary: Optional[Sequence[str]] = None) -> TranscriptionResult:
         """
         Transcribe audio using local Whisper model.
 
         Args:
             audio_bytes: WAV file contents
+            vocabulary: Optional words/phrases mapped to faster-whisper's
+                ``initial_prompt`` argument as a glossary string to bias
+                recognition toward the listed terms.
 
         Returns:
             TranscriptionResult with transcribed text
         """
         start_time = time.time()
+        initial_prompt = format_vocabulary_glossary(vocabulary)
 
         try:
             model = self._load_model()
@@ -265,6 +270,7 @@ class WhisperLocalProvider(TranscriptionProvider):
                     beam_size=5,
                     language=None,  # Auto-detect
                     vad_filter=True,  # Filter out non-speech
+                    initial_prompt=initial_prompt,  # Vocabulary biasing (None when unset)
                 )
 
                 # Collect text from segments
@@ -397,18 +403,26 @@ class WhisperLocalProvider(TranscriptionProvider):
         """faster-whisper supports streaming via segments."""
         return True
 
-    def transcribe_streaming(self, audio_bytes: bytes, on_chunk: Callable[[str], None]) -> TranscriptionResult:
+    def transcribe_streaming(
+        self,
+        audio_bytes: bytes,
+        on_chunk: Callable[[str], None],
+        vocabulary: Optional[Sequence[str]] = None,
+    ) -> TranscriptionResult:
         """
         Transcribe audio with streaming output.
 
         Args:
             audio_bytes: WAV file contents
             on_chunk: Callback called with cumulative text as segments complete
+            vocabulary: Optional words/phrases mapped to faster-whisper's
+                ``initial_prompt`` argument as a glossary string.
 
         Returns:
             TranscriptionResult with final text
         """
         start_time = time.time()
+        initial_prompt = format_vocabulary_glossary(vocabulary)
 
         try:
             model = self._load_model()
@@ -423,6 +437,7 @@ class WhisperLocalProvider(TranscriptionProvider):
                     beam_size=5,
                     language=None,
                     vad_filter=True,
+                    initial_prompt=initial_prompt,  # Vocabulary biasing (None when unset)
                 )
 
                 # Stream segments

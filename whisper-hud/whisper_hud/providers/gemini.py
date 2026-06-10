@@ -4,20 +4,33 @@ Google Gemini API provider for audio transcription.
 Gemini models can process audio natively and provide transcription.
 Supports speaker diarization through prompting.
 
-Models (May 2026):
-- gemini-3.1-flash-lite: Current stable default for direct audio transcription
+Models (verified June 2026 against ai.google.dev/gemini-api/docs/models + audio docs):
+- gemini-3.1-flash-lite: Current stable default for direct audio transcription (lowest latency/cost)
+- gemini-3.5-flash: Newest stable audio-capable Flash model (released 2026-05-19)
 - gemini-3-flash-preview: Frontier preview balanced model
 - gemini-3.1-pro-preview: Latest preview quality model
 - gemini-2.5-flash: Legacy stable fallback, supports audio input
 - gemini-2.5-pro: Strongest stable quality
 - gemini-2.5-flash-lite: Lowest latency/cost, supports audio input
+
+Cost-per-minute values below are approximate: Gemini bills audio understanding by
+token (~32 input tokens/sec of audio), so the per-minute figure is an estimate the
+HUD uses for rough cost display only.
 """
 
 from types import SimpleNamespace
-from typing import Callable
+from typing import Callable, Optional, Sequence
 from .base import TranscriptionProvider, TranscriptionResult
 from .error_utils import build_provider_error_message
+from .vocabulary_utils import normalize_vocabulary_phrases
 from ..keychain import get_api_key
+
+# Base instruction sent with the audio; a vocabulary hint line is appended when
+# the user supplies biasing terms (see _build_transcription_prompt).
+_BASE_TRANSCRIPTION_PROMPT = """Transcribe this audio exactly as spoken.
+Output ONLY the transcription text, nothing else.
+Do not add any commentary, labels, or formatting.
+Preserve natural punctuation."""
 
 
 class GeminiProvider(TranscriptionProvider):
@@ -46,6 +59,13 @@ class GeminiProvider(TranscriptionProvider):
             "name": "Gemini 3.1 Flash-Lite",
             "description": "Current stable default for direct audio transcription",
             "cost_per_minute": 0.001,
+            "recommended": True,
+        },
+        {
+            "id": "gemini-3.5-flash",
+            "name": "Gemini 3.5 Flash",
+            "description": "Newest stable audio-capable Flash model; higher quality than Flash-Lite",
+            "cost_per_minute": 0.002,
             "recommended": True,
         },
         {
@@ -118,6 +138,20 @@ class GeminiProvider(TranscriptionProvider):
         return self._client
 
     @staticmethod
+    def _build_transcription_prompt(vocabulary: Optional[Sequence[str]] = None) -> str:
+        """Build the transcription instruction, appending a vocabulary hint line.
+
+        When the user supplies biasing terms, a short hint line listing them is
+        appended so Gemini favors those spellings; otherwise the base prompt is
+        returned unchanged.
+        """
+        phrases = normalize_vocabulary_phrases(vocabulary)
+        if not phrases:
+            return _BASE_TRANSCRIPTION_PROMPT
+        hint = "Expect these words/phrases (use their exact spelling): " + ", ".join(phrases) + "."
+        return f"{_BASE_TRANSCRIPTION_PROMPT}\n{hint}"
+
+    @staticmethod
     def _is_model_not_found_error(error: Exception) -> bool:
         """Return True when Gemini rejects the selected model ID."""
         message = str(error).lower()
@@ -125,8 +159,13 @@ class GeminiProvider(TranscriptionProvider):
             return False
         return any(token in message for token in ("not found", "invalid", "unsupported", "unknown"))
 
-    def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
-        """Transcribe audio using Gemini."""
+    def transcribe(self, audio_bytes: bytes, vocabulary: Optional[Sequence[str]] = None) -> TranscriptionResult:
+        """Transcribe audio using Gemini.
+
+        ``vocabulary`` appends a short hint line listing the expected
+        words/phrases to the transcription instruction so Gemini favors their
+        spellings.
+        """
         if not audio_bytes:
             return TranscriptionResult(
                 text="", duration_seconds=0, cost_estimate=0, provider=self.name, model=self.model
@@ -136,11 +175,8 @@ class GeminiProvider(TranscriptionProvider):
 
         from google.genai import types
 
-        # Transcription prompt - optimized for accuracy
-        prompt = """Transcribe this audio exactly as spoken.
-Output ONLY the transcription text, nothing else.
-Do not add any commentary, labels, or formatting.
-Preserve natural punctuation."""
+        # Transcription prompt - optimized for accuracy (plus optional vocabulary hint)
+        prompt = self._build_transcription_prompt(vocabulary)
 
         audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
         attempt_models = [self.model]
@@ -240,13 +276,20 @@ Preserve natural punctuation."""
             return None
         return text.strip()
 
-    def transcribe_streaming(self, audio_bytes: bytes, on_chunk: Callable[[str], None]) -> TranscriptionResult:
+    def transcribe_streaming(
+        self,
+        audio_bytes: bytes,
+        on_chunk: Callable[[str], None],
+        vocabulary: Optional[Sequence[str]] = None,
+    ) -> TranscriptionResult:
         """
         Transcribe audio with streaming output.
 
         Args:
             audio_bytes: WAV file contents
             on_chunk: Callback called with cumulative text as it streams
+            vocabulary: Optional words/phrases appended as a hint line to the
+                transcription instruction.
 
         Returns:
             TranscriptionResult with final text and metadata
@@ -259,11 +302,8 @@ Preserve natural punctuation."""
         client = self._get_client()
         from google.genai import types
 
-        # Transcription prompt
-        prompt = """Transcribe this audio exactly as spoken.
-Output ONLY the transcription text, nothing else.
-Do not add any commentary, labels, or formatting.
-Preserve natural punctuation."""
+        # Transcription prompt (plus optional vocabulary hint)
+        prompt = self._build_transcription_prompt(vocabulary)
 
         audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
         attempt_models = [self.model]

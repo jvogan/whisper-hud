@@ -4,7 +4,7 @@ Abstract base class for transcription providers.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, Sequence
 
 
 @dataclass
@@ -26,12 +26,19 @@ class TranscriptionProvider(ABC):
     display_name: str = "Base Provider"
 
     @abstractmethod
-    def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
+    def transcribe(self, audio_bytes: bytes, vocabulary: Sequence[str] | None = None) -> TranscriptionResult:
         """
         Transcribe audio to text.
 
         Args:
             audio_bytes: WAV file contents
+            vocabulary: Optional list of words/phrases (names, jargon, acronyms)
+                the user expects to say. Providers should apply it through their
+                native biasing mechanism (e.g. an OpenAI ``prompt`` glossary,
+                faster-whisper ``initial_prompt``, or Apple
+                ``contextualStrings``) to improve recognition of those terms.
+                Providers that have no biasing mechanism MUST accept this
+                argument and ignore it.
 
         Returns:
             TranscriptionResult with text and metadata
@@ -84,7 +91,12 @@ class TranscriptionProvider(ABC):
         """Create a live transcription session for providers that support it."""
         raise NotImplementedError(f"{self.display_name} does not support live transcription sessions")
 
-    def transcribe_streaming(self, audio_bytes: bytes, on_chunk: Callable[[str], None]) -> TranscriptionResult:
+    def transcribe_streaming(
+        self,
+        audio_bytes: bytes,
+        on_chunk: Callable[[str], None],
+        vocabulary: Sequence[str] | None = None,
+    ) -> TranscriptionResult:
         """
         Transcribe audio with streaming output.
 
@@ -94,12 +106,13 @@ class TranscriptionProvider(ABC):
         Args:
             audio_bytes: WAV file contents
             on_chunk: Callback called with cumulative text as it streams
+            vocabulary: Optional biasing vocabulary; see :meth:`transcribe`.
 
         Returns:
             TranscriptionResult with final text and metadata
         """
         # Default: fall back to non-streaming
-        result = self.transcribe(audio_bytes)
+        result = self.transcribe(audio_bytes, vocabulary=vocabulary)
         if result.text:
             on_chunk(result.text)
         return result

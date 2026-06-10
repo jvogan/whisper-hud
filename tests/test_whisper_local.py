@@ -225,7 +225,7 @@ def test_transcribe_returns_text_and_metadata(monkeypatch, sample_audio_bytes):
     assert len(fake_model.transcribe_calls) == 1
     call_args, call_kwargs = fake_model.transcribe_calls[0]
     assert call_args and call_args[0].endswith(".wav")
-    assert call_kwargs == {"beam_size": 5, "language": None, "vad_filter": True}
+    assert call_kwargs == {"beam_size": 5, "language": None, "vad_filter": True, "initial_prompt": None}
     assert len(deleted_paths) == 1
     assert deleted_paths[0].endswith(".wav")
 
@@ -354,6 +354,51 @@ def test_check_disk_space_returns_false_on_failure(monkeypatch):
     )
 
     assert WhisperLocalProvider.check_disk_space(100) == (False, 0.0)
+
+
+def test_transcribe_maps_vocabulary_to_initial_prompt(monkeypatch, sample_audio_bytes):
+    """Vocabulary should reach faster-whisper as the ``initial_prompt`` glossary string."""
+    provider = WhisperLocalProvider(model="small")
+    fake_model = FakeWhisperModel("small", "cpu", "float16", str(CACHE_DIR))
+
+    monkeypatch.setattr(provider, "_load_model", lambda: fake_model)
+    monkeypatch.setattr("whisper_hud.encryption.create_private_temp_file", lambda _data: "/tmp/w.wav")
+    monkeypatch.setattr("whisper_hud.encryption.secure_delete", lambda _path: None)
+
+    provider.transcribe(sample_audio_bytes, vocabulary=["Kubernetes", "gRPC"])
+
+    _args, kwargs = fake_model.transcribe_calls[0]
+    assert kwargs["initial_prompt"] == "Vocabulary: Kubernetes, gRPC."
+
+
+def test_transcribe_sends_no_initial_prompt_for_empty_vocabulary(monkeypatch, sample_audio_bytes):
+    """None/empty vocabulary should pass ``initial_prompt=None`` (no biasing)."""
+    provider = WhisperLocalProvider(model="small")
+    fake_model = FakeWhisperModel("small", "cpu", "float16", str(CACHE_DIR))
+
+    monkeypatch.setattr(provider, "_load_model", lambda: fake_model)
+    monkeypatch.setattr("whisper_hud.encryption.create_private_temp_file", lambda _data: "/tmp/w.wav")
+    monkeypatch.setattr("whisper_hud.encryption.secure_delete", lambda _path: None)
+
+    provider.transcribe(sample_audio_bytes, vocabulary=[])
+
+    _args, kwargs = fake_model.transcribe_calls[0]
+    assert kwargs["initial_prompt"] is None
+
+
+def test_transcribe_streaming_maps_vocabulary_to_initial_prompt(monkeypatch, sample_audio_bytes):
+    """Streaming transcription should also bias via ``initial_prompt``."""
+    provider = WhisperLocalProvider(model="base")
+    fake_model = FakeWhisperModel("base", "cpu", "float16", str(CACHE_DIR))
+
+    monkeypatch.setattr(provider, "_load_model", lambda: fake_model)
+    monkeypatch.setattr("whisper_hud.encryption.create_private_temp_file", lambda _data: "/tmp/w.wav")
+    monkeypatch.setattr("whisper_hud.encryption.secure_delete", lambda _path: None)
+
+    provider.transcribe_streaming(sample_audio_bytes, lambda _c: None, vocabulary=["Anthropic"])
+
+    _args, kwargs = fake_model.transcribe_calls[0]
+    assert kwargs["initial_prompt"] == "Vocabulary: Anthropic."
 
 
 def test_provider_helper_methods_expose_static_metadata():

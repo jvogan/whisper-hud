@@ -254,6 +254,10 @@ if [[ -f "$SCRIPT_DIR/scripts/build-apple-translate.sh" && ! -x "$APP_DIR/bin/wh
     "$SCRIPT_DIR/scripts/build-apple-translate.sh" || true
 fi
 
+if [[ -f "$SCRIPT_DIR/scripts/build-speechanalyzer.sh" && ! -x "$APP_DIR/bin/whisperhud-speechanalyzer" ]]; then
+    "$SCRIPT_DIR/scripts/build-speechanalyzer.sh" || true
+fi
+
 if [[ ! -f "$VENV_ACTIVATE" ]]; then
     echo "WhisperHUD virtual environment not found."
     echo "Run ./install.sh first, then try ./run.sh again."

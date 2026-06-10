@@ -40,7 +40,7 @@ class FakeWhisperLocalProvider(TranscriptionProvider):
     def __init__(self, model=None):
         self.model = model or "tiny"
 
-    def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
+    def transcribe(self, audio_bytes: bytes, vocabulary=None) -> TranscriptionResult:
         self.__class__.seen_audio.append(audio_bytes)
         if self.__class__.error is not None:
             raise self.__class__.error

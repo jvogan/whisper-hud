@@ -20,6 +20,7 @@ import keyring
 
 from .encryption import SCRYPT_PARAMS
 from .logging_config import get_logger
+from .providers import registry
 
 if TYPE_CHECKING:
     from .config import Config
@@ -27,7 +28,12 @@ if TYPE_CHECKING:
 logger = get_logger("keychain")
 
 SERVICE_NAME = "whisper-hud"
-PROVIDERS = ("openai", "gemini", "anthropic")
+# The set of API-key vendors this app stores credentials for is derived from the
+# central provider registry so that adding a cloud provider does not require a
+# second edit here. With the current registry this is ("openai", "gemini",
+# "anthropic"). Each vendor must also have a display name and key-format
+# validator entry below.
+PROVIDERS = registry.credential_vendors()
 STORAGE_MODES = ("passphrase", "keychain", "none")
 DEFAULT_STORAGE_MODE = "passphrase"
 PASSFILE_NAME = "credentials.enc"
@@ -40,6 +46,30 @@ _PROVIDER_DISPLAY_NAMES = {
     "openai": "OpenAI",
     "gemini": "Gemini",
     "anthropic": "Anthropic",
+}
+
+
+def _check_openai_key_format(normalized_key: str) -> None:
+    """Enforce OpenAI key-format rules (raises ValueError on failure)."""
+    if not normalized_key.startswith("sk-"):
+        raise ValueError("OpenAI API keys must start with 'sk-'")
+    if len(normalized_key) < 40:
+        raise ValueError("OpenAI API keys must be at least 40 characters")
+
+
+def _check_gemini_key_format(normalized_key: str) -> None:
+    """Enforce Gemini key-format rules (raises ValueError on failure)."""
+    if len(normalized_key) < 20:
+        raise ValueError("Gemini API keys must be at least 20 characters")
+
+
+# Per-vendor key-format checks applied after the shared empty/whitespace checks.
+# Vendors without an entry (e.g. Anthropic) only get the shared checks, matching
+# the historical behavior. Adding a vendor = registry entry + (optionally) one
+# entry here plus one validator in _API_KEY_VALIDATORS.
+_KEY_FORMAT_CHECKS = {
+    "openai": _check_openai_key_format,
+    "gemini": _check_gemini_key_format,
 }
 
 
@@ -74,14 +104,9 @@ def _normalize_and_validate_api_key(provider: str, api_key: str) -> str:
     if any(char.isspace() for char in normalized_key):
         raise ValueError(f"{provider_name} API key must not contain whitespace")
 
-    if provider == "openai":
-        if not normalized_key.startswith("sk-"):
-            raise ValueError("OpenAI API keys must start with 'sk-'")
-        if len(normalized_key) < 40:
-            raise ValueError("OpenAI API keys must be at least 40 characters")
-    elif provider == "gemini":
-        if len(normalized_key) < 20:
-            raise ValueError("Gemini API keys must be at least 20 characters")
+    format_check = _KEY_FORMAT_CHECKS.get(provider)
+    if format_check is not None:
+        format_check(normalized_key)
 
     return normalized_key
 
@@ -614,13 +639,10 @@ def validate_api_key(provider: str, api_key: str) -> tuple[bool, str]:
     Returns:
         Tuple of (is_valid, error_message)
     """
-    if provider == "openai":
-        return _validate_openai_key(api_key)
-    if provider == "gemini":
-        return _validate_gemini_key(api_key)
-    if provider == "anthropic":
-        return _validate_anthropic_key(api_key)
-    return False, f"Unknown provider: {provider}"
+    validator = _API_KEY_VALIDATORS.get(provider)
+    if validator is None:
+        return False, f"Unknown provider: {provider}"
+    return validator(api_key)
 
 
 def _validation_get(url: str, **kwargs):
@@ -735,3 +757,13 @@ def _validate_anthropic_key(api_key: str) -> tuple[bool, str]:
         return False, "Could not connect to Anthropic"
     except Exception as e:
         return False, f"Validation error: {str(e)[:50]}"
+
+
+# Per-vendor live-validation callables dispatched by validate_api_key. Adding a
+# vendor = registry entry + one validator here (and, if needed, a key-format
+# check in _KEY_FORMAT_CHECKS and a display name in _PROVIDER_DISPLAY_NAMES).
+_API_KEY_VALIDATORS = {
+    "openai": _validate_openai_key,
+    "gemini": _validate_gemini_key,
+    "anthropic": _validate_anthropic_key,
+}

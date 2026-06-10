@@ -62,12 +62,16 @@ class _FakeRequest:
         self.file_url = file_url
         self.partial_results = None
         self.requires_on_device = None
+        self.contextual_strings = None
 
     def setShouldReportPartialResults_(self, value):
         self.partial_results = value
 
     def setRequiresOnDeviceRecognition_(self, value):
         self.requires_on_device = value
+
+    def setContextualStrings_(self, value):
+        self.contextual_strings = value
 
 
 class _FakeRequestFactory:
@@ -210,6 +214,78 @@ def test_transcribe_returns_text_on_success(monkeypatch, sample_audio_bytes):
     assert request_factory.requests[0].partial_results is False
     assert request_factory.requests[0].requires_on_device is True
     assert secure_delete_calls and secure_delete_calls[0].endswith(".wav")
+
+
+def test_vocabulary_is_set_as_contextual_strings(monkeypatch, sample_audio_bytes):
+    """Vocabulary should be passed directly as the request's contextualStrings list."""
+    _set_macos(monkeypatch)
+
+    def complete(handler):
+        handler(_FakeRecognitionResult("hi"), None)
+
+    _recognizer, request_factory = _install_speech_modules(
+        monkeypatch,
+        recognizer=_FakeRecognizer(available=True, completion=complete),
+    )
+    monkeypatch.setattr(
+        "whisper_hud.providers.apple_speech.AppleSpeechProvider._check_availability",
+        lambda self: True,
+    )
+    monkeypatch.setattr("whisper_hud.encryption.secure_delete", lambda path: None)
+
+    AppleSpeechProvider(model="en-US").transcribe(
+        sample_audio_bytes, vocabulary=["Kubernetes", "Anthropic", "gRPC"]
+    )
+
+    # contextualStrings receives the phrase list directly (not a glossary string).
+    assert request_factory.requests[0].contextual_strings == ["Kubernetes", "Anthropic", "gRPC"]
+
+
+def test_vocabulary_caps_contextual_strings_at_max(monkeypatch, sample_audio_bytes):
+    """An oversized vocabulary should be capped to MAX_CONTEXTUAL_STRINGS phrases."""
+    from whisper_hud.providers.apple_speech import MAX_CONTEXTUAL_STRINGS
+
+    _set_macos(monkeypatch)
+
+    def complete(handler):
+        handler(_FakeRecognitionResult("hi"), None)
+
+    _recognizer, request_factory = _install_speech_modules(
+        monkeypatch,
+        recognizer=_FakeRecognizer(available=True, completion=complete),
+    )
+    monkeypatch.setattr(
+        "whisper_hud.providers.apple_speech.AppleSpeechProvider._check_availability",
+        lambda self: True,
+    )
+    monkeypatch.setattr("whisper_hud.encryption.secure_delete", lambda path: None)
+
+    big_vocab = [f"term{i}" for i in range(MAX_CONTEXTUAL_STRINGS + 25)]
+    AppleSpeechProvider(model="en-US").transcribe(sample_audio_bytes, vocabulary=big_vocab)
+
+    assert len(request_factory.requests[0].contextual_strings) == MAX_CONTEXTUAL_STRINGS
+
+
+def test_no_contextual_strings_set_when_vocabulary_empty(monkeypatch, sample_audio_bytes):
+    """No contextualStrings should be set for None or empty vocabulary."""
+    _set_macos(monkeypatch)
+
+    def complete(handler):
+        handler(_FakeRecognitionResult("hi"), None)
+
+    _recognizer, request_factory = _install_speech_modules(
+        monkeypatch,
+        recognizer=_FakeRecognizer(available=True, completion=complete),
+    )
+    monkeypatch.setattr(
+        "whisper_hud.providers.apple_speech.AppleSpeechProvider._check_availability",
+        lambda self: True,
+    )
+    monkeypatch.setattr("whisper_hud.encryption.secure_delete", lambda path: None)
+
+    AppleSpeechProvider(model="en-US").transcribe(sample_audio_bytes, vocabulary=None)
+
+    assert request_factory.requests[0].contextual_strings is None
 
 
 def test_transcribe_wraps_recognition_errors(monkeypatch, sample_audio_bytes):
