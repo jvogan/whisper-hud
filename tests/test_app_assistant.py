@@ -313,6 +313,48 @@ def test_menu_contains_voice_assistant_submenu(monkeypatch):
     assert any("High" in t for t in effort_titles)
 
 
+# --- (h2) model picker lists both tiers and tracks the configured model -----
+
+
+def test_menu_model_picker_lists_tiers_and_marks_selection(monkeypatch):
+    app = _build_menu_app(monkeypatch)
+    app.config.assistant_model = "gpt-realtime-mini"
+
+    app._build_menu()
+
+    va_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Voice Assistant")
+    titles = _menu_titles(va_menu)
+    assert "Model" in titles
+    # The cloud hint follows the configured model, not a hardcoded id.
+    assert any("Talks to OpenAI gpt-realtime-mini (cloud)" in t for t in titles)
+
+    model_menu = next(item for item in va_menu.items if getattr(item, "title", None) == "Model")
+    model_titles = _menu_titles(model_menu)
+    assert any("gpt-realtime-2" in t for t in model_titles)
+    assert any("gpt-realtime-mini" in t for t in model_titles)
+    assert any(t.startswith("● ") and "gpt-realtime-mini" in t for t in model_titles)
+    assert not any(t.startswith("● ") and "gpt-realtime-2" in t for t in model_titles)
+
+
+# --- (h3) selecting a model persists it and the next start uses it ----------
+
+
+def test_set_assistant_model_persists_and_next_start_uses_it(monkeypatch):
+    app = _build_assistant_app()
+    monkeypatch.setattr("whisper_hud.app.get_api_key", lambda provider: "sk-test")
+    monkeypatch.setattr("whisper_hud.app.VoiceAssistant", FakeAssistant)
+
+    app._set_assistant_model("gpt-realtime-mini")
+
+    assert app.config.assistant_model == "gpt-realtime-mini"
+    app.config.save.assert_called_once_with()
+    app._schedule_menu_rebuild.assert_called_once_with()
+
+    app._toggle_voice_assistant(None)
+
+    assert app._voice_assistant.kwargs["model"] == "gpt-realtime-mini"
+
+
 # --- (i) on_state updates the title icon ------------------------------------
 
 

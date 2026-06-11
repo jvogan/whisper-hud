@@ -1977,6 +1977,13 @@ class WhisperHUDApp(rumps.App):
     # Available realtime output voices and reasoning levels for the assistant.
     ASSISTANT_VOICES = ("marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse")
     ASSISTANT_REASONING_EFFORTS = ("low", "medium", "high")
+    # Conversation models offered in the picker. The original gpt-realtime is
+    # deliberately absent: it costs the same as gpt-realtime-2 without the
+    # reasoning, so there is no configuration where it is the better choice.
+    ASSISTANT_MODELS = (
+        ("gpt-realtime-2", "Best (gpt-realtime-2)"),
+        ("gpt-realtime-mini", "Budget (gpt-realtime-mini)"),
+    )
 
     def _assistant_is_active(self) -> bool:
         """Return True while the voice assistant owns a live conversation."""
@@ -1996,6 +2003,18 @@ class WhisperHUDApp(rumps.App):
         )
 
         va_menu.add(rumps.separator)
+
+        # Model picker (persists config.assistant_model; applies on next start).
+        model_menu = rumps.MenuItem("Model")
+        for model_id, label in self.ASSISTANT_MODELS:
+            prefix = "● " if self.config.assistant_model == model_id else "   "
+            model_menu.add(
+                rumps.MenuItem(
+                    f"{prefix}{label}",
+                    callback=lambda s, m=model_id: self._set_assistant_model(m),
+                )
+            )
+        va_menu.add(model_menu)
 
         # Voice picker (persists config.assistant_voice).
         voice_menu = rumps.MenuItem("Voice")
@@ -2025,7 +2044,7 @@ class WhisperHUDApp(rumps.App):
         )
 
         va_menu.add(rumps.separator)
-        va_menu.add(rumps.MenuItem("Talks to OpenAI gpt-realtime-2 (cloud)", callback=None))
+        va_menu.add(rumps.MenuItem(f"Talks to OpenAI {self.config.assistant_model} (cloud)", callback=None))
 
         self.menu.add(va_menu)
 
@@ -5147,6 +5166,12 @@ class WhisperHUDApp(rumps.App):
         self._schedule_menu_rebuild()
 
     # === Voice Assistant callbacks ==========================================
+
+    def _set_assistant_model(self, model_id: str) -> None:
+        """Persist the selected assistant conversation model."""
+        self.config.assistant_model = model_id
+        self.config.save()
+        self._schedule_menu_rebuild()
 
     def _set_assistant_voice(self, voice: str) -> None:
         """Persist the selected assistant output voice."""

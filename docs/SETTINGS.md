@@ -106,6 +106,7 @@ Your vocabulary and text replacements still apply. Voice commands and AI Cleanup
 A hands-free spoken conversation with OpenAI's voice model, in the top-level **Voice Assistant** menu. You talk, it replies through your speakers, and you can interrupt it mid-reply just by speaking. This is a **cloud, bring-your-own-key** feature: it needs an OpenAI API key, and your audio is sent to OpenAI while a chat is active.
 
 - **Start / Stop Voice Chat**: Begin or end the conversation. The menu-bar icon shows 🤖 while it's active.
+- **Model**: **Best** (`gpt-realtime-2`, default) or **Budget** (`gpt-realtime-mini`) for cheaper long chats. A model change applies the next time you start a chat.
 - **Voice**: The assistant's spoken voice (10 options; default **marin**).
 - **Reasoning Effort**: low / medium / high (default **low**).
 - **Allow Pasting Text**: When on, you can ask the assistant to paste text into the app you're using. Pasting is the **only** action it can take — it cannot run commands, read files, or control anything else.
