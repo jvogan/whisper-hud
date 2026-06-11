@@ -745,3 +745,82 @@ def test_play_sound_file_caps_hold_duration(monkeypatch):
     widget._play_sound_file("/p/blip.wav")
 
     assert sleeps == [10.0]
+
+
+def _reactive_widget(floating_widget):
+    widget = floating_widget.FloatingWidget(lambda: None, lambda: None)
+    widget._visible = True
+    widget._view = MagicMock()
+    widget._appearance_config = _frame_appearance({})
+    widget._image_processor = _FakeFrameProcessor({})
+    return widget
+
+
+def test_audio_level_reacts_only_while_recording(monkeypatch):
+    """The mic level is smoothed during recording and reset on leaving it."""
+    floating_widget = _load_floating_widget_module(monkeypatch)
+    monkeypatch.setattr(floating_widget.threading, "Timer", FakeTimer)
+    FakeTimer.created.clear()
+
+    widget = _reactive_widget(floating_widget)
+
+    # Ignored while idle.
+    widget.set_audio_level(0.9)
+    assert widget._audio_level == 0.0
+
+    widget.set_recording()
+    widget.set_audio_level(1.0)
+    first = widget._audio_level
+    assert 0.0 < first < 1.0  # smoothed, not a raw jump
+    widget.set_audio_level(1.0)
+    assert widget._audio_level > first  # converges upward while speaking
+    widget._view.setAudioLevel_.assert_called()  # forwarded to the view
+
+    # Leaving recording resets the level so the next turn starts quiet.
+    widget.set_processing()
+    assert widget._audio_level == 0.0
+    widget._view.setAudioLevel_.assert_called_with(0.0)
+
+
+def test_audio_level_clamps_and_rejects_garbage(monkeypatch):
+    floating_widget = _load_floating_widget_module(monkeypatch)
+    monkeypatch.setattr(floating_widget.threading, "Timer", FakeTimer)
+    FakeTimer.created.clear()
+
+    widget = _reactive_widget(floating_widget)
+    widget.set_recording()
+
+    widget.set_audio_level(5.0)  # clamped to 1.0 before smoothing
+    assert 0.0 < widget._audio_level <= 1.0
+    before = widget._audio_level
+
+    widget.set_audio_level("loud")  # garbage input is ignored
+    assert widget._audio_level == before
+
+
+def test_recording_frames_speed_up_with_voice(monkeypatch):
+    """Live level shortens the frame interval, capped at 30fps equivalent."""
+    floating_widget = _load_floating_widget_module(monkeypatch)
+    monkeypatch.setattr(floating_widget.threading, "Timer", FakeTimer)
+    FakeTimer.created.clear()
+
+    widget = floating_widget.FloatingWidget(lambda: None, lambda: None)
+    widget._visible = True
+    widget._view = MagicMock()
+    widget._appearance_config = _frame_appearance({"recording": {"frames": ["a", "b"], "fps": 10}})
+    widget._image_processor = _FakeFrameProcessor({"recording": ["f0", "f1"]})
+
+    widget.set_recording()
+    with widget._lock:
+        base = widget._current_animation_interval_locked()
+    assert abs(base - 0.1) < 1e-9
+
+    widget.set_audio_level(1.0)
+    with widget._lock:
+        boosted = widget._current_animation_interval_locked()
+    assert boosted < base
+
+    # Even a saturated level can never push playback past 30fps.
+    widget._audio_level = 1.0
+    with widget._lock:
+        assert widget._current_animation_interval_locked() >= (1.0 / 30.0) - 1e-9

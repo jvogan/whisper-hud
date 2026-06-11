@@ -76,7 +76,15 @@ from .keychain import (
 from .floating_widget import create_floating_widget
 from .streaming_panel import create_streaming_panel
 from .setup_wizard import show_setup_wizard
-from .branding import MenuBarIcons, APPEARANCE_THEMES, get_theme_colors, get_available_themes
+from .branding import (
+    MenuBarIcons,
+    APPEARANCE_THEMES,
+    get_theme_colors,
+    get_available_themes,
+    get_menubar_icon,
+    get_menubar_icon_frames,
+    split_menubar_title,
+)
 from .image_processor import ImageProcessor
 from .character_packs import CharacterPackManager
 from .encryption import (
@@ -137,6 +145,17 @@ class WhisperHUDApp(rumps.App):
     ICON_ERROR = MenuBarIcons.ERROR
     ICON_DOWNLOADING = MenuBarIcons.DOWNLOADING
     ICON_ASSISTANT = MenuBarIcons.ASSISTANT
+
+    # Frame cadence for the animated menu bar icon states (seconds/frame).
+    MENUBAR_FRAME_INTERVALS = {"processing": 0.10, "recording": 0.35}
+
+    # Menu bar icon animation state. Class-level defaults so instances
+    # constructed without __init__ (as the tests do) get safe values.
+    _menubar_anim_timer = None
+    _menubar_anim_state: Optional[str] = None
+    _menubar_anim_frames: tuple = ()
+    _menubar_anim_index = 0
+    _menubar_text: Optional[str] = None
 
     def __init__(self):
         super().__init__("WhisperHUD", icon=None, title=self.ICON_IDLE, quit_button=None)  # We'll add our own quit
@@ -254,6 +273,10 @@ class WhisperHUDApp(rumps.App):
 
         # Build menu
         self._build_menu()
+
+        # Render the menu bar status as a template icon when assets exist
+        # (the emoji title passed to super() stays as the fallback).
+        self._set_title(self._get_idle_icon())
 
         # Build hotkey set from config
         hotkey_set = self._build_hotkey_set()
@@ -3307,6 +3330,9 @@ class WhisperHUDApp(rumps.App):
                     self.hud.update_audio_level(level)
                 if self.streaming_panel and hasattr(self.streaming_panel, "update_audio_level"):
                     self.streaming_panel.update_audio_level(level)
+                widget = self.widget
+                if widget:
+                    widget.set_audio_level(level)
                 time.sleep(0.05)
 
         self._level_monitor_thread = threading.Thread(target=monitor_levels, daemon=True)
@@ -4241,10 +4267,16 @@ class WhisperHUDApp(rumps.App):
         _send()
 
     def _set_title(self, title: str) -> None:
-        """Set the menu bar title on the main thread when possible."""
+        """Set the menu bar status on the main thread when possible.
+
+        `title` is an emoji state token from MenuBarIcons, optionally with a
+        text suffix (e.g. the paste-target pin). When the bundled menubar
+        image assets are available the state renders as a template icon;
+        otherwise the emoji title itself is shown.
+        """
 
         def _apply():
-            self.title = title
+            self._apply_menubar_status(title)
 
         if threading.current_thread() is not threading.main_thread():
             try:
@@ -4256,6 +4288,63 @@ class WhisperHUDApp(rumps.App):
                 pass
 
         _apply()
+
+    def _apply_menubar_status(self, title: str) -> None:
+        """Resolve a state title to icon + text and push it to the status item."""
+        state, suffix = split_menubar_title(title)
+        icon_path = get_menubar_icon(state) if state else None
+        if icon_path is None:
+            self._stop_menubar_animation()
+            self._set_menubar_visuals(None, title)
+            return
+
+        self._menubar_text = suffix or None
+        self._set_menubar_visuals(str(icon_path), self._menubar_text)
+        self._animate_menubar_state(state)
+
+    def _set_menubar_visuals(self, icon_path: Optional[str], text: Optional[str]) -> None:
+        """Assign the rumps status-item icon and title text."""
+        if icon_path is not None and self.template is not True:
+            # Template mode lets macOS tint the icon for light/dark menu bars.
+            self.template = True
+        self.icon = icon_path
+        self.title = text
+
+    def _animate_menubar_state(self, state: str) -> None:
+        """Run the frame-swap timer for animated states; stop it otherwise."""
+        interval = self.MENUBAR_FRAME_INTERVALS.get(state)
+        frames = get_menubar_icon_frames(state) if interval else []
+        if len(frames) < 2:
+            self._stop_menubar_animation()
+            return
+        if self._menubar_anim_state == state:
+            return  # already animating this state
+        self._stop_menubar_animation()
+        self._menubar_anim_state = state
+        self._menubar_anim_frames = tuple(str(path) for path in frames)
+        self._menubar_anim_index = 0
+        timer = rumps.Timer(self._menubar_anim_tick, interval)
+        self._menubar_anim_timer = timer
+        timer.start()
+
+    def _menubar_anim_tick(self, _timer) -> None:
+        frames = self._menubar_anim_frames
+        if not frames:
+            return
+        self._menubar_anim_index = (self._menubar_anim_index + 1) % len(frames)
+        self._set_menubar_visuals(frames[self._menubar_anim_index], self._menubar_text)
+
+    def _stop_menubar_animation(self) -> None:
+        timer = self._menubar_anim_timer
+        self._menubar_anim_timer = None
+        self._menubar_anim_state = None
+        self._menubar_anim_frames = ()
+        self._menubar_anim_index = 0
+        if timer is not None:
+            try:
+                timer.stop()
+            except Exception:
+                pass
 
     def _get_idle_icon(self) -> str:
         """Get the idle icon, with indicators for special modes."""

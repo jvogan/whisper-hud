@@ -145,6 +145,7 @@ if HAS_APPKIT:
             self._appearance_config = None
             self._custom_icon = None  # Cached custom icon image (single-frame)
             self._animation_phase = 0.0
+            self._audio_level = 0.0  # Smoothed live mic level (0..1) while recording
             # Multi-frame sprite animation: when the active pack defines frames
             # for the current state these are drawn instead of _custom_icon.
             self._frames = []
@@ -207,6 +208,10 @@ if HAS_APPKIT:
             """Update the animation phase used when drawing active states."""
             self._animation_phase = phase
             self.setNeedsDisplay_(True)
+
+        def setAudioLevel_(self, level):
+            """Store the live mic level; the animation tick redraws with it."""
+            self._audio_level = level
 
         def _getStateColors(self):
             """Get colors for the current state from appearance config."""
@@ -407,14 +412,17 @@ if HAS_APPKIT:
 
         def _draw_recording_ring(self, icon_rect, icon_color, animation_phase):
             pulse = 0.5 + 0.5 * math.sin(animation_phase * math.tau)
-            ring_rect = self._scaled_rect(icon_rect, 1.35 + (0.12 * pulse))
+            # The live mic level rides on top of the steady pulse, so the
+            # ring visibly swells and brightens while the user speaks.
+            boost = min(1.0, max(0.0, self._audio_level) * 1.6)
+            ring_rect = self._scaled_rect(icon_rect, 1.35 + (0.12 * pulse) + (0.28 * boost))
             ring_path = NSBezierPath.bezierPathWithOvalInRect_(ring_rect)
-            ring_path.setLineWidth_(2.6)
+            ring_path.setLineWidth_(2.6 + (1.2 * boost))
             ring_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
                 icon_color.redComponent(),
                 icon_color.greenComponent(),
                 icon_color.blueComponent(),
-                0.18 + (0.18 * pulse),
+                min(0.65, 0.18 + (0.18 * pulse) + (0.30 * boost)),
             )
             ring_color.setStroke()
             ring_path.stroke()
@@ -664,6 +672,8 @@ class FloatingWidget:
         self._animation_timer: Optional[threading.Timer] = None
         self._animation_generation = 0
         self._animation_interval = 1.0 / 15.0
+        # Smoothed live mic level (0..1); recording visuals react to it.
+        self._audio_level = 0.0
         # Multi-frame sprite animation state (manifest v2). When the active pack
         # defines frames for the current state, these drive the same timer loop:
         # the procedural _animation_phase is replaced by a frame index walk.
@@ -958,10 +968,14 @@ class FloatingWidget:
         """Timer interval for the current state's animation.
 
         Frame sequences honour the pack's fps; procedural states keep the
-        default 1/15s cadence.
+        default 1/15s cadence. While recording, the live mic level speeds
+        up frame playback (up to 2x) so pack characters react to the voice.
         """
         if self._has_frame_animation_locked() and self._state_fps > 0:
-            return 1.0 / self._state_fps
+            interval = 1.0 / self._state_fps
+            if self._state == WidgetState.RECORDING and self._audio_level > 0.0:
+                interval = max(interval / (1.0 + min(1.0, self._audio_level)), 1.0 / 30.0)
+            return interval
         return self._animation_interval
 
     def _state_uses_animation(self) -> bool:
@@ -1069,10 +1083,43 @@ class FloatingWidget:
             self._cancel_revert_timer_locked()
             self._state = state
             self._accessibility_label = self._build_accessibility_label(state)
+            if state != WidgetState.RECORDING:
+                self._audio_level = 0.0
+                self._push_audio_level_to_view(0.0)
             self._restart_animation_for_state_locked()
             self._update_view()
         self._post_accessibility_notification()
         self._trigger_state_sound(state)
+
+    def set_audio_level(self, level: float) -> None:
+        """Feed the live mic level (0..1); recording visuals breathe with it.
+
+        Called from the recording level-monitor thread at ~20Hz. The value is
+        lightly smoothed so the ring swells rather than flickers.
+        """
+        try:
+            level = max(0.0, min(1.0, float(level)))
+        except (TypeError, ValueError):
+            return
+        with self._lock:
+            if self._state != WidgetState.RECORDING:
+                return
+            self._audio_level = (0.55 * self._audio_level) + (0.45 * level)
+            smoothed = self._audio_level
+        self._push_audio_level_to_view(smoothed)
+
+    def _push_audio_level_to_view(self, level: float) -> None:
+        """Forward the level to the view on the main thread (no redraw)."""
+        if not HAS_APPKIT or not self._view:
+            return
+
+        view = self._view
+
+        def _apply():
+            if self._view is view:
+                view.setAudioLevel_(level)
+
+        AppHelper.callAfter(_apply)
 
     def _set_transient_state(self, state: WidgetState, revert_after: float):
         """Enter a transient state that auto-reverts to idle after a delay."""

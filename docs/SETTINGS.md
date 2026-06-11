@@ -33,6 +33,10 @@ Pick an audio or video file (wav, mp3, m4a, aac, aiff/aif, caf, flac, mp4, mov, 
 - **Streaming display**: Show live text panel during transcription
 - **Character pack**: Themed icon set for the floating widget (Settings → Appearance → Character Pack). Built-in packs: Panda, Pixel Adventurer, Handheld '89, CRT Terminal. The newer packs animate per state, play short per-state sounds (when **Play sound** is on), and flash a one-shot success/error animation before reverting to idle.
 
+The menu bar icon is a HUD-style template set that follows app state — waveform (idle), pulsing dot (recording), spinning arc (transcribing), plus marks for success, error, downloads, private mode, and the voice assistant — and adapts to light/dark menu bars automatically.
+
+While recording, the floating widget also reacts to your voice: the pulse ring swells and brightens with your mic level, and character-pack animations play faster as you speak.
+
 ## Dictation Intelligence
 
 A post-transcription text pipeline. All features are off by default and additive.

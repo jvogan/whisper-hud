@@ -263,7 +263,13 @@ def get_state_ascii(state: str) -> str:
 
 
 class MenuBarIcons:
-    """Menu bar emoji icons for different states."""
+    """Menu bar emoji icons for different states.
+
+    These remain the canonical state tokens passed around the app (and the
+    visible fallback when the image icon assets are not installed); when the
+    bundled template images are available they are rendered as real icons
+    instead — see :func:`split_menubar_title` / :func:`get_menubar_icon`.
+    """
 
     IDLE = "🎙️"
     RECORDING = "🔴"
@@ -273,6 +279,60 @@ class MenuBarIcons:
     DOWNLOADING = "⬇️"
     PRIVATE = "🔒"  # Private mode indicator
     ASSISTANT = "🤖"  # Voice assistant active indicator
+
+
+# Emoji state token -> menubar icon asset stem (assets/menubar/<stem>.png).
+MENUBAR_STATE_BY_EMOJI = {
+    MenuBarIcons.IDLE: "idle",
+    MenuBarIcons.RECORDING: "recording",
+    MenuBarIcons.PROCESSING: "processing",
+    MenuBarIcons.SUCCESS: "success",
+    MenuBarIcons.ERROR: "error",
+    MenuBarIcons.DOWNLOADING: "downloading",
+    MenuBarIcons.PRIVATE: "private",
+    MenuBarIcons.ASSISTANT: "assistant",
+}
+
+
+def split_menubar_title(title: str) -> tuple[Optional[str], str]:
+    """Split a menu bar title into (icon state, remaining text suffix).
+
+    Titles are an emoji state token optionally followed by extra text (for
+    example the paste-target pin suffix). Returns ``(None, title)`` when the
+    title does not start with a known state emoji.
+    """
+    for emoji, state in MENUBAR_STATE_BY_EMOJI.items():
+        if title.startswith(emoji):
+            return state, title[len(emoji) :]
+    return None, title
+
+
+def get_menubar_icon(state: str) -> Optional[Path]:
+    """Path to the template menubar icon for a state, if the asset exists."""
+    if ASSETS.base:
+        path = ASSETS.base / "menubar" / f"{state}.png"
+        if path.exists():
+            return path
+    return None
+
+
+def get_menubar_icon_frames(state: str) -> list[Path]:
+    """Ordered animation frames for a state (empty when not animated)."""
+    if not ASSETS.base:
+        return []
+    menubar_dir = ASSETS.base / "menubar"
+    if not menubar_dir.is_dir():
+        return []
+
+    def _frame_index(path: Path) -> int:
+        # state.frame<N>.png -> N
+        try:
+            return int(path.suffixes[-2].removeprefix(".frame"))
+        except (IndexError, ValueError):
+            return 0
+
+    frames = sorted(menubar_dir.glob(f"{state}.frame*.png"), key=_frame_index)
+    return frames
 
 
 # ============================================================================
