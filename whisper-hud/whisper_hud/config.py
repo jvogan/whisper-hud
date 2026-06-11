@@ -128,6 +128,11 @@ class Config:
     show_widget: bool = False  # Show floating widget button
     widget_size: str = "medium"  # Widget size: small, medium, large, xlarge
     widget_position: Optional[dict] = None  # {"x": float, "y": float} for persisted position
+    # Floating button animation preferences. The master switch freezes every
+    # widget animation (pack frames, pulse ring, spinner); the idle switch
+    # controls just the idle loop and the rare idle quirk.
+    widget_animations_enabled: bool = True
+    widget_idle_animation: bool = True
     auto_stop: bool = True  # Auto-stop recording after silence
     silence_duration: float = 1.5  # Seconds of silence before auto-stop
     silence_threshold: float = 0.002  # Audio level threshold for silence (below ambient noise)

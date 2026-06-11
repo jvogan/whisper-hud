@@ -675,6 +675,10 @@ class FloatingWidget:
         self._animation_interval = 1.0 / 15.0
         # Smoothed live mic level (0..1); recording visuals react to it.
         self._audio_level = 0.0
+        # Animation preferences (config-driven). The master switch freezes
+        # every animation; the idle switch covers the idle loop and quirks.
+        self._animations_enabled = True
+        self._idle_animation = True
         # Multi-frame sprite animation state (manifest v2). When the active pack
         # defines frames for the current state, these drive the same timer loop:
         # the procedural _animation_phase is replaced by a frame index walk.
@@ -1007,6 +1011,13 @@ class FloatingWidget:
         return self._animation_interval
 
     def _state_uses_animation(self) -> bool:
+        # User preferences veto everything: the master switch freezes all
+        # animation, the idle switch just the idle loop (static frame 0 and
+        # the per-state icons still render, so state stays visible).
+        if not self._animations_enabled:
+            return False
+        if self._state == WidgetState.IDLE and not self._idle_animation:
+            return False
         # Any state with a multi-frame sequence animates (including IDLE, the
         # idle-breathing hero case); procedural recording/processing also do.
         if self._has_frame_animation_locked():
@@ -1063,6 +1074,8 @@ class FloatingWidget:
             self._state != WidgetState.IDLE
             or self._idle_quirk_active
             or not self._visible
+            or not self._animations_enabled
+            or not self._idle_animation
             or not self._idle_quirk_frames_defined_locked()
         ):
             return
@@ -1180,6 +1193,18 @@ class FloatingWidget:
             self._update_view()
         self._post_accessibility_notification()
         self._trigger_state_sound(state)
+
+    def set_animation_prefs(self, animations_enabled: bool, idle_animation: bool) -> None:
+        """Apply the animation toggles; takes effect immediately."""
+        with self._lock:
+            changed = self._animations_enabled != bool(animations_enabled) or self._idle_animation != bool(
+                idle_animation
+            )
+            self._animations_enabled = bool(animations_enabled)
+            self._idle_animation = bool(idle_animation)
+            if changed:
+                self._restart_animation_for_state_locked()
+                self._update_view()
 
     def set_audio_level(self, level: float) -> None:
         """Feed the live mic level (0..1); recording visuals breathe with it.

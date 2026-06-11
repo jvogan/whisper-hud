@@ -1186,11 +1186,23 @@ class WhisperHUDApp(rumps.App):
         # === Appearance Submenu ===
         appearance_menu = rumps.MenuItem("Appearance")
 
-        # The whole submenu styles the floating button, so its visibility
-        # toggle lives here too (mirrors Recording & Display).
+        # The whole submenu styles the floating button, so its visibility and
+        # animation toggles live here too (mirrors the top-level menu).
         appearance_menu.add(
             rumps.MenuItem(
                 f"{'✓ ' if self.config.show_widget else '   '}Show Floating Button", callback=self._toggle_widget
+            )
+        )
+        appearance_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.widget_animations_enabled else '   '}Animations",
+                callback=self._toggle_widget_animations,
+            )
+        )
+        appearance_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.widget_idle_animation else '   '}Idle Animation",
+                callback=self._toggle_widget_idle_animation,
             )
         )
         appearance_menu.add(rumps.separator)
@@ -1751,6 +1763,9 @@ class WhisperHUDApp(rumps.App):
         # === Voice Assistant ===
         self._build_voice_assistant_menu()
 
+        # === Floating Button (quick controls, one level from the icon) ===
+        self._build_floating_button_menu()
+
         stats = self.transcriber.get_stats()
         history_menu = rumps.MenuItem("History & Stats")
         history_menu.add(
@@ -2091,6 +2106,54 @@ class WhisperHUDApp(rumps.App):
         va_menu.add(rumps.MenuItem(f"Talks to OpenAI {self.config.assistant_model} (cloud)", callback=None))
 
         self.menu.add(va_menu)
+
+    def _build_floating_button_menu(self) -> None:
+        """Top-level quick controls for the floating button.
+
+        The same toggles exist under Settings, but show/hide and the
+        animation switches are the things people reach for — they live one
+        click from the menu bar icon.
+        """
+        fb_menu = rumps.MenuItem("Floating Button")
+
+        fb_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.show_widget else '   '}Show Floating Button", callback=self._toggle_widget
+            )
+        )
+        fb_menu.add(rumps.separator)
+
+        fb_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.widget_animations_enabled else '   '}Animations",
+                callback=self._toggle_widget_animations,
+            )
+        )
+        fb_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.widget_idle_animation else '   '}Idle Animation",
+                callback=self._toggle_widget_idle_animation,
+            )
+        )
+        fb_menu.add(rumps.separator)
+
+        size_menu = rumps.MenuItem("Size")
+        for size_id, size_name in [
+            ("small", "Small"),
+            ("medium", "Medium"),
+            ("large", "Large"),
+            ("xlarge", "Extra Large"),
+        ]:
+            prefix = "● " if self.config.widget_size == size_id else "   "
+            size_menu.add(
+                rumps.MenuItem(f"{prefix}{size_name}", callback=lambda sender, s=size_id: self._set_widget_size(s))
+            )
+        fb_menu.add(size_menu)
+
+        fb_menu.add(rumps.separator)
+        fb_menu.add(rumps.MenuItem("Reset Position", callback=self._reset_widget_position))
+
+        self.menu.add(fb_menu)
 
     def _schedule_menu_rebuild(self, delay: float = 0.5) -> None:
         """Rebuild menu after a short delay to avoid blocking menu callbacks."""
@@ -3797,6 +3860,26 @@ class WhisperHUDApp(rumps.App):
         self.config.save()
         if self.widget:
             self.widget.set_size(size)
+        self._schedule_menu_rebuild()
+
+    def _push_widget_animation_prefs(self) -> None:
+        if self.widget:
+            self.widget.set_animation_prefs(
+                self.config.widget_animations_enabled, self.config.widget_idle_animation
+            )
+
+    def _toggle_widget_animations(self, sender):
+        """Toggle all floating-button animations (master switch)."""
+        self.config.widget_animations_enabled = not self.config.widget_animations_enabled
+        self.config.save()
+        self._push_widget_animation_prefs()
+        self._schedule_menu_rebuild()
+
+    def _toggle_widget_idle_animation(self, sender):
+        """Toggle the idle loop (and rare idle quirks) of the floating button."""
+        self.config.widget_idle_animation = not self.config.widget_idle_animation
+        self.config.save()
+        self._push_widget_animation_prefs()
         self._schedule_menu_rebuild()
 
     def _toggle_hud(self, sender):
@@ -5807,6 +5890,7 @@ class WhisperHUDApp(rumps.App):
 
         if self.widget:
             self.widget.set_appearance(appearance, self.image_processor)
+            self._push_widget_animation_prefs()
 
         if self.hud:
             self.hud.set_appearance(appearance)

@@ -363,11 +363,13 @@ def test_build_menu_reflects_provider_availability(monkeypatch):
         "Translation",
         "Dictation Intelligence",
         "Voice Assistant",
+        "Floating Button",
         "Settings",
         "Quit WhisperHUD",
     ]
-    # Bumped from <= 7: the "Voice Assistant" top-level item is a deliberate add.
-    assert len(top_level_titles) <= 8
+    # Bumped from <= 8: the "Floating Button" quick-controls menu is a
+    # deliberate top-level add (visibility + animation toggles).
+    assert len(top_level_titles) <= 9
 
     provider_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Providers & Keys")
     provider_titles = _menu_titles(provider_menu)
@@ -1516,3 +1518,39 @@ def test_apply_character_pack_reveals_hidden_widget():
     app.widget.show.reset_mock()
     app._apply_character_pack("hero")
     app.widget.show.assert_not_called()
+
+
+def test_floating_button_menu_offers_quick_controls(monkeypatch):
+    """The top-level Floating Button menu holds show/animation/size/position."""
+    app = _build_menu_app(monkeypatch)
+
+    app._build_menu()
+
+    fb_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Floating Button")
+    titles = _menu_titles(fb_menu)
+    assert any("Show Floating Button" in t for t in titles)
+    assert any(t.endswith("Animations") for t in titles)
+    assert any("Idle Animation" in t for t in titles)
+    assert "Size" in titles
+    assert "Reset Position" in titles
+
+
+def test_widget_animation_toggles_persist_and_apply_live():
+    """Both animation toggles save config and push prefs to the widget."""
+    assert Config().widget_animations_enabled is True
+    assert Config().widget_idle_animation is True
+
+    app = WhisperHUDApp.__new__(WhisperHUDApp)
+    app.config = Config()
+    app.config.save = MagicMock(return_value=True)
+    app._schedule_menu_rebuild = MagicMock()
+    app.widget = MagicMock()
+
+    app._toggle_widget_animations(None)
+    assert app.config.widget_animations_enabled is False
+    app.widget.set_animation_prefs.assert_called_with(False, True)
+
+    app._toggle_widget_idle_animation(None)
+    assert app.config.widget_idle_animation is False
+    app.widget.set_animation_prefs.assert_called_with(False, False)
+    assert app.config.save.call_count == 2

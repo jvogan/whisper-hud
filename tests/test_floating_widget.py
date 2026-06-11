@@ -912,3 +912,50 @@ def test_idle_quirk_not_armed_without_idle_rare_frames(monkeypatch):
         widget._restart_animation_for_state_locked()
 
     assert _quirk_timers(floating_widget) == []
+
+
+def test_animations_master_switch_freezes_everything(monkeypatch):
+    """With the master switch off, no state schedules an animation timer."""
+    floating_widget = _load_floating_widget_module(monkeypatch)
+    monkeypatch.setattr(floating_widget.threading, "Timer", FakeTimer)
+    FakeTimer.created.clear()
+
+    widget = floating_widget.FloatingWidget(lambda: None, lambda: None)
+    widget._visible = True
+    widget._view = MagicMock()
+    widget._appearance_config = _frame_appearance({"recording": {"frames": ["a", "b"], "fps": 10}})
+    widget._image_processor = _FakeFrameProcessor({"recording": ["f0", "f1"]})
+
+    widget.set_animation_prefs(False, True)
+    FakeTimer.created.clear()
+
+    widget.set_recording()
+    assert not any(t.started for t in FakeTimer.created)
+    # The static frame is still pushed, so the state remains visible.
+    widget._view.setFrames_.assert_called_with(["f0", "f1"])
+
+    # Flipping the switch back on mid-state resumes the animation at once.
+    widget.set_animation_prefs(True, True)
+    assert any(t.started for t in FakeTimer.created)
+
+
+def test_idle_animation_switch_stills_idle_only(monkeypatch):
+    """Idle loop and quirks stop; recording animation is unaffected."""
+    floating_widget = _load_floating_widget_module(monkeypatch)
+    monkeypatch.setattr(floating_widget.threading, "Timer", FakeTimer)
+    monkeypatch.setattr(floating_widget.random, "uniform", lambda a, b: 60.0)
+    FakeTimer.created.clear()
+
+    widget = _quirk_widget(floating_widget)
+    widget.set_animation_prefs(True, False)
+    FakeTimer.created.clear()
+
+    with widget._lock:
+        widget._restart_animation_for_state_locked()
+
+    # No idle loop timer and no rare-quirk timer.
+    assert FakeTimer.created == []
+
+    # Recording still animates (procedural fallback in this pack).
+    widget.set_recording()
+    assert any(t.started for t in FakeTimer.created)
