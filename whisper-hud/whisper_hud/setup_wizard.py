@@ -43,13 +43,15 @@ try:
         NSAppearance,
         NSAppearanceNameAqua,
         NSAppearanceNameDarkAqua,
+        # Text-attribute constants are AppKit symbols; importing them from
+        # Foundation fails on PyObjC 10+, silently disabling the GUI wizard.
+        NSFontAttributeName,
+        NSForegroundColorAttributeName,
+        NSParagraphStyleAttributeName,
     )
     from Foundation import (
         NSAttributedString,
         NSMutableParagraphStyle,
-        NSFontAttributeName,
-        NSForegroundColorAttributeName,
-        NSParagraphStyleAttributeName,
     )
     from PyObjCTools import AppHelper
 
