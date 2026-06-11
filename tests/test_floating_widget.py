@@ -11,6 +11,7 @@ def _load_floating_widget_module(monkeypatch):
     appkit.NSWindow = type("NSWindow", (), {})
     appkit.NSView = type("NSView", (), {})
     appkit.NSColor = MagicMock()
+    appkit.NSEvent = MagicMock()
     appkit.NSBezierPath = MagicMock()
     appkit.NSWindowStyleMaskBorderless = 0
     appkit.NSBackingStoreBuffered = 0
@@ -912,6 +913,62 @@ def test_idle_quirk_not_armed_without_idle_rare_frames(monkeypatch):
         widget._restart_animation_for_state_locked()
 
     assert _quirk_timers(floating_widget) == []
+
+
+def test_drag_tracks_screen_coordinates_not_the_moving_window(monkeypatch):
+    """Drag math must use NSEvent.mouseLocation (screen coords).
+
+    Deriving the mouse position from the window frame double-counts moves
+    while the window is mid-drag, which made the widget visibly jump.
+    """
+    floating_widget = _load_floating_widget_module(monkeypatch)
+
+    view = object.__new__(floating_widget.WidgetView)
+    view._on_click = None
+    view._on_drag_end = None
+    view._is_pressed = False
+
+    moves = []
+
+    class FakeWindow:
+        def __init__(self):
+            self.origin = SimpleNamespace(x=100.0, y=100.0)
+
+        def frame(self):
+            return SimpleNamespace(origin=self.origin, size=SimpleNamespace(width=88, height=88))
+
+        def setFrameOrigin_(self, origin):
+            moves.append(origin)
+            self.origin = SimpleNamespace(x=origin[0], y=origin[1])
+
+    window = FakeWindow()
+    view.window = lambda: window
+    view.setNeedsDisplay_ = lambda flag: None
+
+    mouse = SimpleNamespace(x=150.0, y=150.0)
+    monkeypatch.setattr(
+        floating_widget, "NSEvent", SimpleNamespace(mouseLocation=lambda: SimpleNamespace(x=mouse.x, y=mouse.y))
+    )
+    event = SimpleNamespace(locationInWindow=lambda: SimpleNamespace(x=50.0, y=50.0))
+
+    view.mouseDown_(event)
+
+    # Below the 12px threshold: no move (protects click detection).
+    mouse.x, mouse.y = 155.0, 155.0
+    view.mouseDragged_(event)
+    assert moves == []
+
+    # Past the threshold: window follows mouse delta from the anchor.
+    mouse.x, mouse.y = 170.0, 165.0
+    view.mouseDragged_(event)
+    assert moves[-1] == (120.0, 115.0)
+
+    # Even if the window origin were perturbed mid-drag (the old failure
+    # mode), the next event lands exactly at anchor-relative position.
+    window.origin = SimpleNamespace(x=999.0, y=999.0)
+    mouse.x, mouse.y = 180.0, 175.0
+    view.mouseDragged_(event)
+    assert moves[-1] == (130.0, 125.0)
 
 
 def test_animations_master_switch_freezes_everything(monkeypatch):

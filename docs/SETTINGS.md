@@ -27,7 +27,7 @@ Pick an audio or video file (wav, mp3, m4a, aac, aiff/aif, caf, flac, mp4, mov, 
 
 ## Display
 
-- **Floating Button** (top-level menu): one click from the menu bar icon — **Show Floating Button**, **Animations** (master switch for all widget animation), **Idle Animation** (just the idle loop and the rare idle quirks; recording/processing still animate), **Size**, and **Reset Position**. The same toggles also appear under Settings → Appearance and Recording & Display.
+- **Floating Button** (top-level menu): one click from the menu bar icon — **Show Floating Button**, **Style** (pick the default circle or any character pack), **Animations** (master switch for all widget animation), **Idle Animation** (just the idle loop and the rare idle quirks; recording/processing still animate), **Size**, and **Reset Position**. The same controls also appear under Settings → Appearance and Recording & Display.
 - **Show floating button**: Optional click-to-record widget. Applying a character pack turns it on automatically.
 - **Widget size**: Small, medium, large, or extra-large
 - **Show HUD overlay**: Visual feedback during recording

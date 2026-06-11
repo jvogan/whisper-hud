@@ -1529,10 +1529,16 @@ def test_floating_button_menu_offers_quick_controls(monkeypatch):
     fb_menu = next(item for item in app.menu.items if getattr(item, "title", None) == "Floating Button")
     titles = _menu_titles(fb_menu)
     assert any("Show Floating Button" in t for t in titles)
+    assert "Style" in titles
     assert any(t.endswith("Animations") for t in titles)
     assert any("Idle Animation" in t for t in titles)
     assert "Size" in titles
     assert "Reset Position" in titles
+
+    # The Style submenu is the which-button picker (default + packs).
+    style_menu = next(item for item in fb_menu.items if getattr(item, "title", None) == "Style")
+    style_titles = _menu_titles(style_menu)
+    assert any("Default (circle icon)" in t for t in style_titles)
 
 
 def test_widget_animation_toggles_persist_and_apply_live():

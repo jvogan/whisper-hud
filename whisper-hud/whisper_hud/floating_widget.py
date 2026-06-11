@@ -26,6 +26,7 @@ try:
     NSWindow = AppKit.NSWindow
     NSView = AppKit.NSView
     NSColor = AppKit.NSColor
+    NSEvent = AppKit.NSEvent
     NSBezierPath = AppKit.NSBezierPath
     NSWindowStyleMaskBorderless = AppKit.NSWindowStyleMaskBorderless
     NSBackingStoreBuffered = AppKit.NSBackingStoreBuffered
@@ -137,6 +138,8 @@ if HAS_APPKIT:
             self._is_pressed = False
             self._state = WidgetState.IDLE
             self._initial_location = None
+            self._drag_anchor = None
+            self._initial_window_origin = None
             self._mouse_down_time = None
             self._did_drag = False
             self._accessibility_role = NSAccessibilityButtonRole
@@ -538,13 +541,16 @@ if HAS_APPKIT:
         def mouseDown_(self, event):
             import time
 
-            # Store mouse position in screen coordinates for stable dragging
+            # Anchor the drag in *screen* coordinates (NSEvent.mouseLocation).
+            # Window-relative math (frame origin + locationInWindow) breaks
+            # while the window itself is moving: the origin is read after
+            # earlier drag events already moved it, double-counting the last
+            # delta and making the widget visibly jump for a frame.
             window = self.window()
             if window:
+                location = NSEvent.mouseLocation()
+                self._drag_anchor = (location.x, location.y)
                 window_frame = window.frame()
-                mouse_in_window = event.locationInWindow()
-                self._initial_screen_x = window_frame.origin.x + mouse_in_window.x
-                self._initial_screen_y = window_frame.origin.y + mouse_in_window.y
                 self._initial_window_origin = (window_frame.origin.x, window_frame.origin.y)
             self._initial_location = event.locationInWindow()
             self._mouse_down_time = time.time()
@@ -561,15 +567,16 @@ if HAS_APPKIT:
             if window is None:
                 return
 
-            # Get current mouse position in screen coordinates
-            window_frame = window.frame()
-            mouse_in_window = event.locationInWindow()
-            current_screen_x = window_frame.origin.x + mouse_in_window.x
-            current_screen_y = window_frame.origin.y + mouse_in_window.y
+            anchor = getattr(self, "_drag_anchor", None)
+            initial_origin = getattr(self, "_initial_window_origin", None)
+            if anchor is None or initial_origin is None:
+                return
 
-            # Calculate movement from initial screen position
-            dx = current_screen_x - getattr(self, "_initial_screen_x", current_screen_x)
-            dy = current_screen_y - getattr(self, "_initial_screen_y", current_screen_y)
+            # Current mouse position in screen coordinates, independent of
+            # where the (moving) window happens to be right now.
+            location = NSEvent.mouseLocation()
+            dx = location.x - anchor[0]
+            dy = location.y - anchor[1]
 
             # Only start dragging if moved more than 12 pixels
             # This prevents accidental drags when trying to click
@@ -579,12 +586,7 @@ if HAS_APPKIT:
             if not self._did_drag:
                 return
 
-            # Calculate new window position based on initial window origin + drag delta
-            initial_origin = getattr(self, "_initial_window_origin", (0, 0))
-            new_x = initial_origin[0] + dx
-            new_y = initial_origin[1] + dy
-
-            window.setFrameOrigin_((new_x, new_y))
+            window.setFrameOrigin_((initial_origin[0] + dx, initial_origin[1] + dy))
 
         def mouseUp_(self, event):
             import time
@@ -610,8 +612,7 @@ if HAS_APPKIT:
 
             # Reset all drag tracking state
             self._initial_location = None
-            self._initial_screen_x = None
-            self._initial_screen_y = None
+            self._drag_anchor = None
             self._initial_window_origin = None
             self._mouse_down_time = None
             self._did_drag = False

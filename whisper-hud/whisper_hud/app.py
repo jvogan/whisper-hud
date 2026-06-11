@@ -1225,26 +1225,7 @@ class WhisperHUDApp(rumps.App):
 
         # === Character Packs ===
         appearance_menu.add(rumps.MenuItem("── Character Packs ──", callback=None))
-
-        # Get available packs
-        available_packs = self.character_pack_manager.get_pack_for_menu()
-        current_pack_id = self.character_pack_manager.get_current_pack_id()
-
-        # Default (no pack) option
-        is_default = current_pack_id is None
-        appearance_menu.add(
-            rumps.MenuItem(f"{'● ' if is_default else '   '}Default (circle icon)", callback=self._clear_character_pack)
-        )
-
-        # Add each available pack
-        for pack in available_packs:
-            is_selected = pack["active"]
-            prefix = "● " if is_selected else "   "
-            appearance_menu.add(
-                rumps.MenuItem(
-                    f"{prefix}{pack['name']}", callback=lambda s, pid=pack["id"]: self._apply_character_pack(pid)
-                )
-            )
+        self._add_character_pack_picker(appearance_menu)
 
         appearance_menu.add(rumps.separator)
 
@@ -2107,12 +2088,33 @@ class WhisperHUDApp(rumps.App):
 
         self.menu.add(va_menu)
 
+    def _add_character_pack_picker(self, menu) -> None:
+        """Append the Default + character-pack choices to a menu.
+
+        Shared between the Appearance submenu and the top-level Floating
+        Button → Style menu so both stay in sync.
+        """
+        current_pack_id = self.character_pack_manager.get_current_pack_id()
+        menu.add(
+            rumps.MenuItem(
+                f"{'● ' if current_pack_id is None else '   '}Default (circle icon)",
+                callback=self._clear_character_pack,
+            )
+        )
+        for pack in self.character_pack_manager.get_pack_for_menu():
+            prefix = "● " if pack["active"] else "   "
+            menu.add(
+                rumps.MenuItem(
+                    f"{prefix}{pack['name']}", callback=lambda s, pid=pack["id"]: self._apply_character_pack(pid)
+                )
+            )
+
     def _build_floating_button_menu(self) -> None:
         """Top-level quick controls for the floating button.
 
-        The same toggles exist under Settings, but show/hide and the
-        animation switches are the things people reach for — they live one
-        click from the menu bar icon.
+        The same toggles exist under Settings, but show/hide, the style
+        picker and the animation switches are the things people reach for —
+        they live one click from the menu bar icon.
         """
         fb_menu = rumps.MenuItem("Floating Button")
 
@@ -2121,6 +2123,12 @@ class WhisperHUDApp(rumps.App):
                 f"{'✓ ' if self.config.show_widget else '   '}Show Floating Button", callback=self._toggle_widget
             )
         )
+        fb_menu.add(rumps.separator)
+
+        # Which button: the default circle or a character pack.
+        style_menu = rumps.MenuItem("Style")
+        self._add_character_pack_picker(style_menu)
+        fb_menu.add(style_menu)
         fb_menu.add(rumps.separator)
 
         fb_menu.add(
