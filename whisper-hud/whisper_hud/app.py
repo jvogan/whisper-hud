@@ -1186,6 +1186,15 @@ class WhisperHUDApp(rumps.App):
         # === Appearance Submenu ===
         appearance_menu = rumps.MenuItem("Appearance")
 
+        # The whole submenu styles the floating button, so its visibility
+        # toggle lives here too (mirrors Recording & Display).
+        appearance_menu.add(
+            rumps.MenuItem(
+                f"{'✓ ' if self.config.show_widget else '   '}Show Floating Button", callback=self._toggle_widget
+            )
+        )
+        appearance_menu.add(rumps.separator)
+
         # Theme header
         appearance_menu.add(rumps.MenuItem("── Themes ──", callback=None))
 
@@ -5751,7 +5760,17 @@ class WhisperHUDApp(rumps.App):
             self._notify("WhisperHUD", "Setup Complete", "You're ready to start transcribing! Hold ⌘⇧Space to record.")
 
         def on_cancel():
-            logger.info("Setup wizard cancelled")
+            logger.info("Setup wizard dismissed")
+            # A dismissed wizard must not reopen on every launch; mark setup
+            # done and point at the menu re-entry instead.
+            if not self.config.setup_completed:
+                self.config.setup_completed = True
+                self.config.save()
+                self._notify(
+                    "WhisperHUD",
+                    "Setup Skipped",
+                    "Run it anytime from Settings → Advanced → Run Setup Wizard.",
+                )
 
         self._setup_wizard = show_setup_wizard(on_complete=on_complete, on_cancel=on_cancel)
 
@@ -5815,6 +5834,15 @@ class WhisperHUDApp(rumps.App):
             self.image_processor.clear_cache()
             self._apply_appearance_to_components()
             self._refresh_idle_menubar_icon()
+
+            # Picking a widget skin while the widget is hidden always means
+            # "show it" — enable the floating button so the pack is visible.
+            if not self.config.show_widget:
+                self.config.show_widget = True
+                self.config.save()
+                if self.widget:
+                    self.widget.show()
+
             self._schedule_menu_rebuild()
 
             self._notify("WhisperHUD", "Character Pack Applied", f"Now using: {pack.name}")

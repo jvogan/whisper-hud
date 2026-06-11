@@ -286,7 +286,17 @@ class Config:
                         f"Config file contained invalid JSON and was reset to defaults, " f"but backup failed: {e}"
                     )
             except Exception as e:
-                logger.warning(f"Failed to load config: {e}")
+                # Same protection as the invalid-JSON path: park the file
+                # aside so falling back to defaults (which the next save
+                # persists) can never silently destroy the user's settings.
+                backup_file = _backup_corrupted_config()
+                if backup_file is not None:
+                    logger.warning(
+                        f"Failed to load config and reset to defaults. "
+                        f"Backed up previous file to {backup_file}: {e}"
+                    )
+                else:
+                    logger.warning(f"Failed to load config: {e}")
         return cls()
 
     def update_from(self, other: "Config") -> None:

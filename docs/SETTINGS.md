@@ -27,7 +27,7 @@ Pick an audio or video file (wav, mp3, m4a, aac, aiff/aif, caf, flac, mp4, mov, 
 
 ## Display
 
-- **Show floating button**: Optional click-to-record widget
+- **Show floating button**: Optional click-to-record widget. Also available at the top of **Settings → Appearance**, and applying a character pack turns it on automatically.
 - **Widget size**: Small, medium, large, or extra-large
 - **Show HUD overlay**: Visual feedback during recording
 - **Streaming display**: Show live text panel during transcription

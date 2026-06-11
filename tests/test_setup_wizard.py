@@ -559,3 +559,24 @@ def test_finish_wizard_stops_when_microphone_denied(monkeypatch):
     wizard._finish_wizard()
 
     assert errors == ["Microphone permission is required before finishing setup"]
+
+
+def test_window_close_fires_cancel_callback():
+    """Dismissing the window (red X) must report a cancel."""
+    cancel = MagicMock()
+    wizard = SetupWizard(on_cancel=cancel)
+
+    wizard.windowWillClose_(None)
+
+    cancel.assert_called_once()
+
+
+def test_window_close_after_finish_is_not_a_cancel():
+    """The window also closes on success; that must not look like a cancel."""
+    cancel = MagicMock()
+    wizard = SetupWizard(on_cancel=cancel)
+    wizard._finished = True
+
+    wizard.windowWillClose_(None)
+
+    cancel.assert_not_called()

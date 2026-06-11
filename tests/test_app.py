@@ -1460,3 +1460,59 @@ def test_transcribe_audio_file_surfaces_decode_error(monkeypatch):
 
     app.hud.show_error.assert_called_once_with("File transcription failed")
     assert app._notify.call_args.args[1] == "File Transcription Failed"
+
+
+def test_dismissed_setup_wizard_marks_setup_completed(monkeypatch):
+    """Closing the wizard without finishing must not re-trigger it forever."""
+    app = WhisperHUDApp.__new__(WhisperHUDApp)
+    app.config = Config()
+    app.config.setup_completed = False
+    app.config.save = MagicMock(return_value=True)
+    app._notify = MagicMock()
+
+    captured = {}
+
+    def fake_show(on_complete=None, on_cancel=None):
+        captured["cancel"] = on_cancel
+        return MagicMock()
+
+    monkeypatch.setattr("whisper_hud.app.show_setup_wizard", fake_show)
+    app._show_setup_wizard()
+
+    captured["cancel"]()
+    assert app.config.setup_completed is True
+    app.config.save.assert_called_once()
+    assert app._notify.call_args.args[1] == "Setup Skipped"
+
+    # A later dismissal (setup already completed) saves and notifies nothing.
+    captured["cancel"]()
+    app.config.save.assert_called_once()
+    app._notify.assert_called_once()
+
+
+def test_apply_character_pack_reveals_hidden_widget():
+    """Picking a widget skin while the widget is hidden must show the widget."""
+    app = WhisperHUDApp.__new__(WhisperHUDApp)
+    app.config = Config()
+    app.config.show_widget = False
+    app.config.save = MagicMock(return_value=True)
+    app.character_pack_manager = MagicMock()
+    app.character_pack_manager.get_pack.return_value = types.SimpleNamespace(name="Hero")
+    app.character_pack_manager.apply_pack.return_value = True
+    app.image_processor = MagicMock()
+    app._apply_appearance_to_components = MagicMock()
+    app._refresh_idle_menubar_icon = MagicMock()
+    app._schedule_menu_rebuild = MagicMock()
+    app._notify = MagicMock()
+    app.widget = MagicMock()
+
+    app._apply_character_pack("hero")
+
+    assert app.config.show_widget is True
+    app.widget.show.assert_called_once()
+
+    # Applying another pack with the widget already visible changes nothing.
+    app.config.save.reset_mock()
+    app.widget.show.reset_mock()
+    app._apply_character_pack("hero")
+    app.widget.show.assert_not_called()

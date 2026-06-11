@@ -748,3 +748,29 @@ class TestRealtimeFeatureConfig:
                     assert loaded.assistant_voice == "cedar"
                     assert loaded.assistant_reasoning_effort == "high"
                     assert loaded.assistant_paste_tool_enabled is False
+
+
+def test_load_backs_up_config_on_unexpected_error(tmp_path, monkeypatch):
+    """An unreadable config must be parked aside, never silently replaced.
+
+    Load falls back to defaults and the very next save persists them — so
+    the original file has to survive as a .bak for recovery.
+    """
+    from whisper_hud.config import Config
+
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text('{"show_widget": true}')
+    monkeypatch.setattr("whisper_hud.config.CONFIG_FILE", cfg_file)
+    monkeypatch.setattr("whisper_hud.config.CONFIG_DIR", tmp_path)
+
+    def boom(_data):
+        raise ValueError("synthetic load failure")
+
+    monkeypatch.setattr("whisper_hud.config._normalize_model_config_values", boom)
+
+    loaded = Config.load()
+
+    assert loaded.show_widget is False  # defaults
+    backups = list(tmp_path.glob("config.json.bak.*"))
+    assert len(backups) == 1
+    assert '"show_widget": true' in backups[0].read_text()

@@ -116,6 +116,9 @@ class SetupWizard:
         """
         self._on_complete = on_complete
         self._on_cancel = on_cancel
+        # Set before the window closes on success so windowWillClose_ can
+        # tell "finished" apart from "dismissed".
+        self._finished = False
         self._window: Optional[NSWindow] = None
         self._current_step = WizardStep.WELCOME
         self._content_view: Optional[NSView] = None
@@ -1272,6 +1275,14 @@ class SetupWizard:
         if self._current_step == WizardStep.PERMISSIONS:
             self._show_step(WizardStep.PERMISSIONS)
 
+    def windowWillClose_(self, _notification):
+        """Treat closing the window as declining setup (unless finishing)."""
+        if not self._finished and self._on_cancel:
+            try:
+                self._on_cancel()
+            except Exception:
+                logger.debug("Setup wizard cancel callback failed", exc_info=True)
+
     def _get_step_progress(self, step: WizardStep) -> tuple[int, int]:
         """Return the 1-based step position and total visible steps."""
         steps = self._get_step_sequence()
@@ -2157,6 +2168,7 @@ class SetupWizard:
 
         config.save()
 
+        self._finished = True
         if self._window:
             self._window.close()
 
