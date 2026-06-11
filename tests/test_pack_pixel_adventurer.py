@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 PACK_ID = "pixel-adventurer"
-EXPECTED_STATES = {"idle", "recording", "processing", "success", "error"}
+EXPECTED_STATES = {"idle", "idle_rare", "recording", "processing", "success", "error"}
 # Per the art/sound spec: only these three states carry a sound.
 SOUND_STATES = {"recording", "success", "error"}
 SILENT_STATES = {"idle", "processing"}

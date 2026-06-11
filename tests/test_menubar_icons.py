@@ -60,6 +60,7 @@ def test_static_states_have_no_frames():
 def _status_app():
     app = WhisperHUDApp.__new__(WhisperHUDApp)
     app._set_menubar_visuals = MagicMock()
+    app._pack_menubar_icon = MagicMock(return_value=None)
     return app
 
 
@@ -96,6 +97,58 @@ def test_missing_assets_fall_back_to_emoji_title():
 
     app._set_menubar_visuals.assert_called_once_with(None, MenuBarIcons.RECORDING)
     app._stop_menubar_animation.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# app: character pack glyph
+# ---------------------------------------------------------------------------
+
+
+def test_pack_glyph_themes_the_idle_icon_in_color():
+    """An active pack's menubar glyph replaces idle, untinted, suffix kept."""
+    app = _status_app()
+    app._animate_menubar_state = MagicMock()
+    app._pack_menubar_icon = MagicMock(return_value="/packs/hero/menubar.png")
+
+    app._apply_menubar_status(MenuBarIcons.IDLE + "📍")
+
+    args, kwargs = app._set_menubar_visuals.call_args
+    assert args == ("/packs/hero/menubar.png", "📍")
+    assert kwargs == {"template": False}
+
+
+def test_pack_glyph_leaves_other_states_template():
+    """Recording etc. keep the standard template icons even with a pack."""
+    app = _status_app()
+    app._animate_menubar_state = MagicMock()
+    app._pack_menubar_icon = MagicMock(return_value="/packs/hero/menubar.png")
+
+    app._apply_menubar_status(MenuBarIcons.RECORDING)
+
+    args, kwargs = app._set_menubar_visuals.call_args
+    assert args[0].endswith("recording.png")
+    assert kwargs == {"template": True}
+
+
+def test_pack_menubar_icon_resolves_from_config(tmp_path, mock_config):
+    """The helper reads the appearance blob and requires an existing file."""
+    app = WhisperHUDApp.__new__(WhisperHUDApp)
+    app.config = mock_config
+
+    # Default config: no pack enabled.
+    assert app._pack_menubar_icon() is None
+
+    glyph = tmp_path / "menubar.png"
+    glyph.write_bytes(b"\x89PNG\r\n\x1a\n")
+    app.config.widget_appearance["custom_icon"] = {
+        "enabled": True,
+        "menubar_icon": str(glyph),
+    }
+    assert app._pack_menubar_icon() == str(glyph)
+
+    # A vanished file stops theming rather than blanking the status item.
+    glyph.unlink()
+    assert app._pack_menubar_icon() is None
 
 
 # ---------------------------------------------------------------------------

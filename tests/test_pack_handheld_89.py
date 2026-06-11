@@ -20,7 +20,7 @@ from whisper_hud.character_packs import (
     MAX_SOUND_SIZE,
 )
 
-EXPECTED_STATES = {"idle", "recording", "processing", "success", "error"}
+EXPECTED_STATES = {"idle", "idle_rare", "recording", "processing", "success", "error"}
 SOUND_STATES = {"recording", "success", "error"}
 SILENT_STATES = {"idle", "processing"}
 

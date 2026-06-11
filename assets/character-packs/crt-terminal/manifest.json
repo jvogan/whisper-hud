@@ -65,6 +65,19 @@
       ],
       "fps": 10.0,
       "sound": "error.wav"
+    },
+    "idle_rare": {
+      "file": "idle_rare.frame0.png",
+      "description": "A surprised little hop after a long quiet stretch",
+      "frames": [
+        "idle_rare.frame0.png",
+        "idle_rare.frame1.png",
+        "idle_rare.frame2.png",
+        "idle_rare.frame3.png",
+        "idle_rare.frame4.png",
+        "idle_rare.frame5.png"
+      ],
+      "fps": 10
     }
   },
   "settings": {
@@ -72,5 +85,6 @@
     "apply_state_tint": false,
     "recommended_size": "large",
     "interpolation": "nearest"
-  }
+  },
+  "menubar_icon": "menubar.png"
 }

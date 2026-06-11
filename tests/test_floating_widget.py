@@ -824,3 +824,91 @@ def test_recording_frames_speed_up_with_voice(monkeypatch):
     widget._audio_level = 1.0
     with widget._lock:
         assert widget._current_animation_interval_locked() >= (1.0 / 30.0) - 1e-9
+
+
+def _quirk_widget(floating_widget, with_quirk=True):
+    widget = floating_widget.FloatingWidget(lambda: None, lambda: None)
+    widget._visible = True
+    widget._view = MagicMock()
+    animations = {"idle": {"frames": ["a", "b"], "fps": 4}}
+    frames = {"idle": ["f0", "f1"]}
+    if with_quirk:
+        animations["idle_rare"] = {"frames": ["q0", "q1", "q2"], "fps": 10}
+        frames["idle_rare"] = ["r0", "r1", "r2"]
+    widget._appearance_config = _frame_appearance(animations)
+    widget._image_processor = _FakeFrameProcessor(frames)
+    return widget
+
+
+def _quirk_timers(floating_widget_module):
+    return [t for t in FakeTimer.created if t.interval == 60.0]
+
+
+def test_idle_quirk_plays_once_after_quiet_stretch(monkeypatch):
+    """idle_rare frames play one-shot after the random idle delay, then idle resumes."""
+    floating_widget = _load_floating_widget_module(monkeypatch)
+    monkeypatch.setattr(floating_widget.threading, "Timer", FakeTimer)
+    monkeypatch.setattr(floating_widget.random, "uniform", lambda a, b: 60.0)
+    FakeTimer.created.clear()
+
+    widget = _quirk_widget(floating_widget)
+    with widget._lock:
+        widget._restart_animation_for_state_locked()
+
+    # The quirk timer is armed alongside the normal idle animation.
+    assert len(_quirk_timers(floating_widget)) == 1
+    assert widget._state_frames == ["f0", "f1"]
+
+    # Fire it: the one-shot idle_rare sequence takes over, silently.
+    quirk = _quirk_timers(floating_widget)[0]
+    quirk.function(*quirk.args)
+    assert widget._idle_quirk_active is True
+    assert widget._state_frames == ["r0", "r1", "r2"]
+    assert widget._state_loops is False
+    assert widget._state_fps == 10
+
+    # Walk the animation to completion: the last tick flips back to idle.
+    for _ in range(3):
+        tick = FakeTimer.created[-1]
+        tick.function(*tick.args)
+
+    assert widget._idle_quirk_active is False
+    assert widget._state_frames == ["f0", "f1"]
+    # A fresh quirk timer is armed for the next quiet stretch.
+    assert len(_quirk_timers(floating_widget)) == 2
+
+
+def test_idle_quirk_cancelled_by_state_change(monkeypatch):
+    """Leaving idle invalidates the pending quirk; returning re-arms it."""
+    floating_widget = _load_floating_widget_module(monkeypatch)
+    monkeypatch.setattr(floating_widget.threading, "Timer", FakeTimer)
+    monkeypatch.setattr(floating_widget.random, "uniform", lambda a, b: 60.0)
+    FakeTimer.created.clear()
+
+    widget = _quirk_widget(floating_widget)
+    with widget._lock:
+        widget._restart_animation_for_state_locked()
+    stale = _quirk_timers(floating_widget)[0]
+
+    widget.set_recording()
+    assert stale.cancelled is True
+    # A stale fire (raced with the cancel) is ignored by the generation guard.
+    stale.function(*stale.args)
+    assert widget._idle_quirk_active is False
+    assert len(_quirk_timers(floating_widget)) == 1  # none armed while recording
+
+    widget.set_idle()
+    assert len(_quirk_timers(floating_widget)) == 2  # re-armed on return to idle
+
+
+def test_idle_quirk_not_armed_without_idle_rare_frames(monkeypatch):
+    """Packs without an idle_rare sequence never schedule a quirk."""
+    floating_widget = _load_floating_widget_module(monkeypatch)
+    monkeypatch.setattr(floating_widget.threading, "Timer", FakeTimer)
+    FakeTimer.created.clear()
+
+    widget = _quirk_widget(floating_widget, with_quirk=False)
+    with widget._lock:
+        widget._restart_animation_for_state_locked()
+
+    assert _quirk_timers(floating_widget) == []

@@ -226,6 +226,18 @@ class WhisperHUDApp(rumps.App):
         # Character pack manager for fun icon themes
         self.character_pack_manager = CharacterPackManager(self.config)
 
+        # Pack-derived appearance fields mirror the manifest; refresh them at
+        # startup so manifest additions (menu bar glyph, new animation states)
+        # reach configs written by older versions. Leaves widget_size alone.
+        active_pack_id = self.character_pack_manager.get_current_pack_id()
+        if active_pack_id:
+            active_pack = self.character_pack_manager.get_pack(active_pack_id)
+            if active_pack:
+                refreshed = active_pack.to_appearance_config()
+                if self.config.widget_appearance.get("custom_icon") != refreshed:
+                    self.config.widget_appearance["custom_icon"] = refreshed
+                    self.config.save()
+
         # Floating widget for click-to-record (with position persistence)
         self.widget = create_floating_widget(
             on_record_start=self._widget_start_recording,
@@ -4292,21 +4304,46 @@ class WhisperHUDApp(rumps.App):
     def _apply_menubar_status(self, title: str) -> None:
         """Resolve a state title to icon + text and push it to the status item."""
         state, suffix = split_menubar_title(title)
-        icon_path = get_menubar_icon(state) if state else None
+        icon_path: Optional[str] = None
+        template = True
+        if state:
+            standard = get_menubar_icon(state)
+            if standard:
+                icon_path = str(standard)
+            # The active character pack may theme the idle glyph (in color).
+            # All other states keep the template icons for legibility.
+            if state == "idle":
+                pack_icon = self._pack_menubar_icon()
+                if pack_icon:
+                    icon_path = pack_icon
+                    template = False
         if icon_path is None:
             self._stop_menubar_animation()
             self._set_menubar_visuals(None, title)
             return
 
         self._menubar_text = suffix or None
-        self._set_menubar_visuals(str(icon_path), self._menubar_text)
+        self._set_menubar_visuals(icon_path, self._menubar_text, template=template)
         self._animate_menubar_state(state)
 
-    def _set_menubar_visuals(self, icon_path: Optional[str], text: Optional[str]) -> None:
+    def _pack_menubar_icon(self) -> Optional[str]:
+        """Path to the active character pack's menu bar glyph, if it has one."""
+        custom_icon = self.config.widget_appearance.get("custom_icon", {})
+        if not isinstance(custom_icon, dict) or not custom_icon.get("enabled", False):
+            return None
+        path = custom_icon.get("menubar_icon")
+        if isinstance(path, str) and path and os.path.isfile(path):
+            return path
+        return None
+
+    def _set_menubar_visuals(
+        self, icon_path: Optional[str], text: Optional[str], template: bool = True
+    ) -> None:
         """Assign the rumps status-item icon and title text."""
-        if icon_path is not None and self.template is not True:
-            # Template mode lets macOS tint the icon for light/dark menu bars.
-            self.template = True
+        if icon_path is not None and self.template is not template:
+            # Template mode lets macOS tint the icon for light/dark menu bars;
+            # pack glyphs opt out to keep their colors.
+            self.template = template
         self.icon = icon_path
         self.title = text
 
@@ -5777,6 +5814,7 @@ class WhisperHUDApp(rumps.App):
             # Clear image cache to load new icons
             self.image_processor.clear_cache()
             self._apply_appearance_to_components()
+            self._refresh_idle_menubar_icon()
             self._schedule_menu_rebuild()
 
             self._notify("WhisperHUD", "Character Pack Applied", f"Now using: {pack.name}")
@@ -5788,9 +5826,15 @@ class WhisperHUDApp(rumps.App):
         self.character_pack_manager.clear_pack()
         self.image_processor.clear_cache()
         self._apply_appearance_to_components()
+        self._refresh_idle_menubar_icon()
         self._schedule_menu_rebuild()
 
         self._notify("WhisperHUD", "Character Pack Removed", "Using default circle icons.")
+
+    def _refresh_idle_menubar_icon(self) -> None:
+        """Re-render the status icon after a pack change, unless mid-turn."""
+        if not self._is_recording:
+            self._set_title(self._get_idle_icon())
 
     def _reset_appearance(self, sender):
         """Reset appearance to default."""

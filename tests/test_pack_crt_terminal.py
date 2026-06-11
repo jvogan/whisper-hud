@@ -20,7 +20,7 @@ from whisper_hud.character_packs import (
 )
 
 PACK_DIR = Path(__file__).resolve().parents[1] / "assets" / "character-packs" / "crt-terminal"
-ALL_STATES = {"idle", "recording", "processing", "success", "error"}
+ALL_STATES = {"idle", "idle_rare", "recording", "processing", "success", "error"}
 # Per the pack's sound design: only these states emit audio.
 SOUND_STATES = {"recording", "success", "error"}
 SILENT_STATES = {"idle", "processing"}

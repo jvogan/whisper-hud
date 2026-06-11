@@ -9,6 +9,7 @@ Supports customizable colors and icons.
 from __future__ import annotations
 
 import math
+import random
 import threading
 from enum import Enum
 from typing import Callable, Optional
@@ -681,6 +682,11 @@ class FloatingWidget:
         self._state_fps = 0.0
         self._frame_index = 0
         self._state_loops = True  # transient states (success/error) play once
+        # Rare idle quirk: packs may define an "idle_rare" frame sequence that
+        # plays once after a long quiet stretch, then idle resumes.
+        self._idle_quirk_timer: Optional[threading.Timer] = None
+        self._idle_quirk_active = False
+        self._idle_quirk_generation = 0
         self._last_sound_state: Optional[WidgetState] = None
         # Transient success/error states auto-revert to idle via this timer.
         # Structured like the animation timer so a future one-shot animation
@@ -894,12 +900,20 @@ class FloatingWidget:
     # States whose frame animations loop forever vs. play exactly once.
     _LOOPING_STATES = {WidgetState.IDLE, WidgetState.RECORDING, WidgetState.PROCESSING}
 
+    # Rare idle quirk: manifest state name and the random delay window
+    # (seconds of continuous idle) before it plays.
+    IDLE_QUIRK_STATE = "idle_rare"
+    IDLE_QUIRK_MIN_DELAY = 45.0
+    IDLE_QUIRK_MAX_DELAY = 150.0
+
     def _load_state_frames_locked(self):
         """Load the active pack's frame sequence for the current state.
 
         Populates ``_state_frames`` / ``_state_fps`` / ``_state_loops`` and
         pushes the frame list to the view. Falls back to an empty list (static
-        icon / procedural animation) when the pack defines no frames.
+        icon / procedural animation) when the pack defines no frames. While the
+        idle quirk is active, the ``idle_rare`` sequence is loaded instead of
+        the normal idle frames and plays exactly once.
         """
         self._state_frames = []
         self._state_fps = 0.0
@@ -919,11 +933,25 @@ class FloatingWidget:
         dims = self._get_dimensions()
         icon_size = dims[3]
         state_name = self._state.value
+        quirking = self._idle_quirk_active and self._state == WidgetState.IDLE
+        if quirking:
+            state_name = self.IDLE_QUIRK_STATE
         try:
             frames = self._image_processor.get_frames_for_state(state_name, icon_size)
         except Exception as exc:  # best-effort; never break the widget on render
             logger.debug(f"Failed to load animation frames for {state_name}: {exc}")
             frames = []
+
+        if quirking and not frames:
+            # Quirk frames failed to load: drop the quirk and reload idle.
+            self._idle_quirk_active = False
+            state_name = self._state.value
+            try:
+                frames = self._image_processor.get_frames_for_state(state_name, icon_size)
+            except Exception:
+                frames = []
+        elif quirking:
+            self._state_loops = False
 
         if frames:
             self._state_frames = list(frames)
@@ -988,8 +1016,11 @@ class FloatingWidget:
     def _restart_animation_for_state_locked(self):
         self._animation_generation += 1
         self._cancel_animation_timer_locked()
+        if self._state != WidgetState.IDLE:
+            self._idle_quirk_active = False
         # (Re)load frames for the new state before deciding whether to animate.
         self._load_state_frames_locked()
+        self._manage_idle_quirk_locked()
 
         if not self._state_uses_animation() or not self._visible:
             self._animation_phase = 0.0
@@ -1001,6 +1032,58 @@ class FloatingWidget:
         if self._has_frame_animation_locked():
             self._update_frame_index()
         self._schedule_animation_tick_locked()
+
+    def _idle_quirk_frames_defined_locked(self) -> bool:
+        """Whether the active pack defines a playable idle_rare sequence."""
+        if not self._appearance_config:
+            return False
+        custom_icon = self._appearance_config.get("custom_icon", {})
+        if not isinstance(custom_icon, dict) or not custom_icon.get("enabled", False):
+            return False
+        animations = custom_icon.get("animations", {})
+        quirk = animations.get(self.IDLE_QUIRK_STATE) if isinstance(animations, dict) else None
+        frames = quirk.get("frames", []) if isinstance(quirk, dict) else []
+        return isinstance(frames, list) and len(frames) >= 2
+
+    def _manage_idle_quirk_locked(self):
+        """(Re)arm or cancel the rare-idle timer for the current situation.
+
+        Called from the animation-restart funnel, so every state change,
+        show/hide and quirk completion re-evaluates eligibility. Quirks are
+        deliberately silent (no state sound) and play only after a random
+        45-150s stretch of visible idle.
+        """
+        self._idle_quirk_generation += 1  # invalidate any in-flight fire
+        timer = self._idle_quirk_timer
+        self._idle_quirk_timer = None
+        if timer is not None:
+            timer.cancel()
+
+        if (
+            self._state != WidgetState.IDLE
+            or self._idle_quirk_active
+            or not self._visible
+            or not self._idle_quirk_frames_defined_locked()
+        ):
+            return
+
+        delay = random.uniform(self.IDLE_QUIRK_MIN_DELAY, self.IDLE_QUIRK_MAX_DELAY)
+        timer = threading.Timer(delay, self._idle_quirk_fire, args=(self._idle_quirk_generation,))
+        timer.daemon = True
+        self._idle_quirk_timer = timer
+        timer.start()
+
+    def _idle_quirk_fire(self, generation: int):
+        """Play the one-shot idle_rare sequence if still quietly idle."""
+        with self._lock:
+            if generation != self._idle_quirk_generation:
+                return
+            self._idle_quirk_timer = None
+            if self._state != WidgetState.IDLE or not self._visible or self._idle_quirk_active:
+                return
+            self._idle_quirk_active = True
+            self._restart_animation_for_state_locked()
+            self._update_view()
 
     def _schedule_animation_tick_locked(self):
         timer = threading.Timer(
@@ -1027,6 +1110,13 @@ class FloatingWidget:
                 if next_index >= len(self._state_frames):
                     if self._state_loops:
                         self._frame_index = 0
+                    elif self._idle_quirk_active and self._state == WidgetState.IDLE:
+                        # Idle quirk finished: resume the normal idle loop and
+                        # schedule the next quirk (restart re-arms it).
+                        self._idle_quirk_active = False
+                        self._animation_timer = None
+                        self._restart_animation_for_state_locked()
+                        return
                     else:
                         # One-shot transition: hold the final frame and stop;
                         # the revert timer returns the widget to idle.

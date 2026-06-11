@@ -150,6 +150,12 @@ class CharacterPack:
     pack_dir: str = ""  # Directory containing the pack
     builtin: bool = True  # True if this is a built-in pack
 
+    # Optional menu bar glyph shown (in color) while the app is idle and this
+    # pack is active. Replaces only the idle status icon; recording/processing
+    # and the other states keep the standard template icons for legibility.
+    menubar_icon: str = ""
+    menubar_icon_path: str = ""
+
     # State icons
     states: Dict[str, CharacterPackState] = field(default_factory=dict)
 
@@ -210,6 +216,7 @@ class CharacterPack:
             "tint_opacity": self.settings.get("tint_opacity", 0.3),
             "shape_mode": self.settings.get("shape_mode", "alpha"),
             "character_pack": self.id,
+            "menubar_icon": self.menubar_icon_path,
         }
 
 
@@ -309,6 +316,16 @@ def load_pack_manifest(pack_dir: Path) -> Optional[CharacterPack]:
                 pack.preview_path = str(preview_path)
             else:
                 logger.warning(f"Preview image path is missing or escapes the pack directory: {pack.preview_image}")
+
+        # Optional menu bar glyph (same containment rules as other members).
+        menubar_icon = data.get("menubar_icon", "")
+        if isinstance(menubar_icon, str) and menubar_icon:
+            menubar_path = _resolve_pack_member(pack_dir, menubar_icon)
+            if menubar_path and menubar_path.is_file():
+                pack.menubar_icon = menubar_icon
+                pack.menubar_icon_path = str(menubar_path)
+            else:
+                logger.warning(f"Menubar icon is missing or escapes the pack directory: {menubar_icon}")
 
         # Validate that pack has at least idle state
         if "idle" not in pack.states:
@@ -574,6 +591,8 @@ def install_pack_from_directory(source_dir: str) -> Optional[CharacterPack]:
             files_to_copy.add(state.sound)
     if pack.preview_image:
         files_to_copy.add(pack.preview_image)
+    if pack.menubar_icon:
+        files_to_copy.add(pack.menubar_icon)
 
     try:
         for relative_path in sorted(files_to_copy):

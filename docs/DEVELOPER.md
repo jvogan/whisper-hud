@@ -61,6 +61,8 @@ The status-bar icon is a template image set in `assets/menubar/` (idle waveform,
 python assets/generate_menubar.py
 ```
 
+An active character pack may replace the **idle** status icon with its own color glyph via the manifest's `menubar_icon` key (see below); the built-in retro packs derive theirs (and their `idle_rare` hop frames) from the idle art with `assets/generate_pack_extras.py`.
+
 ## Character pack manifest (v2 authoring)
 
 Character packs live in `assets/character-packs/<pack-id>/manifest.json` (built-in) or `~/.config/whisper-hud/character-packs/<pack-id>/` (user-installed). Manifest v2 adds optional per-state animation and sound; **all v2 keys are optional and v1 single-icon packs continue to work unchanged**.
@@ -72,10 +74,11 @@ Top-level keys:
 | `id` | Slug; `[A-Za-z0-9_-]+` only |
 | `name`, `description`, `author`, `version` | Metadata |
 | `preview_image` | Filename inside the pack used as the menu preview |
+| `menubar_icon` | Optional color glyph (~40x40) shown as the **menu bar** status icon while idle when this pack is active. Other states keep the standard template icons. Same containment rules as every other member |
 | `states` | Map of state name → state spec (see below) |
 | `settings` | Optional: `shape_mode`, `apply_state_tint`, `tint_opacity`, `recommended_size`, and the v2 `interpolation` hint |
 
-States: the pipeline uses `idle`, `recording`, `processing`, `success`, and `error`. A pack **must** define at least `idle`. Each state value is either a bare filename string (v1) or an object:
+States: the pipeline uses `idle`, `recording`, `processing`, `success`, and `error`. A pack **must** define at least `idle`. An optional `idle_rare` state (needs `frames` with ≥2 entries) plays **once** after a random 45–150s stretch of visible idle, then the normal idle loop resumes — an easter-egg quirk; its `sound` is ignored. Each state value is either a bare filename string (v1) or an object:
 
 | State key | Notes |
 |-----------|-------|

@@ -365,6 +365,103 @@ def test_install_pack_copies_frames_and_sounds(tmp_path):
     assert installed.states["recording"].sound == "blip.wav"
 
 
+def test_load_pack_manifest_parses_menubar_icon(tmp_path):
+    """The optional menubar_icon resolves and lands in the appearance config."""
+    from whisper_hud.character_packs import load_pack_manifest
+
+    pack_dir = tmp_path / "pack"
+    pack_dir.mkdir()
+    _touch(pack_dir / "idle.png")
+    _touch(pack_dir / "menubar.png")
+
+    _write_manifest(
+        pack_dir,
+        {
+            "id": "glyph_pack",
+            "name": "Glyph Pack",
+            "menubar_icon": "menubar.png",
+            "states": {"idle": "idle.png"},
+        },
+    )
+
+    pack = load_pack_manifest(pack_dir)
+    assert pack is not None
+    assert pack.menubar_icon == "menubar.png"
+    assert Path(pack.menubar_icon_path).is_file()
+    assert pack.to_appearance_config()["menubar_icon"] == pack.menubar_icon_path
+
+
+def test_load_pack_manifest_rejects_menubar_icon_traversal(tmp_path):
+    """A menubar_icon escaping the pack directory is dropped, not resolved."""
+    from whisper_hud.character_packs import load_pack_manifest
+
+    outside = tmp_path / "outside.png"
+    _touch(outside)
+    pack_dir = tmp_path / "pack"
+    pack_dir.mkdir()
+    _touch(pack_dir / "idle.png")
+
+    _write_manifest(
+        pack_dir,
+        {
+            "id": "sneaky_pack",
+            "name": "Sneaky Pack",
+            "menubar_icon": "../outside.png",
+            "states": {"idle": "idle.png"},
+        },
+    )
+
+    pack = load_pack_manifest(pack_dir)
+    assert pack is not None  # pack still loads, the bad member is dropped
+    assert pack.menubar_icon == ""
+    assert pack.menubar_icon_path == ""
+    assert pack.to_appearance_config()["menubar_icon"] == ""
+
+
+def test_install_pack_copies_menubar_icon(tmp_path):
+    """Install must copy the menubar glyph alongside the other members."""
+    from whisper_hud.character_packs import install_pack_from_directory
+
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    for name in ("idle.png", "menubar.png"):
+        _touch(source_dir / name)
+
+    _write_manifest(
+        source_dir,
+        {
+            "id": "glyphed",
+            "name": "Glyphed",
+            "menubar_icon": "menubar.png",
+            "states": {"idle": "idle.png"},
+        },
+    )
+
+    user_dir = tmp_path / "user-packs"
+    with patch("whisper_hud.character_packs._get_user_packs_dir", return_value=user_dir):
+        installed = install_pack_from_directory(str(source_dir))
+
+    assert installed is not None
+    assert (user_dir / "glyphed" / "menubar.png").is_file()
+    assert installed.menubar_icon == "menubar.png"
+
+
+def test_builtin_retro_packs_have_menubar_icon_and_idle_quirk():
+    """The three retro packs ship a menu bar glyph and a rare-idle sequence."""
+    from whisper_hud.character_packs import _get_builtin_packs_dir, load_pack_manifest
+
+    for pack_name in ("pixel-adventurer", "handheld-89", "crt-terminal"):
+        pack = load_pack_manifest(_get_builtin_packs_dir() / pack_name)
+        assert pack is not None, pack_name
+        assert pack.menubar_icon_path, pack_name
+        quirk = pack.states.get("idle_rare")
+        assert quirk is not None, pack_name
+        assert len(quirk.frame_paths) >= 2, pack_name
+        appearance = pack.to_appearance_config()
+        assert appearance["menubar_icon"] == pack.menubar_icon_path
+        assert len(appearance["animations"]["idle_rare"]["frames"]) >= 2
+
+
 def test_save_user_pack_preserves_distinct_success(tmp_path, monkeypatch):
     """A distinct success image must not be overwritten by the recording alias."""
     from whisper_hud import character_packs
