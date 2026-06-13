@@ -56,7 +56,7 @@ dependencies = [
     "pyobjc-framework-Cocoa>=11.0",
     "pyobjc-framework-Quartz>=11.0",
     "pyobjc-framework-Speech>=11.0",
-    "requests>=2.28.0",
+    "requests>=2.33.0",
 ]
 
 [project.optional-dependencies]
