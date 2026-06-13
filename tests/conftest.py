@@ -40,6 +40,25 @@ def _block_real_keychain():
                 yield
 
 
+@pytest.fixture(autouse=True)
+def _isolate_real_config(tmp_path):
+    """Globally redirect config storage to a per-test temp dir so a test can
+    NEVER write to the developer's real ~/.config/whisper-hud/config.json.
+
+    Without this, any test that constructs ``Config()`` and triggers a save
+    (directly or through an app helper) silently overwrites the live config —
+    observed resetting ``credential_storage_mode`` and ``setup_completed`` to
+    their defaults. Tests that need their own config path (e.g. test_config)
+    patch ``CONFIG_FILE`` again inside the test, which simply nests over this.
+    """
+    cfg_dir = tmp_path / "wh_config"
+    cfg_dir.mkdir()
+    cfg_file = cfg_dir / "config.json"
+    with patch("whisper_hud.config.CONFIG_DIR", cfg_dir):
+        with patch("whisper_hud.config.CONFIG_FILE", cfg_file):
+            yield
+
+
 @pytest.fixture
 def mock_keychain():
     """Mock keychain operations with accessible mock objects for assertions."""
