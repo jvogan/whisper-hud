@@ -156,6 +156,8 @@ class WhisperHUDApp(rumps.App):
     _menubar_anim_frames: tuple = ()
     _menubar_anim_index = 0
     _menubar_text: Optional[str] = None
+    # Watchdog thread that auto-stops an over-long voice-assistant session.
+    _assistant_max_duration_thread = None
 
     def __init__(self):
         super().__init__("WhisperHUD", icon=None, title=self.ICON_IDLE, quit_button=None)  # We'll add our own quit
@@ -1419,17 +1421,14 @@ class WhisperHUDApp(rumps.App):
                 callback=self._toggle_live_translation,
             )
         )
-        # Only surface the blockers when translation is on and live translation is
-        # requested but cannot take effect (missing key or unsupported target).
-        if self.config.translation_enabled and self.config.live_translation_enabled:
-            if get_api_key("openai") is None:
-                translation_menu.add(
-                    rumps.MenuItem("   Add an OpenAI key to use live speech translation", callback=None)
-                )
-            elif not is_supported_target_language(self.config.target_language):
-                translation_menu.add(
-                    rumps.MenuItem("   Target language not supported for live translation", callback=None)
-                )
+        # Surface the first blocker whenever live translation is requested but
+        # can't take effect yet — translation off, missing key, or unsupported
+        # target. The old condition hid the hint when plain translation was off,
+        # the natural order in which a user enables this.
+        if self.config.live_translation_enabled:
+            blocker = self._live_translation_blocker()
+            if blocker:
+                translation_menu.add(rumps.MenuItem(f"   {blocker}", callback=None))
 
         translation_menu.add(rumps.separator)
 
@@ -2875,12 +2874,19 @@ class WhisperHUDApp(rumps.App):
         )
 
     def _on_live_session_error(self, turn_id: int, error: Exception) -> None:
-        """Downgrade to batch when a live session fails."""
+        """Downgrade to batch when a live session fails, and tell the user once."""
         logger.warning("Live transcription error on turn %s: %s", turn_id, error)
-        self._degrade_turn_to_batch(turn_id, str(error))
+        self._degrade_turn_to_batch(turn_id, str(error), notify_user=True)
 
-    def _degrade_turn_to_batch(self, turn_id: int, reason: str) -> None:
-        """Stop using live transcription and fall back to batch for this turn."""
+    def _degrade_turn_to_batch(self, turn_id: int, reason: str, notify_user: bool = False) -> None:
+        """Stop using live transcription and fall back to batch for this turn.
+
+        When ``notify_user`` is set (a genuine stream error rather than a quiet
+        connect/finalize timeout) and the user was watching live text, surface a
+        one-time toast so their on-screen partial doesn't just vanish with no
+        explanation. Guarded by ``batch_fallback_started`` so repeated error
+        callbacks on the same turn notify at most once.
+        """
         turn = self._get_active_turn(turn_id)
         if not turn:
             return
@@ -2892,6 +2898,14 @@ class WhisperHUDApp(rumps.App):
             return
 
         turn.phase = RecordingTurnPhase.DEGRADED_BATCH
+
+        if notify_user and not turn.batch_fallback_started and self.config.streaming_enabled:
+            self._notify(
+                "WhisperHUD",
+                "Realtime Stream Interrupted",
+                "Finishing this dictation with standard transcription.",
+            )
+
         if self._is_recording and self.config.streaming_enabled:
             self.streaming_panel.hide()
 
@@ -5237,10 +5251,37 @@ class WhisperHUDApp(rumps.App):
         threading.Thread(target=_check_availability, daemon=True).start()
 
     def _toggle_live_translation(self, sender):
-        """Toggle live speech translation (OpenAI streaming translation)."""
-        self.config.live_translation_enabled = not self.config.live_translation_enabled
+        """Toggle live speech translation (OpenAI streaming translation).
+
+        Enabling is allowed even when a precondition is unmet — the intent is
+        saved and the feature starts working the moment the gap is closed — but
+        we surface the first blocker immediately so the toggle never silently
+        no-ops behind a checkmark.
+        """
+        enabling = not self.config.live_translation_enabled
+        self.config.live_translation_enabled = enabling
         self.config.save()
         self._schedule_menu_rebuild()
+
+        if enabling:
+            blocker = self._live_translation_blocker()
+            if blocker:
+                self._notify("WhisperHUD", "Live Translation Pending", blocker)
+
+    def _live_translation_blocker(self) -> Optional[str]:
+        """Return why live speech translation can't take effect yet, or None.
+
+        Single source of truth for both the toggle notification and the menu
+        hint so the two surfaces can never disagree. Mirrors the preconditions
+        in ``_live_translation_active`` (minus the toggle itself).
+        """
+        if not self.config.translation_enabled:
+            return "Turn on Enable translation first to use live speech translation."
+        if get_api_key("openai") is None:
+            return "Add an OpenAI API key to use live speech translation."
+        if not is_supported_target_language(self.config.target_language):
+            return "Your target language isn't supported for live translation yet."
+        return None
 
     def _set_translation_provider(self, provider_id: str):
         """Set the translation provider."""
@@ -5430,6 +5471,21 @@ class WhisperHUDApp(rumps.App):
             self._notify("WhisperHUD", "OpenAI Key Required", "Add your OpenAI API key to use the voice assistant.")
             return
 
+        # Fast refusal before the cost prompt: if dictation already owns the mic
+        # we can't start anyway, so don't ask the user to opt into billing only
+        # to reject them. The authoritative, race-free check is repeated under
+        # _recording_lock below (mirrors the early/locked pattern in
+        # _start_recording).
+        if self._is_recording:
+            self._notify("WhisperHUD", "Dictation Active", "Stop dictation before starting the voice assistant.")
+            return
+
+        # One-time cost disclosure before the first metered session. A live
+        # realtime chat bills continuously per minute, so make the user opt in
+        # once (and only once) rather than springing the meter on them.
+        if not self._confirm_assistant_cost():
+            return
+
         # The dictation guard reads self._is_recording, which a hotkey-started
         # _start_recording flips under self._recording_lock. Take the same lock
         # around the check + construct + start so the two mic owners serialize
@@ -5462,8 +5518,75 @@ class WhisperHUDApp(rumps.App):
             )
             self._assistant_error_notified = False
             self._voice_assistant.start()
+            self._start_assistant_max_duration_timer()
 
         self._schedule_menu_rebuild()
+
+    def _confirm_assistant_cost(self) -> bool:
+        """Show a one-time metered-cost disclosure; return True to proceed.
+
+        The acknowledgement is persisted so it appears only before the very
+        first Voice Chat. Returns True immediately on later starts.
+        """
+        if self.config.assistant_cost_ack:
+            return True
+
+        cap_minutes = max(1, self.config.assistant_max_session_seconds // 60)
+        cap_note = (
+            f" It auto-stops after {cap_minutes} minutes if you forget to end it."
+            if self.config.assistant_max_session_seconds > 0
+            else ""
+        )
+        proceed = rumps.alert(
+            title="Start Voice Chat?",
+            message=(
+                f"Voice Chat holds a live connection to OpenAI "
+                f"({self.config.assistant_model}) and is billed continuously per "
+                f"minute while active. Your audio is sent to OpenAI during the "
+                f"chat.{cap_note}"
+            ),
+            ok="Start",
+            cancel="Cancel",
+        )
+        if not proceed:
+            return False
+        self.config.assistant_cost_ack = True
+        self.config.save()
+        return True
+
+    def _start_assistant_max_duration_timer(self) -> None:
+        """Auto-stop the voice assistant after its configured session cap.
+
+        A realtime conversation streams billable audio for as long as it stays
+        open, so an unattended or stuck session (e.g. a server error that fails
+        to tear down) must not run forever. Mirrors dictation's
+        ``_start_max_duration_timer``. A cap of 0 disables the watchdog.
+        """
+        max_seconds = self.config.assistant_max_session_seconds
+        if not max_seconds or max_seconds <= 0:
+            return
+
+        def check_duration():
+            start = time.time()
+            while self._assistant_is_active():
+                if time.time() - start >= max_seconds:
+                    logger.info(
+                        "Voice assistant session cap (%ss) reached, auto-stopping", max_seconds
+                    )
+                    assistant = self._voice_assistant
+                    if assistant is not None:
+                        assistant.stop()
+                    self._notify(
+                        "WhisperHUD",
+                        "Voice Chat Ended",
+                        "The session reached its time limit. Start a new chat to continue.",
+                    )
+                    self._schedule_menu_rebuild()
+                    break
+                time.sleep(1)
+
+        self._assistant_max_duration_thread = threading.Thread(target=check_duration, daemon=True)
+        self._assistant_max_duration_thread.start()
 
     def _on_assistant_state(self, state: str) -> None:
         """Reflect assistant state in the menu-bar icon and Start/Stop title.

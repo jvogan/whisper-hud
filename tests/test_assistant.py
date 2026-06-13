@@ -559,3 +559,55 @@ def test_full_scale_resample_does_not_wrap_int16():
     # The resample genuinely overshoots past +/-1.0 here, so without the
     # post-resample clip at least one sample would have wrapped.
     assert (np.abs(resampled) > 1.0).any()
+
+
+def test_is_terminal_session_error_classifies_unrecoverable_frames():
+    """Auth/quota/billing markers are terminal; transient frames are not."""
+    from whisper_hud.assistant import _is_terminal_session_error
+
+    assert _is_terminal_session_error(SimpleNamespace(code="invalid_api_key", type="", message=""))
+    assert _is_terminal_session_error(
+        SimpleNamespace(code="", type="", message="You exceeded your insufficient_quota.")
+    )
+    assert _is_terminal_session_error(SimpleNamespace(type="session_expired", code="", message=""))
+    assert not _is_terminal_session_error(
+        SimpleNamespace(code="server_error", type="", message="temporary glitch, retrying")
+    )
+    assert not _is_terminal_session_error(None)
+
+
+def test_terminal_error_event_releases_mic_and_stops_session():
+    """An auth/quota error frame must tear down (mic released), not hot-spin.
+
+    Regression for the hot-mic hazard: the old handler notified and returned,
+    leaving the recv-loop spinning and the recorder holding the mic on a session
+    that never recovers.
+    """
+    h = Harness(
+        events=[
+            SimpleNamespace(
+                type="error",
+                error=SimpleNamespace(
+                    type="invalid_request_error",
+                    code="invalid_api_key",
+                    message="Incorrect API key provided.",
+                ),
+            ),
+            # Only reached if the loop wrongly kept running after the error.
+            SimpleNamespace(type="response.output_audio_transcript.delta", delta="should not appear"),
+        ]
+    )
+    h.assistant.start()
+
+    # "error" state is emitted last, after teardown — wait for it to settle.
+    deadline = time.time() + 2.0
+    while time.time() < deadline and "error" not in h.states:
+        time.sleep(0.01)
+
+    assert h.assistant.is_active() is False
+    assert len(h.errors) == 1
+    assert "error" in h.states
+    assert h.recorder.stopped is True  # mic released, not left hot
+    assert h.player.stopped is True
+    assert h.assistant_texts == []  # the trailing delta never ran
+    h.stop()

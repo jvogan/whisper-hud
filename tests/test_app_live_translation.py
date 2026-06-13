@@ -306,7 +306,7 @@ def test_translation_menu_hint_when_no_key(monkeypatch):
     app._build_menu()
 
     titles = _menu_titles(_translation_submenu(app))
-    assert any("Add an OpenAI key to use live speech translation" in t for t in titles)
+    assert any("Add an OpenAI API key to use live speech translation" in t for t in titles)
 
 
 def test_translation_menu_hint_when_target_unsupported(monkeypatch):
@@ -319,4 +319,61 @@ def test_translation_menu_hint_when_target_unsupported(monkeypatch):
     app._build_menu()
 
     titles = _menu_titles(_translation_submenu(app))
-    assert any("Target language not supported for live translation" in t for t in titles)
+    assert any("isn't supported for live translation" in t for t in titles)
+
+
+def test_translation_menu_hint_when_live_on_but_translation_off(monkeypatch):
+    # The old condition hid every blocker unless plain translation was already
+    # on, so enabling live translation first (the natural order) showed nothing.
+    app = _build_menu_app(monkeypatch)
+    app.config.translation_enabled = False
+    app.config.live_translation_enabled = True
+    monkeypatch.setattr("whisper_hud.app.get_api_key", lambda provider: "sk-test")
+
+    app._build_menu()
+
+    titles = _menu_titles(_translation_submenu(app))
+    assert any("Enable translation" in t and "first" in t for t in titles)
+
+
+def test_toggle_live_translation_notifies_when_blocked(monkeypatch):
+    # Enabling with a precondition unmet still saves the intent, but must not
+    # silently no-op — the user is told the first blocker immediately.
+    app = _build_menu_app(monkeypatch)
+    app._notify = MagicMock()
+    app.config.translation_enabled = True
+    app.config.live_translation_enabled = False
+    app.config.target_language = "es"
+    monkeypatch.setattr("whisper_hud.app.get_api_key", lambda provider: None)
+
+    app._toggle_live_translation(None)
+
+    assert app.config.live_translation_enabled is True  # intent saved
+    app._notify.assert_called_once()
+    assert "OpenAI API key" in " ".join(str(a) for a in app._notify.call_args.args)
+
+
+def test_toggle_live_translation_quiet_when_ready(monkeypatch):
+    app = _build_menu_app(monkeypatch)
+    app._notify = MagicMock()
+    app.config.translation_enabled = True
+    app.config.live_translation_enabled = False
+    app.config.target_language = "es"
+    monkeypatch.setattr("whisper_hud.app.get_api_key", lambda provider: "sk-test")
+
+    app._toggle_live_translation(None)
+
+    assert app.config.live_translation_enabled is True
+    app._notify.assert_not_called()
+    assert app._live_translation_blocker() is None
+
+
+def test_toggle_live_translation_off_is_quiet(monkeypatch):
+    app = _build_menu_app(monkeypatch)
+    app._notify = MagicMock()
+    app.config.live_translation_enabled = True
+
+    app._toggle_live_translation(None)
+
+    assert app.config.live_translation_enabled is False
+    app._notify.assert_not_called()

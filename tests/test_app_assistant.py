@@ -62,6 +62,12 @@ def _build_assistant_app():
     app.config.history_enabled = True
     app.config.private_mode = False
     app.config.history = []
+    # These flow tests exercise construct/refuse/stop, not the cost gate or the
+    # session watchdog: pre-acknowledge the one-time cost disclosure (so no modal
+    # blocks the test) and disable the auto-stop cap (so no watchdog thread is
+    # spawned). The cost gate and watchdog have dedicated tests in test_app.py.
+    app.config.assistant_cost_ack = True
+    app.config.assistant_max_session_seconds = 0
     return app
 
 

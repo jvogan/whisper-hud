@@ -40,6 +40,38 @@ logger = get_logger("assistant")
 
 _CLIENT_TIMEOUT_SECONDS = 30.0
 
+# Realtime ``error`` frames that mean the session is dead. Auth, quota, and
+# billing/account problems never recover on the same socket, so the mic and
+# connection must be released rather than left hot on a defunct session. Other
+# error frames (transient per-response failures) keep the conversation alive.
+_TERMINAL_ERROR_MARKERS = (
+    "invalid_api_key",
+    "authentication",
+    "unauthorized",
+    "insufficient_quota",
+    "account_deactivated",
+    "billing_hard_limit",
+    "session_expired",
+)
+
+
+def _is_terminal_session_error(error: Any) -> bool:
+    """True when an ``error`` event frame means the session cannot continue.
+
+    Matches OpenAI ``error.code``/``error.type``/``error.message`` against a
+    conservative set of unrecoverable markers (auth, quota, billing, expiry).
+    Anything else is treated as transient so a single hiccup does not end the
+    whole conversation.
+    """
+    parts = [
+        value.lower()
+        for attr in ("code", "type", "message")
+        for value in (getattr(error, attr, None),)
+        if isinstance(value, str)
+    ]
+    haystack = " ".join(parts)
+    return any(marker in haystack for marker in _TERMINAL_ERROR_MARKERS)
+
 _DEFAULT_INSTRUCTIONS = (
     "You are a voice assistant living inside a dictation app on this Mac. "
     "You can paste text into the user's currently focused application with the "
@@ -287,9 +319,17 @@ class VoiceAssistant:
         if event_type == "error":
             error = getattr(event, "error", None)
             message = getattr(error, "message", None) or "request failed"
-            wrapped = RuntimeError(build_provider_error_message("OpenAI Assistant", "session", RuntimeError(message)))
-            self._on_error(wrapped)
-            # The SDK may auto-reconnect; do not stop the session here.
+            if _is_terminal_session_error(error):
+                # Auth/quota/billing failures never recover on this socket, and
+                # the SDK only auto-reconnects on a dropped connection, never on
+                # an error frame. Release the mic and connection here instead of
+                # spinning a hot mic on a dead session.
+                self._handle_abnormal_exit(RuntimeError(message))
+            else:
+                wrapped = RuntimeError(
+                    build_provider_error_message("OpenAI Assistant", "session", RuntimeError(message))
+                )
+                self._on_error(wrapped)
             return
 
         # Unknown events are ignored.

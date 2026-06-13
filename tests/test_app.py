@@ -1560,3 +1560,80 @@ def test_widget_animation_toggles_persist_and_apply_live():
     assert app.config.widget_idle_animation is False
     app.widget.set_animation_prefs.assert_called_with(False, False)
     assert app.config.save.call_count == 2
+
+
+# --- Voice assistant cost ceiling + disclosure (P0-B) ----------------------
+
+
+def _bare_app():
+    app = WhisperHUDApp.__new__(WhisperHUDApp)
+    app.config = Config()
+    app.config.save = MagicMock(return_value=True)
+    app._notify = MagicMock()
+    app._schedule_menu_rebuild = MagicMock()
+    app._assistant_max_duration_thread = None
+    return app
+
+
+def test_confirm_assistant_cost_first_time_prompts_and_persists():
+    app = _bare_app()
+    assert app.config.assistant_cost_ack is False
+    with patch("whisper_hud.app.rumps") as fake_rumps:
+        fake_rumps.alert.return_value = 1  # Start
+        assert app._confirm_assistant_cost() is True
+        fake_rumps.alert.assert_called_once()
+    assert app.config.assistant_cost_ack is True
+    app.config.save.assert_called_once()
+
+
+def test_confirm_assistant_cost_cancel_aborts_without_persisting():
+    app = _bare_app()
+    with patch("whisper_hud.app.rumps") as fake_rumps:
+        fake_rumps.alert.return_value = 0  # Cancel
+        assert app._confirm_assistant_cost() is False
+    assert app.config.assistant_cost_ack is False
+    app.config.save.assert_not_called()
+
+
+def test_confirm_assistant_cost_skipped_after_acknowledged():
+    app = _bare_app()
+    app.config.assistant_cost_ack = True
+    with patch("whisper_hud.app.rumps") as fake_rumps:
+        assert app._confirm_assistant_cost() is True
+        fake_rumps.alert.assert_not_called()
+
+
+def test_assistant_watchdog_disabled_when_cap_zero():
+    app = _bare_app()
+    app.config.assistant_max_session_seconds = 0
+    app._start_assistant_max_duration_timer()
+    assert app._assistant_max_duration_thread is None
+
+
+def test_assistant_watchdog_stops_session_at_cap(monkeypatch):
+    app = _bare_app()
+    app.config.assistant_max_session_seconds = 30
+    assistant = MagicMock()
+    assistant.is_active.return_value = True
+    app._voice_assistant = assistant
+
+    # Fake the module clock so the cap is exceeded on the second poll without
+    # any real sleeping; only the watchdog thread reads whisper_hud.app.time.
+    class _FakeClock:
+        def __init__(self):
+            self._t = 1000.0
+
+        def time(self):
+            return self._t
+
+        def sleep(self, _seconds):
+            self._t += 100.0  # jump past the cap
+
+    monkeypatch.setattr("whisper_hud.app.time", _FakeClock())
+
+    app._start_assistant_max_duration_timer()
+    app._assistant_max_duration_thread.join(timeout=2.0)
+
+    assert not app._assistant_max_duration_thread.is_alive()
+    assistant.stop.assert_called_once()
+    app._notify.assert_called_once()

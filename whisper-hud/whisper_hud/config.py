@@ -203,6 +203,11 @@ class Config:
     assistant_voice: str = "marin"  # Output voice
     assistant_reasoning_effort: str = "low"  # low / medium / high
     assistant_paste_tool_enabled: bool = True  # Allow the assistant to paste text into the focused app
+    # A live realtime conversation bills continuously, so cap an unattended or
+    # stuck session and disclose the cost once before the first chat. Additive
+    # with safe defaults; 0 disables the cap.
+    assistant_max_session_seconds: int = 1800  # Auto-stop Voice Chat after 30 min (0 = no cap)
+    assistant_cost_ack: bool = False  # Whether the one-time cost disclosure was acknowledged
 
     # Paste target lock
     paste_target_enabled: bool = False  # Lock transcription to specific target

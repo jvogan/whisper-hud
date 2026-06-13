@@ -102,13 +102,15 @@ Arabic, Chinese, Dutch, French, German, Hindi, Indonesian, Italian, Japanese, Ko
 
 Translates your speech in real time as you dictate and pastes the translated text directly — a single step instead of transcribe-then-translate. Off by default.
 
-To turn it on, all three must be true: **translation is enabled**, an **OpenAI API key** is set, and your **target language is supported** (English, Spanish, Portuguese, French, German, Italian, Japanese, Korean, Chinese, Russian, Hindi, Indonesian, or Vietnamese). You can speak any of 70+ input languages — they're detected automatically. If any requirement is missing, WhisperHUD quietly uses the normal transcribe-then-translate path, and the menu shows a hint explaining why the toggle can't take effect.
+To turn it on, all three must be true: **translation is enabled**, an **OpenAI API key** is set, and your **target language is supported** (English, Spanish, Portuguese, French, German, Italian, Japanese, Korean, Chinese, Russian, Hindi, Indonesian, or Vietnamese). You can speak any of 70+ input languages — they're detected automatically. If any requirement is missing, WhisperHUD quietly uses the normal transcribe-then-translate path. The toggle never silently no-ops: the moment you enable it with a requirement unmet, a notification names the blocker, and the menu keeps a hint showing the same reason until it's resolved (including the case where plain translation isn't on yet). If a live stream is interrupted mid-dictation, WhisperHUD tells you once and finishes that turn with standard transcription instead of dropping your text silently.
 
 Your vocabulary and text replacements still apply. Voice commands and AI Cleanup are skipped for live-translated turns. History keeps the translated text plus the original-language transcript. Pricing is $0.034 per audio minute and is counted in the in-app cost stats. See the [provider guide](API_PROVIDERS.md#live-speech-translation-openai) for full details.
 
 ## Voice Assistant
 
 A hands-free spoken conversation with OpenAI's voice model, in the top-level **Voice Assistant** menu. You talk, it replies through your speakers, and you can interrupt it mid-reply just by speaking. This is a **cloud, bring-your-own-key** feature: it needs an OpenAI API key, and your audio is sent to OpenAI while a chat is active.
+
+Because a live chat is **billed continuously per minute**, the first time you start one WhisperHUD shows a one-time confirmation naming the model and the cost. Every session also **auto-stops after 30 minutes** (configurable; `assistant_max_session_seconds`, set to 0 to disable) so a forgotten or stuck session can't keep streaming billable audio. An authentication or quota error ends the chat and releases the microphone rather than leaving it open.
 
 - **Start / Stop Voice Chat**: Begin or end the conversation. The menu-bar icon shows 🤖 while it's active.
 - **Model**: **Best** (`gpt-realtime-2`, default) or **Budget** (`gpt-realtime-mini`) for cheaper long chats. A model change applies the next time you start a chat.
