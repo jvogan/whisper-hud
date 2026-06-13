@@ -343,10 +343,18 @@ class WhisperHUDApp(rumps.App):
 
     def _should_query_keychain(self) -> bool:
         """
-        Only query keychain when cloud providers are actively selected.
+        Decide whether to read stored API-key presence for the menu.
 
-        This prevents startup/menu keychain prompts for local-only users.
+        The deferred gate exists to avoid keychain prompts for local-only users.
+        But once the user has explicitly chosen ``keychain`` storage, reading key
+        presence is expected and (for the app that stored the key) does not
+        prompt -- so always reflect the real status. Otherwise only query when a
+        cloud provider is actually selected. Without this, a keychain user who
+        dictates with a local provider sees their saved cloud keys as "Deferred"
+        and can never confirm from the UI that they are configured.
         """
+        if self.config.credential_storage_mode == "keychain":
+            return True
         if self._is_cloud_transcription_provider(self.config.default_provider):
             return True
         return self.config.translation_enabled and self._is_cloud_translation_provider(self.config.translation_provider)
@@ -723,7 +731,7 @@ class WhisperHUDApp(rumps.App):
         elif provider_ready:
             status = f"✓ Ready • {provider_name}"
         elif provider_is_cloud:
-            status = f"⚠️ {provider_name} needs setup"
+            status = f"⚠️ {provider_name}: add an API key"
         elif configured:
             # Has some providers but current one needs setup
             status = f"⚠️ {provider_name} needs setup"
@@ -755,8 +763,11 @@ class WhisperHUDApp(rumps.App):
             is_configured = p["configured"]
             is_provider_selected = p["id"] == current_provider_id
 
-            # Status icons: ✓ ready, ⚠️ needs API key
+            # Status icons: ✓ ready, ⚠️ needs API key. On an unconfigured cloud
+            # provider make the click-to-add-a-key affordance explicit (the row
+            # already routes to the key dialog), so it reads as an action.
             status_icon = "✓" if is_configured else "⚠️"
+            display_name = p["name"] if is_configured else f"{p['name']} — Add key…"
             prefix = "● " if is_provider_selected else "   "
 
             # Create provider submenu with its models
@@ -768,7 +779,7 @@ class WhisperHUDApp(rumps.App):
 
             if len(provider_models) > 1:
                 # Multiple models - create submenu
-                provider_submenu = rumps.MenuItem(f"{prefix}{p['name']} {status_icon}", callback=provider_callback)
+                provider_submenu = rumps.MenuItem(f"{prefix}{display_name} {status_icon}", callback=provider_callback)
                 for model in provider_models:
                     is_model_selected = is_provider_selected and model["id"] == current_model_id
                     model_prefix = "● " if is_model_selected else "   "
@@ -787,7 +798,7 @@ class WhisperHUDApp(rumps.App):
                 model = provider_models[0]
                 providers_menu.add(
                     rumps.MenuItem(
-                        f"{prefix}{p['name']} {status_icon}",
+                        f"{prefix}{display_name} {status_icon}",
                         callback=(
                             provider_callback
                             if provider_callback is not None
@@ -5983,7 +5994,7 @@ class WhisperHUDApp(rumps.App):
                 self._notify(
                     "WhisperHUD",
                     "Setup Skipped",
-                    "Run it anytime from Settings → Advanced → Run Setup Wizard.",
+                    "To dictate: hold ⌘⇧Space. Re-run setup from Settings → Advanced & Support → Run Setup Wizard.",
                 )
 
         self._setup_wizard = show_setup_wizard(on_complete=on_complete, on_cancel=on_cancel)
