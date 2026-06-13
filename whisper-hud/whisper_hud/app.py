@@ -343,18 +343,15 @@ class WhisperHUDApp(rumps.App):
 
     def _should_query_keychain(self) -> bool:
         """
-        Decide whether to read stored API-key presence for the menu.
+        Only query keychain when cloud providers are actively selected.
 
-        The deferred gate exists to avoid keychain prompts for local-only users.
-        But once the user has explicitly chosen ``keychain`` storage, reading key
-        presence is expected and (for the app that stored the key) does not
-        prompt -- so always reflect the real status. Otherwise only query when a
-        cloud provider is actually selected. Without this, a keychain user who
-        dictates with a local provider sees their saved cloud keys as "Deferred"
-        and can never confirm from the UI that they are configured.
+        macOS re-prompts on keychain reads for an ad-hoc-signed Python app (it
+        does not reliably honor "Always Allow"), so reading key presence just to
+        render menu status -- on every menu build -- would spam authorization
+        prompts. Leaving cloud key status deferred for a local-provider user is
+        the lesser evil. (A non-prompting storage mode -- passphrase or
+        session-only -- avoids the keychain entirely.)
         """
-        if self.config.credential_storage_mode == "keychain":
-            return True
         if self._is_cloud_transcription_provider(self.config.default_provider):
             return True
         return self.config.translation_enabled and self._is_cloud_translation_provider(self.config.translation_provider)

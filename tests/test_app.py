@@ -1640,22 +1640,3 @@ def test_assistant_watchdog_stops_session_at_cap(monkeypatch):
     assert not app._assistant_max_duration_thread.is_alive()
     assistant.stop.assert_called_once()
     app._notify.assert_called_once()
-
-
-# --- Keychain key-status visibility (setup clarity) -------------------------
-
-
-def test_keychain_mode_reflects_key_status_even_with_local_provider():
-    """A keychain user dictating with a LOCAL provider must still have their
-    saved cloud keys reflected (not hidden as 'Deferred'). Passphrase mode keeps
-    the conservative gate so local-only users get no keychain prompts."""
-    app = WhisperHUDApp.__new__(WhisperHUDApp)
-    app.config = Config()
-    app.config.default_provider = "whisper_local"  # local
-    app.config.translation_enabled = False
-
-    app.config.credential_storage_mode = "keychain"
-    assert app._should_query_keychain() is True
-
-    app.config.credential_storage_mode = "passphrase"
-    assert app._should_query_keychain() is False
