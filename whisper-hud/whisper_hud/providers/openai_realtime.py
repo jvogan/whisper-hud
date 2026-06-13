@@ -142,7 +142,16 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
     def _run(self) -> None:
         """Own the websocket lifetime and process incoming events."""
         try:
-            with self._client.realtime.connect(max_retries=self.CONNECT_MAX_RETRIES) as connection:
+            # ``intent=transcription`` opens a transcription session (no connection
+            # model). Without it the server rejects the socket with
+            # ``missing_model``; passing a conversation model instead makes it
+            # reject the transcription ``session.update`` outright. The
+            # transcription sub-model (e.g. gpt-realtime-whisper) is carried in
+            # the session payload, not the connection.
+            with self._client.realtime.connect(
+                max_retries=self.CONNECT_MAX_RETRIES,
+                extra_query={"intent": "transcription"},
+            ) as connection:
                 self._connection = connection
                 connection.session.update(session=self._build_session_update())
 

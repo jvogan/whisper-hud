@@ -296,3 +296,41 @@ def test_realtime_session_pins_openai_endpoints_and_disables_env_routing():
     assert kwargs["http_client"].trust_env is False
     assert kwargs["http_client"].follow_redirects is False
     kwargs["http_client"].close()
+
+
+def test_run_opens_socket_with_transcription_intent():
+    """Regression: the realtime socket must open with ``intent=transcription``.
+
+    Without the intent query the server closes the connection with
+    ``missing_model``; passing a conversation ``model`` instead makes it reject
+    the transcription ``session.update``. The transcription sub-model rides in
+    the session payload, not the connection. Verified live against the API.
+    """
+    with patch("whisper_hud.providers.openai_realtime.OpenAI") as openai_cls:
+        client = MagicMock()
+        openai_cls.return_value = client
+        conn = MagicMock()
+        client.realtime.connect.return_value.__enter__.return_value = conn
+
+        session = OpenAIRealtimeSession(
+            api_key="sk-test",
+            model="gpt-realtime-whisper",
+            provider_name="openai_realtime",
+            cost_per_minute=0.003,
+            on_partial=lambda _t: None,
+            on_final=lambda _r: None,
+            on_error=lambda _e: None,
+        )
+        # Closed before _run so the recv-loop is skipped right after the socket
+        # is opened and configured (connect + session.update happen first).
+        session._closed.set()
+        session._run()
+
+    client.realtime.connect.assert_called_once()
+    connect_kwargs = client.realtime.connect.call_args.kwargs
+    assert connect_kwargs.get("extra_query") == {"intent": "transcription"}
+    assert "model" not in connect_kwargs  # the connection itself carries no model
+
+    payload = conn.session.update.call_args.kwargs["session"]
+    assert payload["type"] == "transcription"
+    assert payload["audio"]["input"]["transcription"]["model"] == "gpt-realtime-whisper"
