@@ -72,6 +72,7 @@ def _is_terminal_session_error(error: Any) -> bool:
     haystack = " ".join(parts)
     return any(marker in haystack for marker in _TERMINAL_ERROR_MARKERS)
 
+
 _DEFAULT_INSTRUCTIONS = (
     "You are a voice assistant living inside a dictation app on this Mac. "
     "You can paste text into the user's currently focused application with the "

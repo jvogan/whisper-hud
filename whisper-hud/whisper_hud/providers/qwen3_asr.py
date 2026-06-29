@@ -148,10 +148,7 @@ class Qwen3ASRProvider(TranscriptionProvider):
             try:
                 import qwen3_asr_mlx
             except ImportError:
-                raise RuntimeError(
-                    "qwen3-asr-mlx not installed. "
-                    "Install with: pip install 'whisper-hud[qwen3-asr]'"
-                )
+                raise RuntimeError("qwen3-asr-mlx not installed. " "Install with: pip install 'whisper-hud[qwen3-asr]'")
 
             try:
                 self._qwen_model = qwen3_asr_mlx.Qwen3ASR.from_pretrained(self._hf_repo_id(self.model))
@@ -212,10 +209,7 @@ class Qwen3ASRProvider(TranscriptionProvider):
             )
 
         if not self._check_availability():
-            raise RuntimeError(
-                "qwen3-asr-mlx is not installed. "
-                "Install with: pip install 'whisper-hud[qwen3-asr]'"
-            )
+            raise RuntimeError("qwen3-asr-mlx is not installed. " "Install with: pip install 'whisper-hud[qwen3-asr]'")
 
         try:
             from ..encryption import create_private_temp_file, secure_delete

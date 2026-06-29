@@ -30,7 +30,7 @@ pip install -e ".[dev]"
 python -m pytest tests/ -x -q
 
 # Lint
-python -m flake8 whisper-hud/whisper_hud --max-line-length=120 --ignore=E501,W503
+python -m flake8 whisper-hud/whisper_hud --max-line-length=120 --ignore=E203,E501,W503
 
 # Format check
 python -m black whisper-hud/whisper_hud tests --line-length=120 --check

@@ -249,9 +249,7 @@ def test_no_prompt_sent_when_vocabulary_absent_or_empty(monkeypatch, sample_audi
             "_get_openai_client_class",
             staticmethod(lambda fc=fake_client: lambda **_: fc),
         )
-        OpenAITranscribeProvider(model="gpt-4o-mini-transcribe").transcribe(
-            sample_audio_bytes, vocabulary=vocabulary
-        )
+        OpenAITranscribeProvider(model="gpt-4o-mini-transcribe").transcribe(sample_audio_bytes, vocabulary=vocabulary)
         assert "prompt" not in fake_client.calls[0]
 
 

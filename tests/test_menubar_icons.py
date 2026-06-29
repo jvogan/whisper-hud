@@ -13,7 +13,6 @@ from whisper_hud.branding import (
 )
 from whisper_hud.app import WhisperHUDApp
 
-
 # ---------------------------------------------------------------------------
 # branding: state resolution and assets
 # ---------------------------------------------------------------------------

@@ -15,7 +15,6 @@ exercised (its package path is set up by ``tests/conftest.py``).
 
 from pathlib import Path
 
-
 PACK_ID = "pixel-adventurer"
 EXPECTED_STATES = {"idle", "idle_rare", "recording", "processing", "success", "error"}
 # Per the art/sound spec: only these three states carry a sound.

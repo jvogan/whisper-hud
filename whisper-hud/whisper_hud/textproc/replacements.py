@@ -134,9 +134,7 @@ def rules_from_config(raw: list[dict]) -> list[Rule]:
 
         replacement = entry.get("replacement", "")
         if not isinstance(replacement, str):
-            logger.warning(
-                "Skipping replacement entry #%d (%r): 'replacement' must be a string.", index, pattern
-            )
+            logger.warning("Skipping replacement entry #%d (%r): 'replacement' must be a string.", index, pattern)
             continue
 
         rule = Rule(

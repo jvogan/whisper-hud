@@ -450,9 +450,7 @@ class PackCreatorWindow:
             info = STATE_INFO[state]
 
             # State label
-            state_label = self._create_label(
-                NSMakeRect(x, y + 130, 200, 20), info["label"], bold=True, size=12
-            )
+            state_label = self._create_label(NSMakeRect(x, y + 130, 200, 20), info["label"], bold=True, size=12)
             content.addSubview_(state_label)
 
             # Example text
@@ -703,9 +701,7 @@ class PackCreatorWindow:
 
             # Process the required states plus any optional state the user added
             # (e.g. a distinct success image).
-            states_to_process = list(PACK_STATES) + [
-                s for s in OPTIONAL_PACK_STATES if s in source_images
-            ]
+            states_to_process = list(PACK_STATES) + [s for s in OPTIONAL_PACK_STATES if s in source_images]
 
             for i, state in enumerate(states_to_process):
                 # Check if window was closed

@@ -3894,9 +3894,7 @@ class WhisperHUDApp(rumps.App):
 
     def _push_widget_animation_prefs(self) -> None:
         if self.widget:
-            self.widget.set_animation_prefs(
-                self.config.widget_animations_enabled, self.config.widget_idle_animation
-            )
+            self.widget.set_animation_prefs(self.config.widget_animations_enabled, self.config.widget_idle_animation)
 
     def _toggle_widget_animations(self, sender):
         """Toggle all floating-button animations (master switch)."""
@@ -4458,9 +4456,7 @@ class WhisperHUDApp(rumps.App):
             return path
         return None
 
-    def _set_menubar_visuals(
-        self, icon_path: Optional[str], text: Optional[str], template: bool = True
-    ) -> None:
+    def _set_menubar_visuals(self, icon_path: Optional[str], text: Optional[str], template: bool = True) -> None:
         """Assign the rumps status-item icon and title text."""
         if icon_path is not None and self.template is not template:
             # Template mode lets macOS tint the icon for light/dark menu bars;
@@ -5501,9 +5497,7 @@ class WhisperHUDApp(rumps.App):
         # network I/O), so holding the lock across it is safe.
         with self._recording_lock:
             if self._is_recording:
-                self._notify(
-                    "WhisperHUD", "Dictation Active", "Stop dictation before starting the voice assistant."
-                )
+                self._notify("WhisperHUD", "Dictation Active", "Stop dictation before starting the voice assistant.")
                 return
 
             # Honor the user's configured input device, exactly like dictation
@@ -5578,9 +5572,7 @@ class WhisperHUDApp(rumps.App):
             start = time.time()
             while self._assistant_is_active():
                 if time.time() - start >= max_seconds:
-                    logger.info(
-                        "Voice assistant session cap (%ss) reached, auto-stopping", max_seconds
-                    )
+                    logger.info("Voice assistant session cap (%ss) reached, auto-stopping", max_seconds)
                     assistant = self._voice_assistant
                     if assistant is not None:
                         assistant.stop()

@@ -463,9 +463,7 @@ class OpenAIRealtimeProvider(TranscriptionProvider):
         )
 
     @staticmethod
-    def _merge_prompt_with_vocabulary(
-        prompt: Optional[str], vocabulary: Optional[Sequence[str]]
-    ) -> Optional[str]:
+    def _merge_prompt_with_vocabulary(prompt: Optional[str], vocabulary: Optional[Sequence[str]]) -> Optional[str]:
         """Append a vocabulary glossary to the session prompt (if any).
 
         Returns the original prompt unchanged when there is no usable

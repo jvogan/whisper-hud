@@ -175,9 +175,7 @@ class AppleSpeechAnalyzerProvider(TranscriptionProvider):
 
     # -- transcription -----------------------------------------------------
 
-    def transcribe(
-        self, audio_bytes: bytes, vocabulary: Optional[Sequence[str]] = None
-    ) -> TranscriptionResult:
+    def transcribe(self, audio_bytes: bytes, vocabulary: Optional[Sequence[str]] = None) -> TranscriptionResult:
         """Transcribe audio via the bundled SpeechAnalyzer helper.
 
         Args:
@@ -193,13 +191,10 @@ class AppleSpeechAnalyzerProvider(TranscriptionProvider):
         start_time = time.time()
 
         if not self._is_supported_macos():
-            raise RuntimeError(
-                "Apple Speech (Advanced) requires macOS 26 or later (SpeechAnalyzer)."
-            )
+            raise RuntimeError("Apple Speech (Advanced) requires macOS 26 or later (SpeechAnalyzer).")
         if not self._helper_available():
             raise RuntimeError(
-                "Apple Speech (Advanced) helper not available. "
-                "Build it with scripts/build-speechanalyzer.sh"
+                "Apple Speech (Advanced) helper not available. " "Build it with scripts/build-speechanalyzer.sh"
             )
 
         from ..encryption import create_private_temp_file, secure_delete

@@ -195,9 +195,7 @@ class TestCustomCommands:
         assert match_command("please add my signature here", custom) is None
 
     def test_custom_trailing_when_enabled(self):
-        custom = [
-            {"id": "wipe", "action": "discard", "payload": "", "phrases": ["forget it"], "trailing": True}
-        ]
+        custom = [{"id": "wipe", "action": "discard", "payload": "", "phrases": ["forget it"], "trailing": True}]
         match = match_command("send to bob forget it", custom)
         assert match is not None
         assert match.command_id == "wipe"

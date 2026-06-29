@@ -593,9 +593,7 @@ def test_play_sound_file_prefers_nssound(monkeypatch):
     widget = floating_widget.FloatingWidget(lambda: None, lambda: None)
     widget._play_sound_file("/p/blip.wav")
 
-    fake_nssound.alloc.return_value.initWithContentsOfFile_byReference_.assert_called_once_with(
-        "/p/blip.wav", True
-    )
+    fake_nssound.alloc.return_value.initWithContentsOfFile_byReference_.assert_called_once_with("/p/blip.wav", True)
     sound_instance.play.assert_called_once_with()
 
 
@@ -634,9 +632,7 @@ def test_handle_click_idle_starts_recording_and_animates(monkeypatch):
             "processing": {"frames": ["c", "d"], "fps": 8},
         }
     )
-    widget._image_processor = _FakeFrameProcessor(
-        {"recording": ["r0", "r1"], "processing": ["p0", "p1"]}
-    )
+    widget._image_processor = _FakeFrameProcessor({"recording": ["r0", "r1"], "processing": ["p0", "p1"]})
 
     widget._handle_click()
 
@@ -684,9 +680,7 @@ def test_handle_click_recording_starts_processing_and_animates(monkeypatch):
             "processing": {"frames": ["c", "d"], "fps": 8},
         }
     )
-    widget._image_processor = _FakeFrameProcessor(
-        {"recording": ["r0", "r1"], "processing": ["p0", "p1"]}
-    )
+    widget._image_processor = _FakeFrameProcessor({"recording": ["r0", "r1"], "processing": ["p0", "p1"]})
 
     widget._handle_click()  # IDLE -> RECORDING
     assert widget._state == floating_widget.WidgetState.RECORDING

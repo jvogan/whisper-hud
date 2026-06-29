@@ -483,9 +483,7 @@ def test_save_user_pack_preserves_distinct_success(tmp_path, monkeypatch):
         "success": object(),
     }
 
-    ok, result = character_packs.save_user_pack(
-        "distinct-success", "Distinct", "desc", images, FakeProcessor()
-    )
+    ok, result = character_packs.save_user_pack("distinct-success", "Distinct", "desc", images, FakeProcessor())
     assert ok is True
 
     manifest = json.loads((Path(result) / "manifest.json").read_text())
@@ -513,11 +511,8 @@ def test_save_user_pack_aliases_success_to_recording_when_missing(tmp_path, monk
         "error": object(),
     }
 
-    ok, result = character_packs.save_user_pack(
-        "classic-flow", "Classic", "desc", images, FakeProcessor()
-    )
+    ok, result = character_packs.save_user_pack("classic-flow", "Classic", "desc", images, FakeProcessor())
     assert ok is True
 
     manifest = json.loads((Path(result) / "manifest.json").read_text())
     assert manifest["states"]["success"] == "recording.png"
-

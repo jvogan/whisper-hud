@@ -26,12 +26,7 @@ SILENT_STATES = {"idle", "processing"}
 
 
 def _pack_dir() -> Path:
-    return (
-        Path(__file__).resolve().parents[1]
-        / "assets"
-        / "character-packs"
-        / "handheld-89"
-    )
+    return Path(__file__).resolve().parents[1] / "assets" / "character-packs" / "handheld-89"
 
 
 def _load():
@@ -72,9 +67,7 @@ def test_handheld_89_fps_within_supported_range():
     """Per-state fps values are within the engine's clamp window."""
     pack = _load()
     for name, state in pack.states.items():
-        assert (
-            MIN_FRAME_FPS <= state.fps <= MAX_FRAME_FPS
-        ), f"{name} fps {state.fps} out of range"
+        assert MIN_FRAME_FPS <= state.fps <= MAX_FRAME_FPS, f"{name} fps {state.fps} out of range"
 
 
 def test_handheld_89_sounds_only_on_expected_states():

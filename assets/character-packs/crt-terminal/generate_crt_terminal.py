@@ -44,8 +44,8 @@ from PIL import Image
 # --------------------------------------------------------------------------- #
 
 OUTPUT_DIR = Path(__file__).parent
-GRID = 48          # logical pixel grid (48x48)
-SCALE = 4          # nearest-neighbour upscale factor -> 192px PNGs
+GRID = 48  # logical pixel grid (48x48)
+SCALE = 4  # nearest-neighbour upscale factor -> 192px PNGs
 
 RGBA = Tuple[int, int, int, int]
 
@@ -56,22 +56,22 @@ RGBA = Tuple[int, int, int, int]
 TRANSPARENT: RGBA = (0, 0, 0, 0)
 
 # Case (beige/grey, 3 muted tones + dark outline)
-CASE_LIGHT: RGBA = (216, 208, 192, 255)   # #d8d0c0  top/left highlight
-CASE_MID: RGBA = (184, 176, 160, 255)     # #b8b0a0  main body
-CASE_DARK: RGBA = (168, 160, 144, 255)    # #a8a090  bottom/right shade
-CASE_OUTLINE: RGBA = (40, 38, 34, 255)    # near-black outline
-CASE_VENT: RGBA = (150, 143, 128, 255)    # vent slits on the chin
+CASE_LIGHT: RGBA = (216, 208, 192, 255)  # #d8d0c0  top/left highlight
+CASE_MID: RGBA = (184, 176, 160, 255)  # #b8b0a0  main body
+CASE_DARK: RGBA = (168, 160, 144, 255)  # #a8a090  bottom/right shade
+CASE_OUTLINE: RGBA = (40, 38, 34, 255)  # near-black outline
+CASE_VENT: RGBA = (150, 143, 128, 255)  # vent slits on the chin
 
 # Screen bezel (dark, frames the phosphor)
 BEZEL: RGBA = (28, 30, 28, 255)
-BEZEL_HI: RGBA = (52, 56, 52, 255)        # subtle inner bezel highlight
+BEZEL_HI: RGBA = (52, 56, 52, 255)  # subtle inner bezel highlight
 
 # Phosphor greens (4 steps: bg -> dim -> mid -> bright)
-SCREEN_BG: RGBA = (10, 15, 10, 255)       # #0a0f0a  screen background
-SCREEN_BG_SCAN: RGBA = (6, 11, 6, 255)    # darker alternate scanline row
-P_DIM: RGBA = (4, 74, 30, 255)            # #044a1e  dim green (glow halo)
-P_MID: RGBA = (24, 165, 88, 255)          # #18a558  mid green
-P_BRIGHT: RGBA = (0, 255, 102, 255)       # #00ff66  bright core
+SCREEN_BG: RGBA = (10, 15, 10, 255)  # #0a0f0a  screen background
+SCREEN_BG_SCAN: RGBA = (6, 11, 6, 255)  # darker alternate scanline row
+P_DIM: RGBA = (4, 74, 30, 255)  # #044a1e  dim green (glow halo)
+P_MID: RGBA = (24, 165, 88, 255)  # #18a558  mid green
+P_BRIGHT: RGBA = (0, 255, 102, 255)  # #00ff66  bright core
 # Slightly hotter bright used to emphasise error legibility (still monochrome green)
 P_HOT: RGBA = (120, 255, 150, 255)
 
@@ -98,12 +98,12 @@ BEZEL_X1, BEZEL_Y1 = SCREEN_X1 + 1, SCREEN_Y1 + 1
 # Screen text grid: glyphs are 3x5 in a 4x6 cell. Compute usable columns/rows.
 GLYPH_W, GLYPH_H = 3, 5
 CELL_W, CELL_H = 4, 6
-TEXT_X0 = SCREEN_X0 + 1          # left padding inside screen
-TEXT_Y0 = SCREEN_Y0 + 1          # top padding inside screen
+TEXT_X0 = SCREEN_X0 + 1  # left padding inside screen
+TEXT_Y0 = SCREEN_Y0 + 1  # top padding inside screen
 SCREEN_W = SCREEN_X1 - SCREEN_X0 + 1
 SCREEN_H = SCREEN_Y1 - SCREEN_Y0 + 1
-COLS = (SCREEN_W - 2) // CELL_W   # how many character cells fit horizontally
-ROWS = (SCREEN_H - 2) // CELL_H   # how many character cells fit vertically
+COLS = (SCREEN_W - 2) // CELL_W  # how many character cells fit horizontally
+ROWS = (SCREEN_H - 2) // CELL_H  # how many character cells fit vertically
 
 
 # --------------------------------------------------------------------------- #
@@ -119,7 +119,7 @@ FONT: Dict[str, List[str]] = {
     "K": ["#.#", "#.#", "##.", "#.#", "#.#"],
     "P": ["##.", "#.#", "##.", "#..", "#.."],
     ">": ["#..", ".#.", "..#", ".#.", "#.."],
-    "*": [".#.", "#.#", ".#.", "#.#", ".#."],   # diamond/asterisk (REC dot uses solid)
+    "*": [".#.", "#.#", ".#.", "#.#", ".#."],  # diamond/asterisk (REC dot uses solid)
     " ": ["...", "...", "...", "...", "..."],
 }
 
@@ -157,10 +157,7 @@ def in_rounded_case(x: int, y: int) -> bool:
         (CASE_X1 - r, CASE_Y1 - r),
     ]
     for cx, cy in corners:
-        in_corner_zone = (
-            (x < CASE_X0 + r or x > CASE_X1 - r)
-            and (y < CASE_Y0 + r or y > CASE_Y1 - r)
-        )
+        in_corner_zone = (x < CASE_X0 + r or x > CASE_X1 - r) and (y < CASE_Y0 + r or y > CASE_Y1 - r)
         if in_corner_zone:
             # Only test the nearest corner
             if abs(x - cx) <= r and abs(y - cy) <= r:
@@ -241,13 +238,13 @@ def draw_bezel_and_screen(img: Image.Image) -> None:
     # This is the signature cue that the screen is convex tube glass.
     corner_offsets = [(0, 0), (1, 0), (0, 1)]
     corners = [
-        (SCREEN_X0, SCREEN_Y0, 1, 1),     # top-left  (dx, dy directions)
-        (SCREEN_X1, SCREEN_Y0, -1, 1),    # top-right
-        (SCREEN_X0, SCREEN_Y1, 1, -1),    # bottom-left
-        (SCREEN_X1, SCREEN_Y1, -1, -1),   # bottom-right
+        (SCREEN_X0, SCREEN_Y0, 1, 1),  # top-left  (dx, dy directions)
+        (SCREEN_X1, SCREEN_Y0, -1, 1),  # top-right
+        (SCREEN_X0, SCREEN_Y1, 1, -1),  # bottom-left
+        (SCREEN_X1, SCREEN_Y1, -1, -1),  # bottom-right
     ]
-    for (cx, cy, sx, sy) in corners:
-        for (ox, oy) in corner_offsets:
+    for cx, cy, sx, sy in corners:
+        for ox, oy in corner_offsets:
             px(img, cx + ox * sx, cy + oy * sy, SCREEN_BG_SCAN)
 
 
@@ -285,7 +282,7 @@ def glow(img: Image.Image, lit: List[Tuple[int, int]]) -> None:
     overwriting any existing bright pixel. 2-step look: dim ring then core."""
     lit_set = set(lit)
     halo: set = set()
-    for (x, y) in lit:
+    for x, y in lit:
         for dx in (-1, 0, 1):
             for dy in (-1, 0, 1):
                 nx, ny = x + dx, y + dy
@@ -294,15 +291,14 @@ def glow(img: Image.Image, lit: List[Tuple[int, int]]) -> None:
                 if not on_screen(nx, ny):
                     continue
                 halo.add((nx, ny))
-    for (x, y) in halo:
+    for x, y in halo:
         # Only halo over background (don't dim-out a different glyph's core).
         cur = img.getpixel((x, y))
         if cur in (SCREEN_BG, SCREEN_BG_SCAN):
             px(img, x, y, P_DIM)
 
 
-def draw_glyph(img: Image.Image, ch: str, cell_x: int, cell_y: int,
-               collect: List[Tuple[int, int]]) -> None:
+def draw_glyph(img: Image.Image, ch: str, cell_x: int, cell_y: int, collect: List[Tuple[int, int]]) -> None:
     """Stamp a 3x5 font glyph at character-cell (cell_x, cell_y). Lit pixels are
     appended to ``collect`` so a glow halo can be applied afterwards."""
     pattern = FONT.get(ch.upper(), FONT[" "])
@@ -319,7 +315,7 @@ def draw_glyph(img: Image.Image, ch: str, cell_x: int, cell_y: int,
 def stamp_lit(img: Image.Image, lit: List[Tuple[int, int]]) -> None:
     """Apply glow halo first, then bright cores on top."""
     glow(img, lit)
-    for (x, y) in lit:
+    for x, y in lit:
         phosphor_px(img, x, y, bright=True)
 
 
@@ -358,11 +354,11 @@ def render_idle(blink_on: bool) -> Image.Image:
 def _waveform_lit(phase: int) -> List[Tuple[int, int]]:
     """A scrolling waveform polyline across the lower screen area."""
     lit: List[Tuple[int, int]] = []
-    wave_y = SCREEN_Y1 - 4          # baseline row for the waveform
+    wave_y = SCREEN_Y1 - 4  # baseline row for the waveform
     amp = 3
     for x in range(SCREEN_X0 + 1, SCREEN_X1):
         # Deterministic pseudo-wave: sum of two sines scrolling by `phase`.
-        t = (x + phase * 2)
+        t = x + phase * 2
         v = math.sin(t * 0.7) * amp + math.sin(t * 0.33) * (amp * 0.5)
         y = int(round(wave_y - v))
         lit.append((x, y))
@@ -473,7 +469,7 @@ def render_success(frame_idx: int, n_frames: int) -> Image.Image:
 
     # On the opening flash frames, push the glyph cores to the hottest green.
     if flash >= 0.66:
-        for (x, y) in lit:
+        for x, y in lit:
             if on_screen(x, y):
                 px(img, x, y, P_HOT)
     return img
@@ -490,9 +486,7 @@ def render_error(frame_idx: int, n_frames: int, rng: np.random.Generator) -> Ima
     # Draw horizontal tear lines at deterministic-random rows.
     n_tears = int(round(glitch * 4))
     if n_tears > 0:
-        rows = rng.choice(
-            range(SCREEN_Y0, SCREEN_Y1 + 1), size=min(n_tears, SCREEN_H), replace=False
-        )
+        rows = rng.choice(range(SCREEN_Y0, SCREEN_Y1 + 1), size=min(n_tears, SCREEN_H), replace=False)
         for ry in rows:
             tear: List[Tuple[int, int]] = []
             # A tear line with a random horizontal offset/length.
@@ -502,7 +496,7 @@ def render_error(frame_idx: int, n_frames: int, rng: np.random.Generator) -> Ima
                 tear.append((x, int(ry)))
             # Tears render as dim green streaks (not bright) so text stays legible.
             glow(img, tear)
-            for (x, y) in tear:
+            for x, y in tear:
                 phosphor_px(img, x, y, bright=False)
 
     # ERR text. Shift it horizontally on glitchy frames, centred when steady.
@@ -516,7 +510,7 @@ def render_error(frame_idx: int, n_frames: int, rng: np.random.Generator) -> Ima
 
     # Final (steady) frame: brighten ERR cores to hot green for emphasis.
     if glitch <= 0.0:
-        for (x, y) in lit:
+        for x, y in lit:
             if on_screen(x, y):
                 px(img, x, y, P_HOT)
     return img
@@ -670,7 +664,7 @@ def write_manifest(frame_names: Dict[str, List[str]], sound_names: Dict[str, str
     for state, names in frame_names.items():
         desc, fps = STATE_META[state]
         entry: Dict[str, object] = {
-            "file": names[0],            # single-icon fallback / preview source
+            "file": names[0],  # single-icon fallback / preview source
             "description": desc,
             "frames": names,
             "fps": fps,

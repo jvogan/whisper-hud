@@ -233,9 +233,7 @@ def test_vocabulary_is_set_as_contextual_strings(monkeypatch, sample_audio_bytes
     )
     monkeypatch.setattr("whisper_hud.encryption.secure_delete", lambda path: None)
 
-    AppleSpeechProvider(model="en-US").transcribe(
-        sample_audio_bytes, vocabulary=["Kubernetes", "Anthropic", "gRPC"]
-    )
+    AppleSpeechProvider(model="en-US").transcribe(sample_audio_bytes, vocabulary=["Kubernetes", "Anthropic", "gRPC"])
 
     # contextualStrings receives the phrase list directly (not a glossary string).
     assert request_factory.requests[0].contextual_strings == ["Kubernetes", "Anthropic", "gRPC"]

@@ -276,9 +276,7 @@ def load_pack_manifest(pack_dir: Path) -> Optional[CharacterPack]:
             if file_name:
                 full_path = _resolve_pack_member(pack_dir, file_name)
                 if full_path and full_path.is_file():
-                    state = CharacterPackState(
-                        file=file_name, description=description, full_path=str(full_path)
-                    )
+                    state = CharacterPackState(file=file_name, description=description, full_path=str(full_path))
 
                     # Resolve frame sequence (manifest v2). Every frame must
                     # stay inside the pack and exist; unsafe/missing frames are
@@ -292,9 +290,7 @@ def load_pack_manifest(pack_dir: Path) -> Optional[CharacterPack]:
                                 state.frames.append(frame_name)
                                 state.frame_paths.append(str(frame_path))
                             else:
-                                logger.warning(
-                                    f"Frame is missing or escapes the pack directory: {frame_name}"
-                                )
+                                logger.warning(f"Frame is missing or escapes the pack directory: {frame_name}")
 
                     state.fps = _clamp_fps(fps_raw)
 

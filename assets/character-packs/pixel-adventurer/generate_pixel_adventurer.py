@@ -46,8 +46,8 @@ from PIL import Image
 # --------------------------------------------------------------------------- #
 
 OUTPUT_DIR = Path(__file__).resolve().parent
-GRID = 40           # logical pixel grid (40 x 40)
-SCALE = 4           # nearest-neighbour upscale -> 160 x 160 final PNG
+GRID = 40  # logical pixel grid (40 x 40)
+SCALE = 4  # nearest-neighbour upscale -> 160 x 160 final PNG
 FINAL = GRID * SCALE
 
 # --------------------------------------------------------------------------- #
@@ -58,44 +58,44 @@ RGBA = Tuple[int, int, int, int]
 _T: RGBA = (0, 0, 0, 0)
 
 PALETTE: Dict[str, RGBA] = {
-    ".": _T,                       # transparent
-    "K": (28, 20, 38, 255),        # near-black outline (deep plum)
-    "o": (60, 46, 74, 255),        # soft inner shadow / secondary outline
+    ".": _T,  # transparent
+    "K": (28, 20, 38, 255),  # near-black outline (deep plum)
+    "o": (60, 46, 74, 255),  # soft inner shadow / secondary outline
     # skin
-    "s": (242, 190, 152, 255),     # skin base
-    "S": (198, 140, 112, 255),     # skin shadow
+    "s": (242, 190, 152, 255),  # skin base
+    "S": (198, 140, 112, 255),  # skin shadow
     # hair (warm brown)
-    "h": (152, 92, 52, 255),       # hair base
-    "H": (104, 58, 34, 255),       # hair shadow
+    "h": (152, 92, 52, 255),  # hair base
+    "H": (104, 58, 34, 255),  # hair shadow
     # tunic (forest green)
-    "g": (78, 162, 94, 255),       # tunic base
-    "G": (46, 112, 68, 255),       # tunic shadow
+    "g": (78, 162, 94, 255),  # tunic base
+    "G": (46, 112, 68, 255),  # tunic shadow
     # leather (belt / boots / straps)
-    "b": (122, 80, 48, 255),       # leather base
-    "B": (84, 52, 30, 255),        # leather shadow
+    "b": (122, 80, 48, 255),  # leather base
+    "B": (84, 52, 30, 255),  # leather shadow
     # trousers (muted blue)
-    "p": (76, 98, 152, 255),       # trouser base
-    "P": (50, 66, 112, 255),       # trouser shadow
+    "p": (76, 98, 152, 255),  # trouser base
+    "P": (50, 66, 112, 255),  # trouser shadow
     # sword: steel blade + gold hilt
-    "w": (216, 226, 234, 255),     # blade base
-    "W": (150, 166, 184, 255),     # blade shadow
-    "y": (246, 198, 74, 255),      # gold base (hilt / accents)
-    "Y": (198, 150, 44, 255),      # gold shadow
+    "w": (216, 226, 234, 255),  # blade base
+    "W": (150, 166, 184, 255),  # blade shadow
+    "y": (246, 198, 74, 255),  # gold base (hilt / accents)
+    "Y": (198, 150, 44, 255),  # gold shadow
     # shield (red w/ gold rim via y)
-    "r": (202, 66, 66, 255),       # shield red base
-    "R": (150, 42, 46, 255),       # shield red shadow
+    "r": (202, 66, 66, 255),  # shield red base
+    "R": (150, 42, 46, 255),  # shield red shadow
     # cape (royal blue, shown on victory)
-    "c": (72, 98, 200, 255),       # cape base
-    "C": (46, 64, 150, 255),       # cape shadow
+    "c": (72, 98, 200, 255),  # cape base
+    "C": (46, 64, 150, 255),  # cape shadow
     # effects
-    "a": (132, 226, 255, 255),     # aura / magic cyan (light)
-    "A": (88, 168, 230, 255),      # aura cyan (deep)
-    "f": (255, 242, 152, 255),     # spark / star (light)
-    "F": (255, 196, 80, 255),      # spark / star (deep)
-    "u": (192, 152, 255, 255),     # dizzy star (purple)
-    "e": (246, 246, 250, 255),     # eye white / white sparkle
-    "z": (150, 202, 236, 255),     # hourglass glass / frame
-    "n": (236, 206, 120, 255),     # hourglass sand
+    "a": (132, 226, 255, 255),  # aura / magic cyan (light)
+    "A": (88, 168, 230, 255),  # aura cyan (deep)
+    "f": (255, 242, 152, 255),  # spark / star (light)
+    "F": (255, 196, 80, 255),  # spark / star (deep)
+    "u": (192, 152, 255, 255),  # dizzy star (purple)
+    "e": (246, 246, 250, 255),  # eye white / white sparkle
+    "z": (150, 202, 236, 255),  # hourglass glass / frame
+    "n": (236, 206, 120, 255),  # hourglass sand
 }
 
 Grid = List[List[str]]
@@ -104,6 +104,7 @@ Grid = List[List[str]]
 # --------------------------------------------------------------------------- #
 # Tiny pixel drawing API (all coordinates are logical grid pixels)
 # --------------------------------------------------------------------------- #
+
 
 def new_grid() -> Grid:
     return [["." for _ in range(GRID)] for _ in range(GRID)]
@@ -196,8 +197,8 @@ def outline_silhouette(g: Grid, color: str = "K") -> None:
 # enough that a raised sword and circling stars have head-room. ``bob`` shifts
 # the whole figure vertically for the idle breathing loop.
 
-HEAD_CX = 20          # head/torso centre column
-HEAD_TOP = 8          # top of hair (before bob)
+HEAD_CX = 20  # head/torso centre column
+HEAD_TOP = 8  # top of hair (before bob)
 
 
 def draw_head(g: Grid, top: int, eyes: str = "open") -> None:
@@ -249,7 +250,7 @@ def draw_head(g: Grid, top: int, eyes: str = "open") -> None:
             if j == 0:  # left eye: "\" stroke
                 px(g, ex, eye_y - 1, "K")
                 px(g, ex + 1, eye_y, "K")
-            else:       # right eye: "/" stroke (mirrored)
+            else:  # right eye: "/" stroke (mirrored)
                 px(g, ex + 1, eye_y - 1, "K")
                 px(g, ex, eye_y, "K")
             # faint dazed brow above each eye
@@ -284,10 +285,10 @@ def draw_torso(g: Grid, top: int) -> None:
     rect(g, cx - 1, neck_y, cx + 1, neck_y, "s")
     px(g, cx + 1, neck_y, "S")
 
-    sh = neck_y + 1                       # shoulder row
+    sh = neck_y + 1  # shoulder row
     # --- tunic torso (trapezoid) ---
-    rect(g, cx - 5, sh + 0, cx + 5, sh + 0, "g")       # shoulders
-    rect(g, cx - 6, sh + 1, cx + 6, sh + 5, "g")       # chest/belly
+    rect(g, cx - 5, sh + 0, cx + 5, sh + 0, "g")  # shoulders
+    rect(g, cx - 6, sh + 1, cx + 6, sh + 5, "g")  # chest/belly
     # tunic shading (right side + collar V)
     vline(g, cx + 6, sh + 1, sh + 5, "G")
     vline(g, cx + 5, sh + 4, sh + 5, "G")
@@ -336,14 +337,14 @@ def draw_shield_arm(g: Grid, top: int, raised: bool = False) -> None:
     sh = top + 12
     if raised:
         # arm bent upward holding shield high
-        rect(g, cx - 8, sh + 1, cx - 7, sh + 4, "g")   # upper arm sleeve
-        rect(g, cx - 8, sh - 2, cx - 7, sh + 0, "s")   # forearm raised
+        rect(g, cx - 8, sh + 1, cx - 7, sh + 4, "g")  # upper arm sleeve
+        rect(g, cx - 8, sh - 2, cx - 7, sh + 0, "s")  # forearm raised
         cy = sh - 4
         _round_shield(g, cx - 8, cy)
     else:
         # arm down by side, shield facing front lower-left
-        rect(g, cx - 7, sh + 1, cx - 6, sh + 3, "g")   # sleeve
-        px(g, cx - 7, sh + 4, "s")                     # hand
+        rect(g, cx - 7, sh + 1, cx - 6, sh + 3, "g")  # sleeve
+        px(g, cx - 7, sh + 4, "s")  # hand
         _round_shield(g, cx - 9, sh + 5)
 
 
@@ -377,19 +378,19 @@ def draw_sword_arm(
     sh = top + 12
     if pose == "raised":
         # arm straight up
-        rect(g, cx + 6, sh - 1, cx + 7, sh + 3, "g")    # sleeve
-        rect(g, cx + 6, sh - 4, cx + 7, sh - 2, "s")    # forearm
+        rect(g, cx + 6, sh - 1, cx + 7, sh + 3, "g")  # sleeve
+        rect(g, cx + 6, sh - 4, cx + 7, sh - 2, "s")  # forearm
         # sword pointing up from the fist
         _sword(g, cx + 6, sh - 5, direction="up", length=10)
     elif pose == "cast":
         # forearm raised forward & slightly up, sword angled up-right
         yy = sh - cast_offset
-        rect(g, cx + 6, sh + 0, cx + 7, sh + 3, "g")    # sleeve
-        rect(g, cx + 7, yy - 1, cx + 8, yy + 1, "s")    # hand forward
+        rect(g, cx + 6, sh + 0, cx + 7, sh + 3, "g")  # sleeve
+        rect(g, cx + 7, yy - 1, cx + 8, yy + 1, "s")  # hand forward
         _sword(g, cx + 9, yy - 1, direction="up", length=8)
     else:  # rest
-        rect(g, cx + 6, sh + 1, cx + 7, sh + 4, "g")    # sleeve
-        px(g, cx + 7, sh + 5, "s")                      # hand
+        rect(g, cx + 6, sh + 1, cx + 7, sh + 4, "g")  # sleeve
+        px(g, cx + 7, sh + 5, "s")  # hand
         _sword(g, cx + 8, sh + 4, direction="down", length=9)
 
 
@@ -405,11 +406,11 @@ def _sword(g: Grid, hx: int, hy: int, direction: str = "up", length: int = 9) ->
         for i in range(1, length + 1):
             yy = hy - i
             px(g, hx, yy, "w")
-            px(g, hx + 1, yy, "W")   # one-pixel bevel shadow
+            px(g, hx + 1, yy, "W")  # one-pixel bevel shadow
         # pointed tip
         px(g, hx, hy - length - 1, "w")
     else:  # down
-        px(g, hx, hy - 1, "y")       # grip above guard
+        px(g, hx, hy - 1, "y")  # grip above guard
         for i in range(1, length + 1):
             yy = hy + i
             px(g, hx, yy, "w")
@@ -431,6 +432,7 @@ def draw_cape(g: Grid, top: int) -> None:
 # --------------------------------------------------------------------------- #
 # Hero presets used by multiple states
 # --------------------------------------------------------------------------- #
+
 
 def hero_base(
     g: Grid,
@@ -455,6 +457,7 @@ def hero_base(
 # --------------------------------------------------------------------------- #
 # Effect helpers
 # --------------------------------------------------------------------------- #
+
 
 def spark(g: Grid, cx: int, cy: int, size: int, c_light: str, c_deep: str) -> None:
     """A 4-point sparkle/star."""
@@ -507,13 +510,14 @@ def hourglass(g: Grid, cx: int, cy: int, phase: float) -> None:
 # Frame builders (one function per state -> list of grids)
 # --------------------------------------------------------------------------- #
 
+
 def build_idle() -> List[Grid]:
     """4 frames: gentle breathing bob; the 4th frame blinks."""
     frames: List[Grid] = []
     specs = [
-        (0, "open"),   # neutral
+        (0, "open"),  # neutral
         (-1, "open"),  # inhale (rise)
-        (0, "open"),   # neutral
+        (0, "open"),  # neutral
         (0, "blink"),  # blink at rest
     ]
     for bob, eyes in specs:
@@ -574,7 +578,7 @@ def build_processing() -> List[Grid]:
         # spinning hourglass beside the head
         hourglass(g, 33, top + 4, phase=(i / 5.0))
         # three thought dots that pop in sequence above the head
-        dots = (i % 5)
+        dots = i % 5
         if dots >= 1:
             px(g, cx + 6, top + 1, "e")
         if dots >= 2:
@@ -628,12 +632,10 @@ def build_success() -> List[Grid]:
             ]
             # On the final hold frame use a clean, symmetric trio of stars.
             if i == 6:
-                for (sx, sy) in [(tip[0], tip[1] - 1),
-                                 (tip[0] - 5, tip[1] + 4),
-                                 (tip[0] + 5, tip[1] + 4)]:
+                for sx, sy in [(tip[0], tip[1] - 1), (tip[0] - 5, tip[1] + 4), (tip[0] + 5, tip[1] + 4)]:
                     spark(g, sx, sy, 1, "f", "F")
             else:
-                for (sx, sy) in positions[:burst]:
+                for sx, sy in positions[:burst]:
                     sz = 2 if (sx == tip[0]) else 1
                     spark(g, sx, sy, sz, "f", "F")
         frames.append(g)
@@ -684,6 +686,7 @@ def build_error() -> List[Grid]:
 # --------------------------------------------------------------------------- #
 # Rendering
 # --------------------------------------------------------------------------- #
+
 
 def grid_to_image(g: Grid) -> Image.Image:
     """Convert a logical grid to a crisp x4 RGBA PNG via nearest-neighbour."""
@@ -886,14 +889,13 @@ def write_manifest(frames: Dict[str, List[str]], sounds: Dict[str, str]) -> None
             "interpolation": "nearest",
         },
     }
-    (OUTPUT_DIR / "manifest.json").write_text(
-        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-    )
+    (OUTPUT_DIR / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
 # --------------------------------------------------------------------------- #
 # Entry point
 # --------------------------------------------------------------------------- #
+
 
 def main() -> None:
     frames = write_pngs()

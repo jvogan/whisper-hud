@@ -48,9 +48,7 @@ def test_encode_passthrough_at_native_rate_round_trips():
 def test_encode_downmixes_stereo_to_mono():
     # Two channels (L=+0.5, R=-0.5) average to ~0; the encoded mono stream is
     # half the per-channel sample count.
-    stereo = np.column_stack(
-        [np.full(120, 0.5, dtype=np.float32), np.full(120, -0.5, dtype=np.float32)]
-    )
+    stereo = np.column_stack([np.full(120, 0.5, dtype=np.float32), np.full(120, -0.5, dtype=np.float32)])
     encoded, _ = encode_pcm16_chunk(stereo, REALTIME_SAMPLE_RATE)
     decoded = np.frombuffer(decode_pcm16_chunk(encoded), dtype="<i2")
     assert len(decoded) == 120

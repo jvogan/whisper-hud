@@ -35,14 +35,14 @@ from PIL import Image
 # Palette  (strict 4-shade green DMG + minimal neutral shell)
 # --------------------------------------------------------------------------- #
 # RGBA tuples. Index names match the brief.
-DARKEST = (0x0F, 0x38, 0x0F, 255)   # #0f380f  near-black green (outlines, ink)
-DARK = (0x30, 0x62, 0x30, 255)      # #306230  mid-dark green
-LIGHT = (0x8B, 0xAC, 0x0F, 255)     # #8bac0f  light green
+DARKEST = (0x0F, 0x38, 0x0F, 255)  # #0f380f  near-black green (outlines, ink)
+DARK = (0x30, 0x62, 0x30, 255)  # #306230  mid-dark green
+LIGHT = (0x8B, 0xAC, 0x0F, 255)  # #8bac0f  light green
 LIGHTEST = (0x9B, 0xBC, 0x0F, 255)  # #9bbc0f  screen background (lit LCD)
 
 # Console body shell: a muted neutral cream/grey, kept minimal. A slightly
 # darker tone is used for shading the body edge so the shell reads as plastic.
-SHELL = (0xC4, 0xCF, 0xA1, 255)     # #c4cfa1  body plastic
+SHELL = (0xC4, 0xCF, 0xA1, 255)  # #c4cfa1  body plastic
 SHELL_DARK = (0x9A, 0xA6, 0x7C, 255)  # darker plastic for bezel/shadow
 SHELL_HI = (0xD9, 0xE2, 0xBE, 255)  # subtle plastic highlight
 
@@ -117,9 +117,7 @@ class Canvas:
                     self.set(x, y, color)
 
     def upscaled(self, factor=SCALE):
-        return self.img.resize(
-            (self.size * factor, self.size * factor), Image.NEAREST
-        )
+        return self.img.resize((self.size * factor, self.size * factor), Image.NEAREST)
 
 
 # --------------------------------------------------------------------------- #
@@ -143,9 +141,9 @@ def draw_body(c: Canvas):
     # Fill body
     c.rect(bx0, by0, bx1, by1, SHELL)
     # Knock out the four corners to fake rounding (2px notch).
-    for (cx, cy) in [(bx0, by0), (bx1, by0), (bx0, by1), (bx1, by1)]:
+    for cx, cy in [(bx0, by0), (bx1, by0), (bx0, by1), (bx1, by1)]:
         c.set(cx, cy, TRANSPARENT)
-    for (cx, cy) in [(bx0, by0), (bx1, by0), (bx0, by1), (bx1, by1)]:
+    for cx, cy in [(bx0, by0), (bx1, by0), (bx0, by1), (bx1, by1)]:
         # also soften one pixel inward diagonally? keep simple single-notch.
         pass
 
@@ -188,7 +186,7 @@ def draw_body(c: Canvas):
 
     # ---- Two round action buttons (lower-right), set on a diagonal -----------
     # Button A (lower), Button B (upper) — classic offset.
-    for (bxc, byc) in [(23, 26), (26, 23)]:
+    for bxc, byc in [(23, 26), (26, 23)]:
         c.disc(bxc, byc, 1.6, DARKEST)
         c.set(bxc, byc, DARK)  # lit centre
 
@@ -403,7 +401,7 @@ def _check_points():
 def _draw_check(c, n_points, bold=True):
     """Draw the first ``n_points`` of the checkmark. ``bold`` thickens it."""
     pts = _check_points()
-    for (col, row) in pts[:n_points]:
+    for col, row in pts[:n_points]:
         c.set(sx(col), sy(row), DARK)
         if bold:
             c.set(sx(col), sy(row + 1), DARK)  # 1px thicker downward
@@ -466,8 +464,8 @@ def _draw_x(c, partial=1.0, bold=True):
     n = max(1, int(len(span) * partial))
     for i in range(n):
         col = span[i]
-        row1 = 3 + i           # top-left -> bottom-right
-        row2 = 14 - i          # bottom-left -> top-right
+        row1 = 3 + i  # top-left -> bottom-right
+        row2 = 14 - i  # bottom-left -> top-right
         c.set(sx(col), sy(row1), DARK)
         c.set(sx(col), sy(row2), DARK)
         if bold:

@@ -226,9 +226,7 @@ def modes_from_config(raw: list[dict]) -> list[Mode]:
 
         format_style = entry.get("format_style", "none")
         if not isinstance(format_style, str) or format_style not in _VALID_FORMAT_STYLES:
-            logger.warning(
-                "Mode %r has unknown format_style %r; defaulting to 'none'.", mode_id, format_style
-            )
+            logger.warning("Mode %r has unknown format_style %r; defaulting to 'none'.", mode_id, format_style)
             format_style = "none"
 
         llm_prompt = entry.get("llm_prompt", "")

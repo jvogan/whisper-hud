@@ -19,7 +19,7 @@ dev:
 
 # Run linting
 lint:
-	$(PYTHON) -m flake8 whisper-hud/whisper_hud --max-line-length=120 --ignore=E501,W503
+	$(PYTHON) -m flake8 whisper-hud/whisper_hud --max-line-length=120 --ignore=E203,E501,W503
 	$(PYTHON) -m py_compile whisper-hud/whisper_hud/*.py
 	@echo "✓ Linting passed"
 

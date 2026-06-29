@@ -16,7 +16,6 @@ from whisper_hud.providers.apple_speechanalyzer import (
     _parse_macos_major,
 )
 
-
 # --- fake subprocess plumbing -------------------------------------------------
 
 
@@ -66,9 +65,7 @@ def patch_helper_subprocess(monkeypatch):
             state["argv"] = argv
             return fake_proc
 
-        monkeypatch.setattr(
-            "whisper_hud.providers.apple_speechanalyzer.subprocess.Popen", fake_popen
-        )
+        monkeypatch.setattr("whisper_hud.providers.apple_speechanalyzer.subprocess.Popen", fake_popen)
 
         def fake_create_temp(data, **kwargs):
             path = "/tmp/whisper_hud_speechanalyzer_test.wav"
@@ -80,12 +77,8 @@ def patch_helper_subprocess(monkeypatch):
             return True
 
         # The provider imports these lazily from ..encryption inside transcribe().
-        monkeypatch.setattr(
-            "whisper_hud.encryption.create_private_temp_file", fake_create_temp
-        )
-        monkeypatch.setattr(
-            "whisper_hud.encryption.secure_delete", fake_secure_delete
-        )
+        monkeypatch.setattr("whisper_hud.encryption.create_private_temp_file", fake_create_temp)
+        monkeypatch.setattr("whisper_hud.encryption.secure_delete", fake_secure_delete)
         return state
 
     return install
@@ -93,12 +86,8 @@ def patch_helper_subprocess(monkeypatch):
 
 def _force_ready(monkeypatch):
     """Make the provider report macOS 26+ and a present, runnable helper."""
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_is_supported_macos", staticmethod(lambda: True)
-    )
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_helper_available", lambda self: True
-    )
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_is_supported_macos", staticmethod(lambda: True))
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_helper_available", lambda self: True)
 
 
 # --- macOS version parsing ----------------------------------------------------
@@ -129,10 +118,7 @@ def test_helper_path_ignores_untrusted_override(monkeypatch):
     monkeypatch.setattr(sys, "frozen", False, raising=False)
     monkeypatch.setenv("WHISPERHUD_SPEECHANALYZER_HELPER", "/tmp/evil-helper")
 
-    assert (
-        AppleSpeechAnalyzerProvider._helper_path()
-        == AppleSpeechAnalyzerProvider._source_helper_path()
-    )
+    assert AppleSpeechAnalyzerProvider._helper_path() == AppleSpeechAnalyzerProvider._source_helper_path()
 
 
 def test_helper_path_accepts_repo_local_override(monkeypatch):
@@ -189,16 +175,12 @@ def test_init_falls_back_to_default_model_for_unknown():
 
 
 def test_is_configured_false_on_non_macos(monkeypatch):
-    monkeypatch.setattr(
-        "whisper_hud.providers.apple_speechanalyzer.platform.system", lambda: "Linux"
-    )
+    monkeypatch.setattr("whisper_hud.providers.apple_speechanalyzer.platform.system", lambda: "Linux")
     assert AppleSpeechAnalyzerProvider().is_configured() is False
 
 
 def test_is_configured_false_on_old_macos(monkeypatch):
-    monkeypatch.setattr(
-        "whisper_hud.providers.apple_speechanalyzer.platform.system", lambda: "Darwin"
-    )
+    monkeypatch.setattr("whisper_hud.providers.apple_speechanalyzer.platform.system", lambda: "Darwin")
     monkeypatch.setattr(
         "whisper_hud.providers.apple_speechanalyzer.platform.mac_ver",
         lambda: ("15.4", ("", "", ""), "arm64"),
@@ -207,12 +189,8 @@ def test_is_configured_false_on_old_macos(monkeypatch):
 
 
 def test_is_configured_false_when_helper_missing(monkeypatch):
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_is_supported_macos", staticmethod(lambda: True)
-    )
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_helper_available", lambda self: False
-    )
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_is_supported_macos", staticmethod(lambda: True))
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_helper_available", lambda self: False)
     assert AppleSpeechAnalyzerProvider().is_configured() is False
 
 
@@ -226,9 +204,7 @@ def test_is_configured_true_when_supported_and_helper_present(monkeypatch):
 
 def test_transcribe_parses_final_event(monkeypatch, patch_helper_subprocess, sample_audio_bytes):
     _force_ready(monkeypatch)
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_resolve_locale", lambda self: "en-US"
-    )
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_resolve_locale", lambda self: "en-US")
 
     stdout = "\n".join(
         [
@@ -252,13 +228,9 @@ def test_transcribe_parses_final_event(monkeypatch, patch_helper_subprocess, sam
     assert state["deleted"] == ["/tmp/whisper_hud_speechanalyzer_test.wav"]
 
 
-def test_transcribe_sends_locale_and_audio_path_in_request(
-    monkeypatch, patch_helper_subprocess, sample_audio_bytes
-):
+def test_transcribe_sends_locale_and_audio_path_in_request(monkeypatch, patch_helper_subprocess, sample_audio_bytes):
     _force_ready(monkeypatch)
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_resolve_locale", lambda self: "fr-FR"
-    )
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_resolve_locale", lambda self: "fr-FR")
 
     fake = _FakeCompletedProc(
         stdout=json.dumps({"type": "final", "text": "bonjour", "locale": "fr-FR"}),
@@ -275,13 +247,9 @@ def test_transcribe_sends_locale_and_audio_path_in_request(
     assert "vocabulary" not in request
 
 
-def test_transcribe_passes_vocabulary_through_request(
-    monkeypatch, patch_helper_subprocess, sample_audio_bytes
-):
+def test_transcribe_passes_vocabulary_through_request(monkeypatch, patch_helper_subprocess, sample_audio_bytes):
     _force_ready(monkeypatch)
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_resolve_locale", lambda self: "en-US"
-    )
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_resolve_locale", lambda self: "en-US")
 
     fake = _FakeCompletedProc(
         stdout=json.dumps({"type": "final", "text": "ok", "locale": "en-US"}),
@@ -301,13 +269,9 @@ def test_transcribe_passes_vocabulary_through_request(
 # --- transcribe error handling ------------------------------------------------
 
 
-def test_transcribe_raises_on_error_event(
-    monkeypatch, patch_helper_subprocess, sample_audio_bytes
-):
+def test_transcribe_raises_on_error_event(monkeypatch, patch_helper_subprocess, sample_audio_bytes):
     _force_ready(monkeypatch)
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_resolve_locale", lambda self: "en-US"
-    )
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_resolve_locale", lambda self: "en-US")
 
     fake = _FakeCompletedProc(
         stdout=json.dumps({"type": "error", "message": "Locale 'xx-ZZ' is not supported"}),
@@ -322,13 +286,9 @@ def test_transcribe_raises_on_error_event(
     assert state["deleted"] == ["/tmp/whisper_hud_speechanalyzer_test.wav"]
 
 
-def test_transcribe_raises_on_nonzero_exit_without_event(
-    monkeypatch, patch_helper_subprocess, sample_audio_bytes
-):
+def test_transcribe_raises_on_nonzero_exit_without_event(monkeypatch, patch_helper_subprocess, sample_audio_bytes):
     _force_ready(monkeypatch)
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_resolve_locale", lambda self: "en-US"
-    )
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_resolve_locale", lambda self: "en-US")
 
     fake = _FakeCompletedProc(stdout="", stderr="boom", returncode=2)
     patch_helper_subprocess(fake)
@@ -337,18 +297,12 @@ def test_transcribe_raises_on_nonzero_exit_without_event(
         AppleSpeechAnalyzerProvider().transcribe(sample_audio_bytes)
 
 
-def test_transcribe_raises_when_no_final_event(
-    monkeypatch, patch_helper_subprocess, sample_audio_bytes
-):
+def test_transcribe_raises_when_no_final_event(monkeypatch, patch_helper_subprocess, sample_audio_bytes):
     _force_ready(monkeypatch)
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_resolve_locale", lambda self: "en-US"
-    )
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_resolve_locale", lambda self: "en-US")
 
     # Only partials, no final and exit 0 -> treated as failure.
-    fake = _FakeCompletedProc(
-        stdout=json.dumps({"type": "partial", "text": "Hello"}), returncode=0
-    )
+    fake = _FakeCompletedProc(stdout=json.dumps({"type": "partial", "text": "Hello"}), returncode=0)
     patch_helper_subprocess(fake)
 
     with pytest.raises(RuntimeError, match="no transcript"):
@@ -356,20 +310,14 @@ def test_transcribe_raises_when_no_final_event(
 
 
 def test_transcribe_raises_when_macos_unsupported(monkeypatch, sample_audio_bytes):
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_is_supported_macos", staticmethod(lambda: False)
-    )
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_is_supported_macos", staticmethod(lambda: False))
     with pytest.raises(RuntimeError, match="macOS 26"):
         AppleSpeechAnalyzerProvider().transcribe(sample_audio_bytes)
 
 
 def test_transcribe_raises_when_helper_missing(monkeypatch, sample_audio_bytes):
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_is_supported_macos", staticmethod(lambda: True)
-    )
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_helper_available", lambda self: False
-    )
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_is_supported_macos", staticmethod(lambda: True))
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_helper_available", lambda self: False)
     with pytest.raises(RuntimeError, match="build-speechanalyzer.sh"):
         AppleSpeechAnalyzerProvider().transcribe(sample_audio_bytes)
 
@@ -377,13 +325,9 @@ def test_transcribe_raises_when_helper_missing(monkeypatch, sample_audio_bytes):
 # --- timeout handling ---------------------------------------------------------
 
 
-def test_transcribe_kills_helper_on_timeout(
-    monkeypatch, patch_helper_subprocess, sample_audio_bytes
-):
+def test_transcribe_kills_helper_on_timeout(monkeypatch, patch_helper_subprocess, sample_audio_bytes):
     _force_ready(monkeypatch)
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_resolve_locale", lambda self: "en-US"
-    )
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_resolve_locale", lambda self: "en-US")
 
     # First communicate() raises TimeoutExpired; the provider must kill + reap.
     fake = _FakeCompletedProc(stdout="", returncode=0, timeout_first=True)
@@ -401,16 +345,12 @@ def test_transcribe_kills_helper_on_timeout(
 
 
 def test_availability_message_non_macos(monkeypatch):
-    monkeypatch.setattr(
-        "whisper_hud.providers.apple_speechanalyzer.platform.system", lambda: "Linux"
-    )
+    monkeypatch.setattr("whisper_hud.providers.apple_speechanalyzer.platform.system", lambda: "Linux")
     assert "requires macOS" in AppleSpeechAnalyzerProvider.get_availability_message()
 
 
 def test_availability_message_old_macos(monkeypatch):
-    monkeypatch.setattr(
-        "whisper_hud.providers.apple_speechanalyzer.platform.system", lambda: "Darwin"
-    )
+    monkeypatch.setattr("whisper_hud.providers.apple_speechanalyzer.platform.system", lambda: "Darwin")
     monkeypatch.setattr(
         "whisper_hud.providers.apple_speechanalyzer.platform.mac_ver",
         lambda: ("15.4", ("", "", ""), "arm64"),
@@ -421,9 +361,7 @@ def test_availability_message_old_macos(monkeypatch):
 
 
 def test_availability_message_helper_missing(monkeypatch):
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_is_supported_macos", staticmethod(lambda: True)
-    )
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_is_supported_macos", staticmethod(lambda: True))
     monkeypatch.setattr(
         AppleSpeechAnalyzerProvider,
         "_helper_path",
@@ -433,13 +371,9 @@ def test_availability_message_helper_missing(monkeypatch):
 
 
 def test_availability_message_ready(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_is_supported_macos", staticmethod(lambda: True)
-    )
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_is_supported_macos", staticmethod(lambda: True))
     helper = tmp_path / "whisperhud-speechanalyzer"
     helper.write_text("#!/bin/sh\n")
     helper.chmod(0o755)
-    monkeypatch.setattr(
-        AppleSpeechAnalyzerProvider, "_helper_path", classmethod(lambda cls: helper)
-    )
+    monkeypatch.setattr(AppleSpeechAnalyzerProvider, "_helper_path", classmethod(lambda cls: helper))
     assert AppleSpeechAnalyzerProvider.get_availability_message() == "Apple Speech (Advanced) is available"
