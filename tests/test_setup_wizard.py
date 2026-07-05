@@ -90,6 +90,36 @@ def test_get_step_sequence_defaults_to_local_path():
     ]
 
 
+def test_prefills_transcription_and_translation_from_existing_config(mock_config):
+    mock_config.default_provider = "openai_realtime"
+    mock_config.translation_enabled = True
+    mock_config.translation_provider = "gemini"
+    mock_config.target_language = "ja"
+    mock_config.source_language = "en"
+    mock_config.gemini_translate_model = "gemini-3.1-pro-preview"
+    mock_config.save()
+
+    wizard = SetupWizard()
+
+    assert wizard._transcription_mode == "cloud"
+    assert wizard._selected_provider == "openai_realtime"
+    assert wizard._translation_enabled is True
+    assert wizard._translation_provider == "gemini"
+    assert wizard._translation_target_language == "ja"
+    assert wizard._translation_source_language == "en"
+    assert wizard._translation_models["gemini"] == "gemini-3.1-pro-preview"
+
+
+def test_prefills_supported_local_provider_from_existing_config(mock_config):
+    mock_config.default_provider = "whisper_local"
+    mock_config.save()
+
+    wizard = SetupWizard()
+
+    assert wizard._transcription_mode == "local"
+    assert wizard._selected_provider == "whisper_local"
+
+
 def test_get_step_progress_tracks_cloud_flow_when_navigating_back():
     wizard = SetupWizard()
     wizard._transcription_mode = "cloud"
@@ -580,3 +610,44 @@ def test_window_close_after_finish_is_not_a_cancel():
     wizard.windowWillClose_(None)
 
     cancel.assert_not_called()
+
+
+def test_cancel_button_notifies_parent_only_once():
+    cancel = MagicMock()
+    wizard = SetupWizard(on_cancel=cancel)
+
+    class _Window:
+        def close(self):
+            wizard.windowWillClose_(None)
+
+    wizard._window = _Window()
+
+    wizard._cancel_wizard()
+
+    cancel.assert_called_once()
+
+
+def test_show_setup_wizard_reports_first_run_cancel_callback(mock_config, monkeypatch):
+    mock_config.setup_completed = False
+    mock_config.save()
+    cancel = MagicMock()
+
+    monkeypatch.setattr(SetupWizard, "show", lambda self: None)
+
+    wizard = setup_wizard.show_setup_wizard(on_cancel=cancel)
+    wizard.windowWillClose_(None)
+
+    cancel.assert_called_once_with()
+
+
+def test_show_setup_wizard_allows_cancel_callback_after_completed_setup(mock_config, monkeypatch):
+    mock_config.setup_completed = True
+    mock_config.save()
+    cancel = MagicMock()
+
+    monkeypatch.setattr(SetupWizard, "show", lambda self: None)
+
+    wizard = setup_wizard.show_setup_wizard(on_cancel=cancel)
+    wizard.windowWillClose_(None)
+
+    cancel.assert_called_once_with()

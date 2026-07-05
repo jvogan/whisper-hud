@@ -95,6 +95,45 @@ def test_handle_reset_to_defaults_restores_factory_defaults(mock_config, monkeyp
     editor._show_step.assert_called_once_with(2)
 
 
+def test_handle_reset_to_defaults_preserves_active_character_pack(mock_config, monkeypatch):
+    editor = _make_editor(mock_config)
+    defaults = appearance_editor._get_default_widget_appearance()
+    pack_icon_config = {
+        "enabled": True,
+        "path": "",
+        "per_state": True,
+        "icons": {
+            "idle": "/packs/hero/idle.png",
+            "recording": "/packs/hero/recording.png",
+            "processing": "/packs/hero/processing.png",
+            "success": "/packs/hero/success.png",
+            "error": "/packs/hero/error.png",
+        },
+        "animations": {"idle": ["/packs/hero/idle-1.png"]},
+        "sounds": {"success": "/packs/hero/success.wav"},
+        "interpolation": {"idle": "nearest"},
+        "apply_state_tint": False,
+        "tint_opacity": 0.3,
+        "shape_mode": "alpha",
+        "character_pack": "hero",
+        "menubar_icon": "/packs/hero/menu.png",
+    }
+    editor._working_config["theme"] = "custom"
+    editor._working_config["colors"]["idle"]["background"] = "#010203"
+    editor._working_config["custom_icon"] = appearance_editor.deepcopy(pack_icon_config)
+    editor._current_step = 1
+    editor._show_step = MagicMock()
+
+    monkeypatch.setattr(editor, "_confirm_reset_to_defaults", lambda: True)
+
+    editor.handleResetToDefaults()
+
+    assert editor._working_config["theme"] == defaults["theme"]
+    assert editor._working_config["colors"] == defaults["colors"]
+    assert editor._working_config["custom_icon"] == pack_icon_config
+    editor._show_step.assert_called_once_with(1)
+
+
 def test_handle_reset_to_defaults_respects_cancel(mock_config, monkeypatch):
     editor = _make_editor(mock_config)
     original = appearance_editor.deepcopy(editor._working_config)

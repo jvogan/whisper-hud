@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -87,7 +87,8 @@ jobs:
           echo "Target: $VERSION"
 
           if [ "$PYPROJECT_VERSION" != "$VERSION" ] || [ "$INIT_VERSION" != "$VERSION" ]; then
-            echo "Warning: Version mismatch detected"
+            echo "Error: Version mismatch detected"
+            exit 1
           fi
 
       - name: Build package

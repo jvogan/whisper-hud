@@ -255,6 +255,48 @@ def test_transcribe_raises_runtime_error_on_malformed_response(
         provider.transcribe(sample_audio_bytes)
 
 
+def test_transcribe_returns_empty_text_for_no_speech_response(
+    monkeypatch,
+    sample_audio_bytes,
+    fake_gemini_sdk,
+):
+    """Whitespace-only Gemini text should stay on the no-speech path when it is not blocked."""
+    provider = GeminiProvider()
+
+    class FakeModels:
+        def generate_content(self, *, model, contents):
+            return {"text": "   "}
+
+    monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(models=FakeModels()))
+
+    result = provider.transcribe(sample_audio_bytes)
+
+    assert result.text == ""
+    assert result.provider == "gemini"
+    assert result.duration_seconds == pytest.approx(len(sample_audio_bytes) / 32000)
+
+
+def test_transcribe_raises_runtime_error_on_safety_blocked_response(
+    monkeypatch,
+    sample_audio_bytes,
+    fake_gemini_sdk,
+):
+    """Safety-blocked Gemini responses should surface as errors, not empty successes."""
+    provider = GeminiProvider()
+
+    class FakeModels:
+        def generate_content(self, *, model, contents):
+            return SimpleNamespace(
+                text="",
+                candidates=[SimpleNamespace(finish_reason="SAFETY")],
+            )
+
+    monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(models=FakeModels()))
+
+    with pytest.raises(RuntimeError, match="blocked by safety filters"):
+        provider.transcribe(sample_audio_bytes)
+
+
 def test_transcribe_handles_empty_audio_gracefully():
     """Empty audio should short-circuit without calling the provider."""
     result = GeminiProvider().transcribe(b"")
@@ -306,6 +348,69 @@ def test_transcribe_streaming_handles_empty_audio_gracefully():
     assert result.text == ""
     assert result.duration_seconds == 0
     assert result.cost_estimate == 0
+
+
+def test_transcribe_streaming_returns_empty_text_for_no_speech_response(
+    monkeypatch,
+    sample_audio_bytes,
+    fake_gemini_sdk,
+):
+    """Streaming Gemini responses with explicit empty text should use the no-speech path."""
+    provider = GeminiProvider()
+
+    class FakeModels:
+        def generate_content_stream(self, *, model, contents):
+            return [SimpleNamespace(text=""), SimpleNamespace()]
+
+    monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(models=FakeModels()))
+
+    chunks = []
+    result = provider.transcribe_streaming(sample_audio_bytes, chunks.append)
+
+    assert chunks == []
+    assert result.text == ""
+    assert result.duration_seconds == pytest.approx(len(sample_audio_bytes) / 32000)
+
+
+def test_transcribe_streaming_raises_runtime_error_on_malformed_empty_response(
+    monkeypatch,
+    sample_audio_bytes,
+    fake_gemini_sdk,
+):
+    """Streaming chunks with no text field are still malformed provider payloads."""
+    provider = GeminiProvider()
+
+    class FakeModels:
+        def generate_content_stream(self, *, model, contents):
+            return [SimpleNamespace()]
+
+    monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(models=FakeModels()))
+
+    with pytest.raises(RuntimeError, match="No transcription text was found"):
+        provider.transcribe_streaming(sample_audio_bytes, lambda _chunk: None)
+
+
+def test_transcribe_streaming_raises_runtime_error_on_safety_blocked_response(
+    monkeypatch,
+    sample_audio_bytes,
+    fake_gemini_sdk,
+):
+    """Streaming safety blocks should surface as transcription errors."""
+    provider = GeminiProvider()
+
+    class FakeModels:
+        def generate_content_stream(self, *, model, contents):
+            return [
+                SimpleNamespace(
+                    text="",
+                    candidates=[SimpleNamespace(finish_reason="SAFETY")],
+                )
+            ]
+
+    monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(models=FakeModels()))
+
+    with pytest.raises(RuntimeError, match="blocked by safety filters"):
+        provider.transcribe_streaming(sample_audio_bytes, lambda _chunk: None)
 
 
 def test_transcribe_streaming_raises_runtime_error_on_api_error(

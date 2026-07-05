@@ -179,6 +179,53 @@ def test_openai_streaming_delta_parser():
     assert provider._extract_text_from_response(response) == "Hola mundo"
 
 
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"output_text": "   "},
+        {
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "refusal", "text": "blocked"}],
+                }
+            ]
+        },
+    ],
+)
+def test_openai_translate_raises_on_empty_or_unparseable_response(monkeypatch, response):
+    """OpenAI responses without translated text should not return empty successes."""
+
+    class FakeResponsesAPI:
+        def create(self, **_kwargs):
+            return response
+
+    provider = OpenAITranslateProvider(model="gpt-5.4-mini")
+    monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(responses=FakeResponsesAPI()))
+
+    with pytest.raises(RuntimeError, match="OpenAI translation failed: unexpected error"):
+        provider.translate("Hello world", "en", "es")
+
+
+def test_openai_streaming_translation_raises_on_empty_fallback_response(monkeypatch):
+    """OpenAI streaming fallback should raise if no stream or final payload text is usable."""
+
+    class FakeResponsesAPI:
+        def create(self, **kwargs):
+            if kwargs.get("stream"):
+                return []
+            return {"output_text": "   "}
+
+    provider = OpenAITranslateProvider(model="gpt-5.4-mini")
+    monkeypatch.setattr(provider, "_get_client", lambda: SimpleNamespace(responses=FakeResponsesAPI()))
+
+    chunks = []
+    with pytest.raises(RuntimeError, match="OpenAI translation failed: unexpected error"):
+        provider.translate_streaming("Hello world", "en", "es", chunks.append)
+
+    assert chunks == []
+
+
 def test_openai_client_pins_base_url_and_disables_env_routing(monkeypatch):
     """OpenAI translation should pin the vendor endpoint and ignore ambient proxies."""
     captured_kwargs = {}

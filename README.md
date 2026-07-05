@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="assets/social/readme_banner.png" alt="WhisperHUD - voice to text, invisibly" width="800">
+  <img src="assets/social/readme_banner_woodblock.jpg" alt="WhisperHUD - local AI transcription builds text from speech" width="800">
 </p>
 
 <p align="center">
-  <strong>voice → text, invisibly</strong>
+  <strong>macOS dictation for any text field</strong>
 </p>
 
 <p align="center">
@@ -16,25 +16,25 @@
 
 <p align="center">
   <em>System-wide voice-to-text for macOS.<br>
-  Hold a hotkey anywhere, speak, and text appears at your cursor.<br>
-  No subscription. No account. Bring your own API keys — or use it fully local for free.</em>
+  Hold a hotkey, speak, and paste the transcription at the cursor.<br>
+  Use Apple Speech locally, local Whisper models, or your own cloud API keys.</em>
 </p>
 
 ---
 
 <p align="center">
-  <img src="assets/demo.svg" alt="WhisperHUD demo — hold hotkey, speak, text appears" width="800">
+  <img src="assets/demo.svg" alt="WhisperHUD demo: hold hotkey, speak, text appears" width="800">
 </p>
 
 ---
 
 ## Why WhisperHUD?
 
-- **Works everywhere** — dictate into any app, any text field, any terminal. System-wide, not app-specific.
-- **Free local option** — choose Apple Speech (built-in, no API key, no cost) and start transcribing in 30 seconds.
-- **Private by default** — no telemetry, no data collection. Local providers keep everything on-device. Cloud keys are encrypted at rest.
-- **No subscription** — bring your own API keys. Typical cloud cost: **$0.001 per dictation**.
-- **50+ language translation** — transcribe in one language, paste in another. Local or cloud.
+- **System-wide input** - dictate into apps, text fields, and terminals.
+- **Local options** - use Apple Speech or local Whisper models without cloud setup.
+- **Private defaults** - no telemetry or data collection. Cloud keys are encrypted at rest.
+- **Bring your own API keys** - cloud transcription is optional and billed through your provider account.
+- **Translation support** - transcribe in one language and paste in another.
 
 ## Quickstart
 
@@ -42,16 +42,16 @@
 ./install.sh
 ```
 
-That's it. On first launch, choose **Apple (Built-in)** to start free with zero setup — or configure a cloud provider for higher accuracy.
+On first launch, choose **Apple (Built-in)** for local transcription, or configure a cloud provider for higher accuracy.
 
 <details>
 <summary><strong>First-time macOS permissions</strong> (one-time setup)</summary>
 
 macOS requires three permissions for WhisperHUD to work:
 
-1. **Accessibility** — System Settings → Privacy & Security → Accessibility → enable WhisperHUD or your terminal
-2. **Microphone** — System Settings → Privacy & Security → Microphone → enable WhisperHUD or your terminal
-3. **Automation** — on first paste, click OK when macOS asks to control System Events
+1. **Accessibility** - System Settings → Privacy & Security → Accessibility → enable WhisperHUD or your terminal
+2. **Microphone** - System Settings → Privacy & Security → Microphone → enable WhisperHUD or your terminal
+3. **Automation** - on first paste, click OK when macOS asks to control System Events
 
 If a prompt was dismissed, re-enable it in System Settings → Privacy & Security → Automation.
 </details>
@@ -60,14 +60,14 @@ If a prompt was dismissed, re-enable it in System Settings → Privacy & Securit
 
 | Provider | Type | Setup | Cost |
 |----------|------|-------|------|
-| **Apple Speech** | Local | None — built into macOS | Free |
+| **Apple Speech** | Local | Built into macOS | Free |
 | **Whisper Local** | Local | `pip install -e ".[whisper-local]"` | Free |
 | **Parakeet** | Local | `pip install -e ".[parakeet]"` (Apple Silicon) | Free |
 | **Google Gemini** | Cloud | [Get API key](https://aistudio.google.com/apikey) (free tier) | ~$0.001/min |
 | **OpenAI Whisper** | Cloud | [Get API key](https://platform.openai.com/api-keys) | ~$0.003-0.006/min |
-| **OpenAI Realtime** | Cloud | Same OpenAI key — live streaming | Realtime pricing |
+| **OpenAI Realtime** | Cloud | Same OpenAI key, live streaming | Realtime pricing |
 
-Typical usage (30s of speech): **$0.001 - $0.003** with cloud providers. Local providers are completely free.
+Cloud costs depend on provider usage. Local providers do not use paid APIs.
 
 ## How It Works
 
@@ -81,13 +81,13 @@ Text is automatically pasted wherever your cursor is. The menu bar icon shows st
 
 ## Features
 
-**Core** — Hold-to-record with auto-transcribe and auto-paste. Visual feedback via menu bar icon and optional HUD overlay. Auto-stop on silence. Streaming display shows live text as it's recognized.
+**Core:** Hold-to-record with auto-transcribe and auto-paste. Visual feedback via menu bar icon and optional HUD overlay. Auto-stop on silence. Streaming display shows live text as it's recognized.
 
-**Translation** — Transcribe in one language, paste in another. 50+ languages supported. Local translation via Apple Translation (macOS 26+) or Ollama keeps data on-device. Cloud translation via Gemini, OpenAI, or Anthropic.
+**Translation:** Transcribe in one language, paste in another. 50+ languages supported. Local translation via Apple Translation (macOS 26+) or Ollama keeps data on-device. Cloud translation via Gemini, OpenAI, or Anthropic.
 
-**Privacy & Security** — Three API key storage modes: passphrase-encrypted (default), macOS Keychain, or session-only. Audio processed in memory. Local providers never send data off-device. No telemetry or data collection. Files saved with user-only permissions.
+**Privacy & Security:** Three API key storage modes: passphrase-encrypted (default), macOS Keychain, or session-only. Audio processed in memory. Local providers never send data off-device. No telemetry or data collection. Files saved with user-only permissions.
 
-**Extras** — Cost tracking in the menu bar. Configurable floating record button. Character packs for widget customization. Launch at login support.
+**Extras:** Cost tracking in the menu bar. Configurable floating record button. Character packs for widget customization. Launch at login support.
 
 ## Comparison
 
@@ -149,7 +149,7 @@ OpenAI Realtime uses the same API key as batch transcription.
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License. See [LICENSE](LICENSE) for details.
 
 ## Contributing
 

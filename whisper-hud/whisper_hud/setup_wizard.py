@@ -59,6 +59,21 @@ try:
 except ImportError:
     HAS_APPKIT = False
 
+    def NSMakeRect(*args):
+        return args
+
+    NSWindow = NSView = NSColor = NSFont = NSScreen = NSTextField = NSButton = None
+    NSApplication = NSSecureTextField = NSProgressIndicator = NSPopUpButton = None
+    NSAppearance = NSAttributedString = NSMutableParagraphStyle = None
+    NSWindowStyleMaskTitled = NSWindowStyleMaskClosable = NSBackingStoreBuffered = 0
+    NSProgressIndicatorSpinningStyle = NSLeftTextAlignment = 0
+    NSAppearanceNameAqua = "NSAppearanceNameAqua"
+    NSAppearanceNameDarkAqua = "NSAppearanceNameDarkAqua"
+    NSFontAttributeName = "NSFont"
+    NSForegroundColorAttributeName = "NSForegroundColor"
+    NSParagraphStyleAttributeName = "NSParagraphStyle"
+    AppHelper = None
+
 try:
     from AVFoundation import AVCaptureDevice, AVMediaTypeAudio
 
@@ -103,6 +118,8 @@ class SetupWizard:
     PERMISSION_STATUS_NOT_DETERMINED = "not-determined"
     MICROPHONE_SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
     ACCESSIBILITY_SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+    CLOUD_TRANSCRIPTION_PROVIDERS = {"gemini", "openai", "openai_realtime"}
+    LOCAL_TRANSCRIPTION_PROVIDERS = {"apple", "whisper_local", "parakeet"}
 
     def __init__(
         self, on_complete: Optional[Callable[[dict], None]] = None, on_cancel: Optional[Callable[[], None]] = None
@@ -119,6 +136,7 @@ class SetupWizard:
         # Set before the window closes on success so windowWillClose_ can
         # tell "finished" apart from "dismissed".
         self._finished = False
+        self._cancel_notified = False
         self._window: Optional[NSWindow] = None
         self._current_step = WizardStep.WELCOME
         self._content_view: Optional[NSView] = None
@@ -181,10 +199,22 @@ class SetupWizard:
         }
 
         # Prefill from current config when rerunning setup.
+        self._prefill_from_existing_config()
+
+    def _prefill_from_existing_config(self):
+        """Prefill setup choices from the saved config where the wizard supports them."""
         try:
             from .config import Config
 
             existing = Config.load()
+            provider = getattr(existing, "default_provider", "")
+            if provider in self.CLOUD_TRANSCRIPTION_PROVIDERS:
+                self._transcription_mode = "cloud"
+                self._selected_provider = provider
+            elif provider in self.LOCAL_TRANSCRIPTION_PROVIDERS:
+                self._transcription_mode = "local"
+                self._selected_provider = provider
+
             self._translation_enabled = bool(existing.translation_enabled)
             self._translation_provider = getattr(existing, "translation_provider", "apple")
             self._translation_target_language = getattr(existing, "target_language", "en")
@@ -1277,11 +1307,17 @@ class SetupWizard:
 
     def windowWillClose_(self, _notification):
         """Treat closing the window as declining setup (unless finishing)."""
-        if not self._finished and self._on_cancel:
-            try:
-                self._on_cancel()
-            except Exception:
-                logger.debug("Setup wizard cancel callback failed", exc_info=True)
+        self._notify_cancelled()
+
+    def _notify_cancelled(self):
+        """Notify the parent once when setup is cancelled."""
+        if self._finished or self._cancel_notified or not self._on_cancel:
+            return
+        self._cancel_notified = True
+        try:
+            self._on_cancel()
+        except Exception:
+            logger.debug("Setup wizard cancel callback failed", exc_info=True)
 
     def _get_step_progress(self, step: WizardStep) -> tuple[int, int]:
         """Return the 1-based step position and total visible steps."""
@@ -2126,8 +2162,7 @@ class SetupWizard:
         """Cancel and close wizard."""
         if self._window:
             self._window.close()
-        if self._on_cancel:
-            self._on_cancel()
+        self._notify_cancelled()
 
     def _finish_wizard(self):
         """Finish wizard and save settings."""

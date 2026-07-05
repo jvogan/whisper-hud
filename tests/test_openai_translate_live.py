@@ -40,11 +40,15 @@ class FakeWebSocket:
     def send(self, message):
         self.sent.append(json.loads(message))
 
-    def recv(self):
+    def recv(self, timeout=None):
         if self._script:
             return self._script.pop(0)
         if self._raise_on_end:
             raise _RecvClosed("socket closed")
+        if timeout is not None:
+            if self._release.wait(timeout=timeout):
+                raise _RecvClosed("released")
+            raise TimeoutError("timed out waiting for websocket frame")
         # Block until the test closes the session, then unblock the run loop.
         self._release.wait(timeout=0.5)
         raise _RecvClosed("released")
@@ -306,6 +310,23 @@ def test_recv_failure_mid_session_emits_on_error():
     assert "OpenAI Live Translation" in str(errors[0])
 
 
+def test_idle_timeout_before_ready_emits_on_error(monkeypatch):
+    """A server that never acknowledges the session must not leave the worker alive forever."""
+    monkeypatch.setattr(OpenAITranslateLiveSession, "RECV_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(OpenAITranslateLiveSession, "READY_IDLE_TIMEOUT_SECONDS", 0.02)
+
+    session, _, finals, errors, ready, sockets = _make_session(script=[])
+
+    _run_session_to_completion(session)
+
+    assert ready == []
+    assert finals == []
+    assert len(errors) == 1
+    assert "OpenAI Live Translation" in str(errors[0])
+    assert "timed out" in str(errors[0]).lower()
+    assert sockets[0].closed is True
+
+
 def test_clean_close_event_does_not_error():
     """A normal session.closed finalizes without surfacing an error."""
     script = [json.dumps({"type": "session.updated"}), json.dumps({"type": "session.closed"})]
@@ -343,7 +364,6 @@ def test_user_requested_close_does_not_emit_error_on_recv_drop():
     # Wait for readiness, then close from the caller side.
     assert session._ready.wait(timeout=0.5)
     session.close()
-    session._thread.join(timeout=1.0)
 
     assert not session._thread.is_alive()
     assert errors == []

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from collections import deque
 from typing import Any, Callable, Optional
 
@@ -59,6 +60,10 @@ class OpenAITranslateLiveSession(LiveTranscriptionSession):
 
     TARGET_SAMPLE_RATE = REALTIME_SAMPLE_RATE
     PRECONNECT_BUFFER_SECONDS = 2.0
+    RECV_POLL_SECONDS = 0.5
+    READY_IDLE_TIMEOUT_SECONDS = 10.0
+    FINAL_IDLE_TIMEOUT_SECONDS = 30.0
+    CLOSE_JOIN_TIMEOUT_SECONDS = 2.0
 
     def __init__(
         self,
@@ -99,7 +104,7 @@ class OpenAITranslateLiveSession(LiveTranscriptionSession):
 
     def start(self) -> None:
         """Start the remote session in a background thread."""
-        if self._thread is not None:
+        if self._thread is not None or self._closed.is_set():
             return
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -140,16 +145,26 @@ class OpenAITranslateLiveSession(LiveTranscriptionSession):
         self._send_close()
 
     def close(self) -> None:
-        """Close the session and underlying websocket (idempotent)."""
-        if self._closed.is_set():
-            return
+        """Close the session and underlying websocket, then briefly join the worker."""
+        already_closed = self._closed.is_set()
         self._closed.set()
-        websocket = self._websocket
-        if websocket is not None:
+
+        if not already_closed:
+            with self._send_lock:
+                websocket = self._websocket
+                self._websocket = None
+            if websocket is not None:
+                try:
+                    websocket.close()
+                except Exception:
+                    logger.debug("Failed to close live translation websocket cleanly", exc_info=True)
+
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
             try:
-                websocket.close()
-            except Exception:
-                logger.debug("Failed to close live translation websocket cleanly", exc_info=True)
+                thread.join(timeout=self.CLOSE_JOIN_TIMEOUT_SECONDS)
+            except RuntimeError:
+                logger.debug("Failed to join live translation worker", exc_info=True)
 
     def _run(self) -> None:
         """Own the websocket lifetime and process incoming events."""
@@ -163,10 +178,24 @@ class OpenAITranslateLiveSession(LiveTranscriptionSession):
                 }
             )
 
+            last_server_event_at = time.monotonic()
             while not self._closed.is_set():
-                message = self._websocket.recv()
+                try:
+                    message = self._recv_message()
+                except TimeoutError as e:
+                    now = time.monotonic()
+                    if self._server_idle_timed_out(last_server_event_at, now):
+                        self._notify_error(
+                            RuntimeError(build_provider_error_message("OpenAI Live Translation", "session", e))
+                        )
+                        break
+                    continue
+
+                if self._closed.is_set():
+                    break
+                last_server_event_at = time.monotonic()
                 self._handle_message(message)
-                if self._final_sent:
+                if self._final_sent or self._error_sent:
                     break
         except Exception as e:
             # The socket dropped before a clean ``session.closed``. If the user
@@ -176,6 +205,25 @@ class OpenAITranslateLiveSession(LiveTranscriptionSession):
                 self._notify_error(RuntimeError(build_provider_error_message("OpenAI Live Translation", "session", e)))
         finally:
             self.close()
+
+    def _recv_message(self) -> Any:
+        """Receive one websocket frame, polling with a timeout when supported."""
+        websocket = self._websocket
+        if websocket is None:
+            raise RuntimeError("live translation websocket is closed")
+        try:
+            return websocket.recv(timeout=self.RECV_POLL_SECONDS)
+        except TypeError:
+            return websocket.recv()
+
+    def _server_idle_timed_out(self, last_server_event_at: float, now: float) -> bool:
+        """Return True when the server has gone idle in a terminal wait state."""
+        idle_seconds = now - last_server_event_at
+        if not self._ready.is_set():
+            return idle_seconds >= self.READY_IDLE_TIMEOUT_SECONDS
+        if self._stop_requested.is_set() or self._close_sent:
+            return idle_seconds >= self.FINAL_IDLE_TIMEOUT_SECONDS
+        return False
 
     def _handle_message(self, message: Any) -> None:
         """Parse a server text frame and route it to callbacks."""

@@ -37,6 +37,8 @@ PROVIDERS = registry.credential_vendors()
 STORAGE_MODES = ("passphrase", "keychain", "none")
 DEFAULT_STORAGE_MODE = "passphrase"
 PASSFILE_NAME = "credentials.enc"
+MAX_PASSPHRASE_HINT_LENGTH = 120
+PASSPHRASE_NO_RECOVERY_MESSAGE = "WhisperHUD cannot recover or reset this passphrase. Keep it somewhere safe."
 REQUESTS_MISSING_WARNING = "requests package not available, skipping API key validation"
 
 _session_passphrase: Optional[str] = None
@@ -73,11 +75,13 @@ _KEY_FORMAT_CHECKS = {
 }
 
 
-class PassphraseStorePayload(TypedDict):
+class PassphraseStorePayload(TypedDict, total=False):
     version: int
     kdf: str
     salt: str
     ciphertext: str
+    hint: str
+    no_recovery_acknowledged: bool
 
 
 def _normalize_mode(mode: Optional[str]) -> str:
@@ -157,6 +161,60 @@ def _ensure_credentials_file_permissions(path: Path) -> None:
             pass
 
 
+def _clean_passphrase_hint(hint: object) -> str:
+    """Normalize a user-visible passphrase hint without treating it as secret data."""
+    cleaned = " ".join(str(hint).split())
+    if len(cleaned) > MAX_PASSPHRASE_HINT_LENGTH:
+        cleaned = cleaned[:MAX_PASSPHRASE_HINT_LENGTH].rstrip()
+    return cleaned
+
+
+def _normalize_passphrase_hint_for_save(hint: object, passphrase: Optional[str] = None) -> str:
+    cleaned = _clean_passphrase_hint(hint)
+    active_passphrase = passphrase if passphrase is not None else (_session_passphrase or "")
+    if active_passphrase and (
+        cleaned == active_passphrase or (len(active_passphrase) >= 8 and active_passphrase in cleaned)
+    ):
+        raise ValueError("Passphrase hint must not contain the passphrase")
+    return cleaned
+
+
+def _atomic_write_passphrase_payload(path: Path, payload: PassphraseStorePayload) -> bool:
+    temp_path: Optional[Path] = None
+    try:
+        # Write to a temp file first, then atomically replace.
+        # This avoids partial writes and keeps file permissions restrictive.
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(path.parent),
+            prefix=".credentials.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            json.dump(payload, temp_file)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+
+        try:
+            os.chmod(temp_path, 0o600)
+        except Exception:
+            pass
+
+        os.replace(temp_path, path)
+        _ensure_credentials_file_permissions(path)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to write encrypted credential store: {type(e).__name__}")
+        if temp_path and temp_path.exists():
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
+        return False
+
+
 def _derive_fernet_key(passphrase: str, salt: bytes) -> bytes:
     from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
@@ -197,12 +255,17 @@ def _read_passphrase_store() -> Optional[PassphraseStorePayload]:
             data = json.load(f)
         if not isinstance(data, dict):
             return None
-        return {
+        payload: PassphraseStorePayload = {
             "version": int(data.get("version", 1)),
             "kdf": str(data.get("kdf", "")),
             "salt": str(data["salt"]),
             "ciphertext": str(data["ciphertext"]),
         }
+        hint = _clean_passphrase_hint(data.get("hint", ""))
+        if hint:
+            payload["hint"] = hint
+        payload["no_recovery_acknowledged"] = bool(data.get("no_recovery_acknowledged", False))
+        return payload
     except Exception:
         return None
 
@@ -223,46 +286,57 @@ def _write_passphrase_store(keys: dict[str, str], passphrase: str, rotate_salt: 
 
     salt = base64.b64decode(salt_b64.encode("utf-8"))
     ciphertext = _encrypt_keys(keys, passphrase, salt)
-    payload = {
+    payload: PassphraseStorePayload = {
         "version": 1,
         "kdf": "scrypt",
         "salt": salt_b64,
         "ciphertext": ciphertext,
     }
+    if existing:
+        hint = _clean_passphrase_hint(existing.get("hint", ""))
+        if hint:
+            payload["hint"] = hint
+        if existing.get("no_recovery_acknowledged", False):
+            payload["no_recovery_acknowledged"] = True
 
-    temp_path: Optional[Path] = None
-    try:
-        # Write to a temp file first, then atomically replace.
-        # This avoids partial writes and keeps file permissions restrictive.
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=str(path.parent),
-            prefix=".credentials.",
-            suffix=".tmp",
-            delete=False,
-        ) as temp_file:
-            temp_path = Path(temp_file.name)
-            json.dump(payload, temp_file)
-            temp_file.flush()
-            os.fsync(temp_file.fileno())
+    return _atomic_write_passphrase_payload(path, payload)
 
-        try:
-            os.chmod(temp_path, 0o600)
-        except Exception:
-            pass
 
-        os.replace(temp_path, path)
-        _ensure_credentials_file_permissions(path)
-        return True
-    except Exception as e:
-        logger.error(f"Failed to write encrypted credential store: {type(e).__name__}")
-        if temp_path and temp_path.exists():
-            try:
-                temp_path.unlink()
-            except Exception:
-                pass
+def _write_passphrase_store_metadata(
+    *,
+    hint: Optional[str] = None,
+    no_recovery_acknowledged: Optional[bool] = None,
+) -> bool:
+    path = _credentials_file()
+    _ensure_credentials_file_permissions(path)
+    payload = _read_passphrase_store()
+    if payload is None:
         return False
+
+    updated: PassphraseStorePayload = {
+        "version": payload["version"],
+        "kdf": payload["kdf"],
+        "salt": payload["salt"],
+        "ciphertext": payload["ciphertext"],
+    }
+    if "hint" in payload:
+        updated["hint"] = payload["hint"]
+    if payload.get("no_recovery_acknowledged", False):
+        updated["no_recovery_acknowledged"] = True
+    if hint is not None:
+        normalized_hint = _normalize_passphrase_hint_for_save(hint)
+        if normalized_hint:
+            updated["hint"] = normalized_hint
+        else:
+            updated.pop("hint", None)
+
+    if no_recovery_acknowledged is not None:
+        if no_recovery_acknowledged:
+            updated["no_recovery_acknowledged"] = True
+        else:
+            updated.pop("no_recovery_acknowledged", None)
+
+    return _atomic_write_passphrase_payload(path, updated)
 
 
 def _load_passphrase_store(passphrase: str) -> dict[str, str]:
@@ -296,6 +370,55 @@ def is_passphrase_supported() -> bool:
 
 def has_passphrase_store() -> bool:
     return _credentials_file().exists()
+
+
+def get_passphrase_hint() -> str:
+    """Return the stored passphrase hint, if one exists."""
+    payload = _read_passphrase_store()
+    if payload is None:
+        return ""
+    return payload.get("hint", "")
+
+
+def set_passphrase_hint(hint: str) -> tuple[bool, str]:
+    """
+    Store a bounded, non-secret passphrase hint in credential-store metadata.
+
+    The hint is intentionally not encrypted because it must be available before
+    unlock. It must never contain the passphrase itself.
+    """
+    if not has_passphrase_store():
+        return False, "Credential store has not been created"
+    if _session_passphrase is None:
+        return False, "Passphrase store must be unlocked to save a hint"
+    try:
+        if _write_passphrase_store_metadata(hint=hint):
+            return True, "Passphrase hint saved"
+    except ValueError as exc:
+        return False, str(exc)
+    return False, "Failed to save passphrase hint"
+
+
+def get_passphrase_no_recovery_message() -> str:
+    """Return the disclosure text shown before creating a passphrase store."""
+    return PASSPHRASE_NO_RECOVERY_MESSAGE
+
+
+def has_acknowledged_passphrase_no_recovery() -> bool:
+    """Return whether the user acknowledged that the passphrase cannot be recovered."""
+    payload = _read_passphrase_store()
+    if payload is None:
+        return False
+    return bool(payload.get("no_recovery_acknowledged", False))
+
+
+def acknowledge_passphrase_no_recovery(acknowledged: bool = True) -> tuple[bool, str]:
+    """Persist the no-recovery acknowledgement flag in credential-store metadata."""
+    if not has_passphrase_store():
+        return False, "Credential store has not been created"
+    if _write_passphrase_store_metadata(no_recovery_acknowledged=bool(acknowledged)):
+        return True, "Passphrase recovery acknowledgement saved"
+    return False, "Failed to save passphrase recovery acknowledgement"
 
 
 def is_passphrase_unlocked() -> bool:
@@ -367,6 +490,13 @@ def change_passphrase(current_passphrase: str, new_passphrase: str) -> tuple[boo
     ok, message = unlock_passphrase_store(current_passphrase)
     if not ok:
         return False, message
+
+    existing_hint = get_passphrase_hint()
+    if existing_hint:
+        try:
+            _normalize_passphrase_hint_for_save(existing_hint, passphrase=new_passphrase)
+        except ValueError:
+            return False, "Stored passphrase hint must not contain the new passphrase"
 
     # Re-wrap history encryption key first so encrypted history remains readable
     # after the credential passphrase changes. If the credential write fails,
