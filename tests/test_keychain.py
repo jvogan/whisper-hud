@@ -1,6 +1,7 @@
 """Tests for credential storage and API key management."""
 
 import builtins
+import json
 from unittest.mock import Mock, call, patch
 
 import pytest
@@ -224,6 +225,83 @@ class TestPassphraseMode:
                 ok, _ = unlock_passphrase_store("wrong-passphrase")
                 assert not ok
 
+    def test_passphrase_recovery_metadata_roundtrip(self, temp_config_dir):
+        """Hint and no-recovery metadata should not expose credential secrets."""
+        from whisper_hud.keychain import (
+            acknowledge_passphrase_no_recovery,
+            change_passphrase,
+            get_passphrase_hint,
+            has_acknowledged_passphrase_no_recovery,
+            lock_passphrase_store,
+            set_api_key,
+            set_passphrase_hint,
+            unlock_passphrase_store,
+        )
+
+        with patch("whisper_hud.config.CONFIG_DIR", temp_config_dir):
+            with patch("whisper_hud.config.CONFIG_FILE", temp_config_dir / "config.json"):
+                with patch("whisper_hud.keychain.get_storage_mode", return_value="passphrase"):
+                    lock_passphrase_store()
+                    old_passphrase = "old-passphrase-123"
+                    new_passphrase = "new-passphrase-456"
+                    valid_openai_key = "sk-" + ("d" * 40)
+
+                    ok, _ = unlock_passphrase_store(old_passphrase)
+                    assert ok
+                    assert set_api_key("openai", valid_openai_key)
+
+                    ok, message = set_passphrase_hint("Laptop password manager note")
+                    assert ok, message
+                    ok, message = acknowledge_passphrase_no_recovery()
+                    assert ok, message
+
+                    assert get_passphrase_hint() == "Laptop password manager note"
+                    assert has_acknowledged_passphrase_no_recovery() is True
+
+                    store_path = temp_config_dir / "credentials.enc"
+                    store_text = store_path.read_text(encoding="utf-8")
+                    store_data = json.loads(store_text)
+                    assert store_data["hint"] == "Laptop password manager note"
+                    assert store_data["no_recovery_acknowledged"] is True
+                    assert old_passphrase not in store_text
+                    assert valid_openai_key not in store_text
+
+                    ok, message = change_passphrase(old_passphrase, new_passphrase)
+                    assert ok, message
+                    assert get_passphrase_hint() == "Laptop password manager note"
+                    assert has_acknowledged_passphrase_no_recovery() is True
+
+    def test_passphrase_hint_rejects_active_passphrase(self, temp_config_dir):
+        """The optional hint helper must not persist the passphrase itself."""
+        from whisper_hud.keychain import lock_passphrase_store, set_passphrase_hint, unlock_passphrase_store
+
+        with patch("whisper_hud.config.CONFIG_DIR", temp_config_dir):
+            with patch("whisper_hud.config.CONFIG_FILE", temp_config_dir / "config.json"):
+                lock_passphrase_store()
+                ok, _ = unlock_passphrase_store("secret-passphrase-123")
+                assert ok
+
+                ok, message = set_passphrase_hint("secret-passphrase-123")
+
+        assert ok is False
+        assert message == "Passphrase hint must not contain the passphrase"
+
+    def test_passphrase_hint_requires_unlocked_store(self, temp_config_dir):
+        """Hint writes require unlock so the helper can guard against plaintext passphrases."""
+        from whisper_hud.keychain import lock_passphrase_store, set_passphrase_hint, unlock_passphrase_store
+
+        with patch("whisper_hud.config.CONFIG_DIR", temp_config_dir):
+            with patch("whisper_hud.config.CONFIG_FILE", temp_config_dir / "config.json"):
+                lock_passphrase_store()
+                ok, _ = unlock_passphrase_store("secret-passphrase-123")
+                assert ok
+                lock_passphrase_store()
+
+                ok, message = set_passphrase_hint("Stored in my password manager")
+
+        assert ok is False
+        assert message == "Passphrase store must be unlocked to save a hint"
+
     def test_change_passphrase(self, temp_config_dir):
         """Changing passphrase should preserve stored keys."""
         from whisper_hud.keychain import (
@@ -250,6 +328,28 @@ class TestPassphraseMode:
                     ok, _ = unlock_passphrase_store("new-passphrase-456")
                     assert ok
                     assert get_api_key("gemini") == valid_gemini_key
+
+    def test_change_passphrase_rejects_new_passphrase_matching_existing_hint(self, temp_config_dir):
+        """A readable hint must not become the new passphrase during rotation."""
+        from whisper_hud.keychain import (
+            change_passphrase,
+            lock_passphrase_store,
+            set_passphrase_hint,
+            unlock_passphrase_store,
+        )
+
+        with patch("whisper_hud.config.CONFIG_DIR", temp_config_dir):
+            with patch("whisper_hud.config.CONFIG_FILE", temp_config_dir / "config.json"):
+                lock_passphrase_store()
+                ok, _ = unlock_passphrase_store("old-passphrase-123")
+                assert ok
+                ok, message = set_passphrase_hint("stored in password manager")
+                assert ok, message
+
+                ok, message = change_passphrase("old-passphrase-123", "password manager")
+
+        assert ok is False
+        assert message == "Stored passphrase hint must not contain the new passphrase"
 
     def test_change_passphrase_rolls_back_history_rewrap_when_credential_write_fails(self, temp_config_dir):
         """History key rewrap should not be left ahead of credentials after a partial failure."""

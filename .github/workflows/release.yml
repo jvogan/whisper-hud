@@ -39,7 +39,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Full history for version detection
 
@@ -86,13 +86,15 @@ jobs:
           # Check pyproject.toml
           PYPROJECT_VERSION=$(grep -m1 'version = ' pyproject.toml | sed 's/.*"\(.*\)".*/\1/')
           if [ "$PYPROJECT_VERSION" != "$VERSION" ]; then
-            echo "Warning: pyproject.toml version ($PYPROJECT_VERSION) != tag version ($VERSION)"
+            echo "Error: pyproject.toml version ($PYPROJECT_VERSION) != tag version ($VERSION)"
+            exit 1
           fi
 
           # Check __init__.py
           INIT_VERSION=$(grep '__version__' whisper-hud/whisper_hud/__init__.py | sed 's/.*"\(.*\)".*/\1/')
           if [ "$INIT_VERSION" != "$VERSION" ]; then
-            echo "Warning: __init__.py version ($INIT_VERSION) != tag version ($VERSION)"
+            echo "Error: __init__.py version ($INIT_VERSION) != tag version ($VERSION)"
+            exit 1
           fi
 
       - name: Build .app bundle
@@ -213,7 +215,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Get version from tag
         id: version

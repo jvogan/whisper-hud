@@ -203,6 +203,43 @@ def test_clear_history_shows_failure_alert_when_persist_fails(monkeypatch):
     assert fake_rumps.alert.call_args_list[1].kwargs["title"] == "Clear History Failed"
 
 
+def test_reveal_config_file_selects_existing_config(monkeypatch, tmp_path):
+    """Reveal config should ask Finder to select config.json when it exists."""
+    import subprocess
+
+    config_dir = tmp_path / "whisper-hud"
+    config_dir.mkdir()
+    config_file = config_dir / "config.json"
+    config_file.write_text("{}", encoding="utf-8")
+    run = MagicMock()
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr("whisper_hud.config.CONFIG_DIR", config_dir)
+    monkeypatch.setattr("whisper_hud.config.CONFIG_FILE", config_file)
+
+    app = _build_recording_app()
+    app._reveal_config_file(None)
+
+    run.assert_called_once_with(["open", "-R", str(config_file)], check=True)
+
+
+def test_reveal_config_file_opens_config_dir_before_first_save(monkeypatch, tmp_path):
+    """Reveal config should open the config directory if config.json does not exist yet."""
+    import subprocess
+
+    config_dir = tmp_path / "whisper-hud"
+    config_file = config_dir / "config.json"
+    run = MagicMock()
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr("whisper_hud.config.CONFIG_DIR", config_dir)
+    monkeypatch.setattr("whisper_hud.config.CONFIG_FILE", config_file)
+
+    app = _build_recording_app()
+    app._reveal_config_file(None)
+
+    assert config_dir.exists()
+    run.assert_called_once_with(["open", str(config_dir)], check=True)
+
+
 def test_enable_private_mode_shows_failure_alert_when_persist_fails(monkeypatch):
     """Private Mode UI should fail closed if the config update cannot be saved."""
     fake_rumps = types.SimpleNamespace(alert=MagicMock(side_effect=[1, None]))
@@ -383,10 +420,50 @@ def test_build_menu_reflects_provider_availability(monkeypatch):
     assert "Appearance" in settings_titles
     assert "Hotkey" in settings_titles
     assert "Advanced & Support" in settings_titles
+    advanced_menu = next(item for item in settings_menu.items if getattr(item, "title", None) == "Advanced & Support")
+    advanced_titles = _menu_titles(advanced_menu)
+    assert "Reveal config.json in Finder" in advanced_titles
 
     recording_menu = next(item for item in settings_menu.items if getattr(item, "title", None) == "Recording & Display")
     recording_titles = _menu_titles(recording_menu)
     assert "Reset Position" in recording_titles
+    assert "Recording sensitivity" in recording_titles
+    sensitivity_menu = next(
+        item for item in recording_menu.items if getattr(item, "title", None) == "Recording sensitivity"
+    )
+    sensitivity_titles = _menu_titles(sensitivity_menu)
+    assert "● Balanced" in sensitivity_titles
+    assert "   Noisy room" in sensitivity_titles
+
+
+def test_recording_sensitivity_preset_persists():
+    """Sensitivity presets should update both silence knobs together."""
+    app = _build_recording_app()
+
+    app._set_recording_sensitivity("noisy")
+
+    assert app.config.silence_duration == 2.0
+    assert app.config.silence_threshold == 0.004
+    app.config.save.assert_called_once_with()
+    app._schedule_menu_rebuild.assert_called_once_with()
+
+
+def test_first_run_setup_cancel_marks_setup_skipped(monkeypatch):
+    """First-run wizard dismissal should not reopen setup on every launch."""
+    app = _build_recording_app()
+    app.config.setup_completed = False
+
+    def fake_show_setup_wizard(*, on_complete, on_cancel):  # noqa: ARG001 - mirrors real helper
+        on_cancel()
+        return object()
+
+    monkeypatch.setattr("whisper_hud.app.show_setup_wizard", fake_show_setup_wizard)
+
+    app._show_setup_wizard()
+
+    assert app.config.setup_completed is True
+    app.config.save.assert_called_once_with()
+    app._notify.assert_called_once()
 
 
 def test_dictation_intelligence_menu_lists_core_toggles(monkeypatch):
@@ -560,6 +637,43 @@ def test_set_openai_key_does_not_prefill_existing_key(monkeypatch):
     )
 
 
+def test_passphrase_unlock_prompt_includes_saved_hint(monkeypatch):
+    """Saved hints should be visible before entering the passphrase."""
+    app = _build_recording_app()
+    app._is_passphrase_mode = MagicMock(return_value=True)
+    app._applescript_input_dialog = MagicMock(return_value="correct horse battery staple")
+    monkeypatch.setattr("whisper_hud.app.is_passphrase_unlocked", MagicMock(return_value=False))
+    monkeypatch.setattr("whisper_hud.app.has_passphrase_store", MagicMock(return_value=True))
+    monkeypatch.setattr("whisper_hud.app.get_passphrase_hint", MagicMock(return_value="Password manager note"))
+    monkeypatch.setattr("whisper_hud.app.unlock_passphrase_store", MagicMock(return_value=(True, "unlocked")))
+
+    assert app._ensure_passphrase_unlocked() is True
+
+    _, message = app._applescript_input_dialog.call_args.args[:2]
+    assert "Hint: Password manager note" in message
+
+
+def test_passphrase_creation_saves_optional_hint(monkeypatch):
+    """First-time passphrase setup should collect and persist a non-secret hint."""
+    app = _build_recording_app()
+    app._is_passphrase_mode = MagicMock(return_value=True)
+    app._applescript_input_dialog = MagicMock(
+        side_effect=["correct horse battery staple", "correct horse battery staple", "Password manager note"]
+    )
+    monkeypatch.setattr("whisper_hud.app.is_passphrase_unlocked", MagicMock(return_value=False))
+    monkeypatch.setattr("whisper_hud.app.has_passphrase_store", MagicMock(return_value=False))
+    monkeypatch.setattr("whisper_hud.app.unlock_passphrase_store", MagicMock(return_value=(True, "created")))
+    acknowledge = MagicMock(return_value=(True, "acknowledged"))
+    set_hint = MagicMock(return_value=(True, "saved"))
+    monkeypatch.setattr("whisper_hud.app.acknowledge_passphrase_no_recovery", acknowledge)
+    monkeypatch.setattr("whisper_hud.app.set_passphrase_hint", set_hint)
+
+    assert app._ensure_passphrase_unlocked() is True
+
+    acknowledge.assert_called_once_with()
+    set_hint.assert_called_once_with("Password manager note")
+
+
 def test_open_provider_setup_uses_backing_credential_dialog():
     """Cloud provider setup should route through the backing credential provider."""
     app = _build_recording_app()
@@ -645,6 +759,77 @@ def test_transcription_result_is_dispatched_to_paste_pipeline(monkeypatch):
     app._paste_to_target.assert_called_once_with("hello world")
     app.hud.show_success.assert_called_once_with("Done! (2 words)")
     app._finish_turn_cleanup.assert_called_once_with(3)
+
+
+def test_paste_failure_surfaces_error_before_success_side_effects(monkeypatch):
+    """Failed paste should not show success, play sound, or write history first."""
+    app = _build_recording_app()
+    app._active_turn = ActiveTranscriptionTurn(turn_id=33, provider_id="openai")
+    monkeypatch.setattr("whisper_hud.app.threading.Thread", ImmediateThread)
+    monkeypatch.setattr("whisper_hud.app.time.sleep", lambda _: None)
+
+    def fail_paste(text):
+        assert text == "hello world"
+        app.hud.show_success.assert_not_called()
+        app._play_completion_sound.assert_not_called()
+        assert app.config.history == []
+        return False
+
+    app._paste_to_target = MagicMock(side_effect=fail_paste)
+
+    app._process_turn_result(33, _result("hello world"), use_streaming=False, stats_already_recorded=True)
+
+    app._paste_to_target.assert_called_once_with("hello world")
+    app.hud.show_error.assert_called_once_with("Paste failed")
+    app.hud.show_success.assert_not_called()
+    app._play_completion_sound.assert_not_called()
+    assert app.config.history[0]["text"] == "hello world"
+    app._notify.assert_called_with(
+        "WhisperHUD",
+        "Paste Failed",
+        "Nothing was pasted. The transcript was saved in History.",
+    )
+    app._finish_turn_cleanup.assert_called_once_with(33)
+
+
+def test_stale_turn_result_does_not_paste_or_show_success(monkeypatch):
+    """A result from an old turn must not paste after a newer turn starts."""
+    app = _build_recording_app()
+    turn = ActiveTranscriptionTurn(turn_id=34, provider_id="openai")
+    app._active_turn = turn
+    app._paste_to_target = MagicMock(return_value=True)
+    app._get_active_turn = MagicMock(side_effect=[turn, None])
+    monkeypatch.setattr("whisper_hud.app.threading.Thread", ImmediateThread)
+    monkeypatch.setattr("whisper_hud.app.time.sleep", lambda _: None)
+
+    app._process_turn_result(34, _result("hello world"), use_streaming=False, stats_already_recorded=True)
+
+    app._paste_to_target.assert_not_called()
+    app.hud.show_success.assert_not_called()
+    assert app.config.history == []
+    app._finish_turn_cleanup.assert_not_called()
+
+
+def test_stale_turn_after_paste_delay_does_not_paste_or_show_success(monkeypatch):
+    """A newer recording that starts during the paste delay must suppress the old paste."""
+    app = _build_recording_app()
+    old_turn = ActiveTranscriptionTurn(turn_id=35, provider_id="openai")
+    new_turn = ActiveTranscriptionTurn(turn_id=36, provider_id="openai")
+    app._active_turn = old_turn
+    app._paste_to_target = MagicMock(return_value=True)
+
+    def sleep_and_replace_turn(_seconds):
+        app._active_turn = new_turn
+
+    monkeypatch.setattr("whisper_hud.app.threading.Thread", ImmediateThread)
+    monkeypatch.setattr("whisper_hud.app.time.sleep", sleep_and_replace_turn)
+
+    app._process_turn_result(35, _result("hello world"), use_streaming=False, stats_already_recorded=True)
+
+    app._paste_to_target.assert_not_called()
+    app.hud.show_success.assert_not_called()
+    assert app.config.history == []
+    app._finish_turn_cleanup.assert_not_called()
 
 
 def test_locked_paste_target_unavailable_fails_closed():
@@ -924,6 +1109,11 @@ def test_llm_cleanup_skipped_when_no_model(monkeypatch):
     app._process_turn_result(27, _result("hello world"), use_streaming=False, stats_already_recorded=True)
 
     app.cleanup_engine.cleanup.assert_not_called()
+    app._notify.assert_any_call(
+        "WhisperHUD",
+        "AI Cleanup Unavailable",
+        "Using the raw transcript. Check Cleanup Status in the menu.",
+    )
     app._paste_to_target.assert_called_once_with("hello world")
 
 
@@ -1301,6 +1491,37 @@ def test_quit_sweeps_pending_history_view_files(monkeypatch, tmp_path):
     mock_quit.assert_called_once()
     assert not os.path.exists(path)
     assert app._history_view_files == []
+
+
+def test_quit_cancels_active_turn_timers(monkeypatch):
+    """Quit should cancel delayed callbacks for the active recording turn."""
+    app = _build_recording_app()
+    turn = ActiveTranscriptionTurn(turn_id=41, provider_id="openai")
+    connect_timer = MagicMock()
+    finalize_timer = MagicMock()
+    turn.connect_timer = connect_timer
+    turn.finalize_timer = finalize_timer
+    app._active_turn = turn
+    app._history_view_files = []
+    app._cancel_turn_timers = MagicMock(wraps=lambda active: WhisperHUDApp._cancel_turn_timers(app, active))
+    app._close_live_session = MagicMock()
+    app.hotkey_listener = MagicMock()
+    app._detach_menu_observers = MagicMock()
+
+    with (
+        patch("whisper_hud.app.lock_passphrase_store"),
+        patch("whisper_hud.app.lock_history_encryption"),
+        patch("whisper_hud.app.rumps.quit_application") as mock_quit,
+    ):
+        app._quit(None)
+
+    app._cancel_turn_timers.assert_called_once_with(turn)
+    connect_timer.cancel.assert_called_once_with()
+    finalize_timer.cancel.assert_called_once_with()
+    assert turn.connect_timer is None
+    assert turn.finalize_timer is None
+    app._close_live_session.assert_called_once_with(turn)
+    mock_quit.assert_called_once()
 
 
 def test_render_history_entries_includes_tags_and_full_text():

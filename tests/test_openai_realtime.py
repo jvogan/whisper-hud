@@ -1,6 +1,8 @@
 """Tests for the OpenAI Realtime transcription provider."""
 
 import base64
+import json
+import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -8,6 +10,66 @@ import numpy as np
 import pytest
 
 from whisper_hud.providers.openai_realtime import OpenAIRealtimeProvider, OpenAIRealtimeSession
+
+
+class _RecvReleased(Exception):
+    """Sentinel raised by fake sockets after caller-driven close."""
+
+
+class FakeOpenAIRawWebSocket:
+    """Timeout-aware stand-in for the SDK's wrapped websockets connection."""
+
+    def __init__(self, messages=None):
+        self._messages = list(messages or [])
+        self.closed = False
+        self.recv_calls = []
+        self._release = threading.Event()
+
+    def recv(self, timeout=None, decode=None):
+        self.recv_calls.append((timeout, decode))
+        if self._messages:
+            return self._messages.pop(0)
+        if self._release.wait(timeout=timeout):
+            raise _RecvReleased("released")
+        raise TimeoutError("timed out waiting for websocket frame")
+
+    def close(self, *args, **kwargs):  # noqa: ARG002 - mirrors SDK/websockets close signatures
+        self.closed = True
+        self._release.set()
+
+
+class FakeOpenAIRealtimeConnection:
+    """Minimal SDK connection facade used by the run-loop tests."""
+
+    def __init__(self, raw_websocket):
+        self._connection = raw_websocket
+        self.session = SimpleNamespace(update=MagicMock())
+        self.input_audio_buffer = SimpleNamespace(append=MagicMock(), commit=MagicMock())
+        self.closed = False
+
+    def parse_event(self, data):
+        payload = json.loads(data.decode("utf-8") if isinstance(data, bytes) else data)
+        error = payload.get("error")
+        if isinstance(error, dict):
+            payload["error"] = SimpleNamespace(**error)
+        return SimpleNamespace(**payload)
+
+    def close(self):
+        self.closed = True
+        self._connection.close()
+
+
+class FakeOpenAIConnectContext:
+    """Context manager returned by ``client.realtime.connect``."""
+
+    def __init__(self, connection):
+        self._connection = connection
+
+    def __enter__(self):
+        return self._connection
+
+    def __exit__(self, exc_type, exc, exc_tb):  # noqa: ARG002 - context-manager protocol
+        self._connection.close()
 
 
 def _build_session(
@@ -334,3 +396,72 @@ def test_run_opens_socket_with_transcription_intent():
     payload = conn.session.update.call_args.kwargs["session"]
     assert payload["type"] == "transcription"
     assert payload["audio"]["input"]["transcription"]["model"] == "gpt-realtime-whisper"
+
+
+def test_run_times_out_when_server_never_marks_session_ready(monkeypatch):
+    """A stalled server must emit an error and let the worker exit."""
+    monkeypatch.setattr(OpenAIRealtimeSession, "RECV_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(OpenAIRealtimeSession, "READY_IDLE_TIMEOUT_SECONDS", 0.02)
+
+    raw_websocket = FakeOpenAIRawWebSocket()
+    connection = FakeOpenAIRealtimeConnection(raw_websocket)
+    errors = []
+
+    with patch("whisper_hud.providers.openai_realtime.OpenAI") as openai_cls:
+        client = MagicMock()
+        client.realtime.connect.return_value = FakeOpenAIConnectContext(connection)
+        openai_cls.return_value = client
+
+        session = OpenAIRealtimeSession(
+            api_key="sk-test",
+            model="gpt-realtime-whisper",
+            provider_name="openai_realtime",
+            cost_per_minute=0.003,
+            on_partial=lambda _t: None,
+            on_final=lambda _r: None,
+            on_error=errors.append,
+        )
+
+    session.start()
+    session._thread.join(timeout=1.0)
+
+    assert not session._thread.is_alive()
+    assert len(errors) == 1
+    assert "OpenAI Realtime" in str(errors[0])
+    assert "timed out" in str(errors[0]).lower()
+    assert raw_websocket.recv_calls
+    assert raw_websocket.recv_calls[0] == (0.01, False)
+    assert raw_websocket.closed is True
+
+
+def test_close_stops_and_joins_realtime_worker():
+    """close() should unblock the receive loop and join the worker without surfacing an error."""
+    raw_websocket = FakeOpenAIRawWebSocket([b'{"type": "session.updated"}'])
+    connection = FakeOpenAIRealtimeConnection(raw_websocket)
+    errors = []
+    ready = []
+
+    with patch("whisper_hud.providers.openai_realtime.OpenAI") as openai_cls:
+        client = MagicMock()
+        client.realtime.connect.return_value = FakeOpenAIConnectContext(connection)
+        openai_cls.return_value = client
+
+        session = OpenAIRealtimeSession(
+            api_key="sk-test",
+            model="gpt-realtime-whisper",
+            provider_name="openai_realtime",
+            cost_per_minute=0.003,
+            on_partial=lambda _t: None,
+            on_final=lambda _r: None,
+            on_error=errors.append,
+            on_ready=lambda: ready.append(True),
+        )
+
+    session.start()
+    assert session._ready.wait(timeout=0.5)
+    session.close()
+
+    assert ready == [True]
+    assert not session._thread.is_alive()
+    assert errors == []
+    assert raw_websocket.closed is True

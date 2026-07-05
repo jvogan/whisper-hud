@@ -2,7 +2,9 @@
 
 ## Banner / Social Preview
 
-- Place the README banner at: `assets/social/readme_banner.png`
+- Place the README banner at: `assets/social/readme_banner_woodblock.jpg`
+- Place the Open Graph social preview at: `assets/social/og_image.jpg`
+- Keep the Open Graph social preview under 1MB
 - Keep width around 1200–1600px for crisp display in GitHub
 - Update the README image tag if you change the file name
 

@@ -794,7 +794,7 @@ class AppearanceEditorWindow:
         alert.setMessageText_("Reset Appearance")
         alert.setInformativeText_(
             "Restore all appearance settings to their factory defaults?\n\n"
-            "This resets colors, icon settings, and any other appearance customizations."
+            "This resets colors and non-pack icon settings. Active character packs stay selected."
         )
         alert.addButtonWithTitle_("Reset")
         alert.addButtonWithTitle_("Cancel")
@@ -805,7 +805,12 @@ class AppearanceEditorWindow:
         if not self._confirm_reset_to_defaults():
             return
 
-        self._working_config = _get_default_widget_appearance()
+        existing_custom_icon = deepcopy(self._working_config.get("custom_icon", {}))
+        default_appearance = _get_default_widget_appearance()
+        if existing_custom_icon.get("character_pack"):
+            default_appearance["custom_icon"] = existing_custom_icon
+
+        self._working_config = default_appearance
         self._show_step(self._current_step)
 
     def handleGoBack(self):

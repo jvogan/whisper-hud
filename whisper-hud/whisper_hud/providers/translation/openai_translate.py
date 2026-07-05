@@ -231,6 +231,13 @@ class OpenAITranslateProvider(TranslationProvider):
 
         return "".join(parts).strip()
 
+    def _extract_required_text_from_response(self, response: Any) -> str:
+        """Extract and clean provider text, failing when the payload has none."""
+        text = self._clean_response(self._extract_text_from_response(response))
+        if not text:
+            raise ValueError("OpenAI translation returned an empty or unparseable response")
+        return text
+
     def _extract_delta_text(self, event: Any) -> str:
         """Extract text delta from a streaming event."""
         if self._safe_get(event, "type") != "response.output_text.delta":
@@ -266,7 +273,7 @@ class OpenAITranslateProvider(TranslationProvider):
             response = client.responses.create(
                 **self._build_request_kwargs(text, source_lang, target_lang, stream=False)
             )
-            result_text = self._clean_response(self._extract_text_from_response(response))
+            result_text = self._extract_required_text_from_response(response)
             return TranslationResult(
                 text=result_text,
                 source_lang=source_lang,
@@ -359,8 +366,10 @@ class OpenAITranslateProvider(TranslationProvider):
                     final_text = self._extract_text_from_response(response)
 
             final_text = self._clean_response(final_text)
-            if final_text:
-                on_chunk(final_text)
+            if not final_text:
+                raise ValueError("OpenAI translation returned an empty or unparseable response")
+
+            on_chunk(final_text)
 
             return TranslationResult(
                 text=final_text,

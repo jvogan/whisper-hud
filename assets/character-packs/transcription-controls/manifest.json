@@ -1,0 +1,35 @@
+{
+  "id": "transcription-controls",
+  "name": "Transcription Controls",
+  "description": "Clean button-style controls for transcription states: off, on, processing, success, and error.",
+  "author": "WhisperHUD",
+  "version": "1.0.0",
+  "preview_image": "idle.png",
+  "states": {
+    "idle": {
+      "file": "idle.png",
+      "description": "Idle/off transcription button"
+    },
+    "recording": {
+      "file": "recording.png",
+      "description": "Active/on transcription button"
+    },
+    "processing": {
+      "file": "processing.png",
+      "description": "Processing transcription button"
+    },
+    "success": {
+      "file": "success.png",
+      "description": "Successful transcription button"
+    },
+    "error": {
+      "file": "error.png",
+      "description": "Error transcription button"
+    }
+  },
+  "settings": {
+    "shape_mode": "alpha",
+    "apply_state_tint": false,
+    "recommended_size": "large"
+  }
+}

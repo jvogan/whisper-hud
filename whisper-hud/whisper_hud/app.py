@@ -69,6 +69,10 @@ from .keychain import (
     unlock_passphrase_store,
     lock_passphrase_store,
     change_passphrase,
+    get_passphrase_hint,
+    set_passphrase_hint,
+    get_passphrase_no_recovery_message,
+    acknowledge_passphrase_no_recovery,
     export_api_keys,
     import_api_keys,
     clear_api_keys,
@@ -94,6 +98,13 @@ from .encryption import (
 )
 
 logger = get_logger("app")
+
+RECORDING_SENSITIVITY_PRESETS = [
+    ("sensitive", "Sensitive", 1.2, 0.001),
+    ("balanced", "Balanced", 1.5, 0.002),
+    ("noisy", "Noisy room", 2.0, 0.004),
+    ("patient", "Wait longer", 2.5, 0.002),
+]
 
 
 class RecordingTurnPhase(Enum):
@@ -279,6 +290,7 @@ class WhisperHUDApp(rumps.App):
         self._cleanup_available: Optional[bool] = None
         self._cleanup_availability_inflight = False
         self._cleanup_availability_last_checked = 0.0
+        self._cleanup_failure_notified = False
         self._cached_frontmost_app: Optional[str] = None
         self._cached_frontmost_app_checked = 0.0
 
@@ -476,9 +488,13 @@ class WhisperHUDApp(rumps.App):
             return True
 
         if has_passphrase_store():
+            message = "Enter your API key storage passphrase."
+            hint = get_passphrase_hint()
+            if hint:
+                message += f"\n\nHint: {hint}"
             passphrase = self._applescript_input_dialog(
                 "Unlock API Key Store",
-                "Enter your API key storage passphrase.",
+                message,
                 hidden=True,
             )
             if not passphrase:
@@ -502,7 +518,8 @@ class WhisperHUDApp(rumps.App):
             "Create API Key Passphrase",
             (
                 "Create a passphrase to encrypt API keys locally.\n\n"
-                "You'll enter this passphrase when you restart the app."
+                "You will enter it when you restart the app.\n\n"
+                f"{get_passphrase_no_recovery_message()}"
             ),
             hidden=True,
         )
@@ -526,6 +543,19 @@ class WhisperHUDApp(rumps.App):
         if not ok:
             rumps.alert(title="Passphrase Setup Failed", message=message)
             return False
+
+        acknowledge_passphrase_no_recovery()
+        hint = self._applescript_input_dialog(
+            "Passphrase Hint",
+            (
+                "Optional: add a short hint shown before unlock.\n\n"
+                "Do not include the passphrase itself. Leave blank to skip."
+            ),
+        )
+        if hint:
+            ok, message = set_passphrase_hint(hint)
+            if not ok:
+                rumps.alert(title="Hint Not Saved", message=message)
 
         self._ensure_history_encryption_session(create_if_missing=False, prompt_unlock=False)
         self._notify("WhisperHUD", "Passphrase Ready", "API key storage is encrypted and unlocked.")
@@ -1022,6 +1052,37 @@ class WhisperHUDApp(rumps.App):
                 f"{'✓ ' if self.config.auto_stop else '   '}Auto-stop on silence", callback=self._toggle_auto_stop
             )
         )
+
+        sensitivity_menu = rumps.MenuItem("Recording sensitivity")
+        try:
+            current_silence_duration = float(self.config.silence_duration)
+            current_silence_threshold = float(self.config.silence_threshold)
+        except (TypeError, ValueError):
+            current_silence_duration = -1.0
+            current_silence_threshold = -1.0
+        matched_preset = False
+        for preset_id, label, duration, threshold in RECORDING_SENSITIVITY_PRESETS:
+            is_selected = (
+                abs(current_silence_duration - duration) < 0.001
+                and abs(current_silence_threshold - threshold) < 0.00001
+            )
+            matched_preset = matched_preset or is_selected
+            prefix = "● " if is_selected else "   "
+            sensitivity_menu.add(
+                rumps.MenuItem(f"{prefix}{label}", callback=lambda s, p=preset_id: self._set_recording_sensitivity(p))
+            )
+        if not matched_preset:
+            sensitivity_menu.add(rumps.separator)
+            custom_label = "Custom"
+            if current_silence_duration >= 0 and current_silence_threshold >= 0:
+                custom_label = f"Custom ({current_silence_duration:g}s, {current_silence_threshold:g})"
+            sensitivity_menu.add(
+                rumps.MenuItem(
+                    custom_label,
+                    callback=None,
+                )
+            )
+        recording_menu.add(sensitivity_menu)
 
         # Max recording duration submenu
         max_dur_menu = rumps.MenuItem("Max recording duration")
@@ -1899,6 +1960,7 @@ class WhisperHUDApp(rumps.App):
         # === Advanced & Support ===
         advanced_menu = rumps.MenuItem("Advanced & Support")
         advanced_menu.add(rumps.MenuItem("Run Setup Wizard...", callback=self._run_setup_wizard))
+        advanced_menu.add(rumps.MenuItem("Reveal config.json in Finder", callback=self._reveal_config_file))
         advanced_menu.add(rumps.separator)
 
         from . import __version__
@@ -2725,6 +2787,15 @@ class WhisperHUDApp(rumps.App):
             logger.debug("Text replacement failed; using unmodified text", exc_info=True)
             return text
 
+    def _notify_cleanup_failure_once(self, detail: str) -> None:
+        """Tell the user once per session when local cleanup is enabled but unavailable."""
+        if getattr(self, "_cleanup_failure_notified", False):
+            return
+        self._cleanup_failure_notified = True
+        self._cleanup_available = False
+        self._notify("WhisperHUD", "AI Cleanup Unavailable", detail)
+        self._schedule_menu_rebuild()
+
     def _run_llm_cleanup(self, text: str, mode) -> str:
         """Run local LLM cleanup on ``text`` when enabled, returning the result.
 
@@ -2742,7 +2813,8 @@ class WhisperHUDApp(rumps.App):
         try:
             model = self.cleanup_engine.pick_model(self.config.llm_cleanup_model)
             if not model:
-                logger.debug("LLM cleanup skipped: no local model available")
+                logger.warning("LLM cleanup skipped: no local model available")
+                self._notify_cleanup_failure_once("Using the raw transcript. Check Cleanup Status in the menu.")
                 return text
 
             if self.config.show_hud:
@@ -2755,12 +2827,17 @@ class WhisperHUDApp(rumps.App):
                 timeout=self.config.llm_cleanup_timeout_seconds,
             )
         except Exception:
-            logger.debug("LLM cleanup raised unexpectedly; using original text", exc_info=True)
+            logger.warning("LLM cleanup raised unexpectedly; using original text", exc_info=True)
+            self._notify_cleanup_failure_once("Using the raw transcript. Check Cleanup Status in the menu.")
             return text
 
         # cleanup() returns None on failure (fall back to raw) or the guarded
         # result (which may itself be the original when the guardrail rejected it).
-        return cleaned if cleaned is not None else text
+        if cleaned is None:
+            logger.warning("LLM cleanup returned no result; using original text")
+            self._notify_cleanup_failure_once("Using the raw transcript. Check Cleanup Status in the menu.")
+            return text
+        return cleaned
 
     def _handle_voice_command(self, turn_id: int, raw_text: str) -> Optional[str]:
         """Check the RAW transcript for a voice command and act on it.
@@ -3044,6 +3121,7 @@ class WhisperHUDApp(rumps.App):
 
                     final_text = processed_text
                     did_translate = False
+                    success_suffix = ""
 
                     # Gate translation on ``command_result is None``: an 'insert'
                     # voice-command payload (e.g. "new line" -> "\n") is literal
@@ -3088,21 +3166,17 @@ class WhisperHUDApp(rumps.App):
                             lang_name = self.translator.get_supported_languages().get(
                                 self.config.target_language, self.config.target_language
                             )
-                            self._set_title(self.ICON_SUCCESS)
-                            if self.config.show_hud:
-                                self.hud.show_success(self._hud_success_message(final_text, f" -> {lang_name}"))
+                            success_suffix = f" -> {lang_name}"
 
                         except Exception as e:
                             logger.warning("Translation failed (%s)", type(e).__name__)
                             final_text = processed_text
+                            success_suffix = " (translation failed)"
                             self._notify(
                                 "WhisperHUD",
                                 "Translation Failed",
                                 "Using the original transcription instead.",
                             )
-                            self._set_title(self.ICON_SUCCESS)
-                            if self.config.show_hud:
-                                self.hud.show_success(self._hud_success_message(final_text, " (translation failed)"))
                     elif is_live_translated:
                         # Text already arrived translated from the live session.
                         # Mark it translated (history original_text = source) and
@@ -3111,21 +3185,10 @@ class WhisperHUDApp(rumps.App):
                         lang_name = self.translator.get_supported_languages().get(
                             self.config.target_language, self.config.target_language
                         )
-                        self._set_title(self.ICON_SUCCESS)
-                        if self.config.show_hud:
-                            self.hud.show_success(self._hud_success_message(final_text, f" -> {lang_name}"))
-                    else:
-                        self._set_title(self.ICON_SUCCESS)
-                        if self.config.show_hud:
-                            self.hud.show_success(self._hud_success_message(final_text))
+                        success_suffix = f" -> {lang_name}"
 
-                    self._play_completion_sound()
-
-                    if self.widget:
-                        self.widget.set_success()
-
-                    if use_streaming:
-                        self.streaming_panel.show_complete()
+                    if not self._get_active_turn(turn_id):
+                        return
 
                     # History original_text: for live translation the source
                     # transcript lives on result.source_text (result.text is
@@ -3135,17 +3198,54 @@ class WhisperHUDApp(rumps.App):
                         history_original = result.source_text or ""
                     else:
                         history_original = result.text if did_translate else ""
+
+                    paste_ok = False
+                    if self.config.auto_paste:
+                        time.sleep(0.1)
+                        if not self._get_active_turn(turn_id):
+                            return
+                        paste_ok = self._paste_to_target(final_text)
+                        if not paste_ok:
+                            history_saved = self.config.add_to_history(
+                                text=final_text,
+                                provider=result.provider,
+                                translated=did_translate,
+                                original_text=history_original,
+                            )
+                            self._set_title(self.ICON_ERROR)
+                            if self.config.show_hud:
+                                self.hud.show_error("Paste failed")
+                            if self.widget:
+                                self.widget.set_error()
+                            if use_streaming:
+                                self.streaming_panel.hide()
+                            detail = (
+                                "Nothing was pasted. The transcript was saved in History."
+                                if history_saved
+                                else "Nothing was pasted."
+                            )
+                            self._notify("WhisperHUD", "Paste Failed", detail)
+                            self._finish_turn_cleanup(turn_id)
+                            return
+
+                    self._set_title(self.ICON_SUCCESS)
+                    if self.config.show_hud:
+                        self.hud.show_success(self._hud_success_message(final_text, success_suffix))
+
+                    self._play_completion_sound()
+
+                    if self.widget:
+                        self.widget.set_success()
+
+                    if use_streaming:
+                        self.streaming_panel.show_complete()
+
                     self.config.add_to_history(
                         text=final_text,
                         provider=result.provider,
                         translated=did_translate,
                         original_text=history_original,
                     )
-
-                    paste_ok = False
-                    if self.config.auto_paste:
-                        time.sleep(0.1)
-                        paste_ok = self._paste_to_target(final_text)
 
                     # (g) Mode auto-send: press Return after a successful paste so
                     #     e.g. a chat message is sent. Only fires when a mode
@@ -3923,6 +4023,16 @@ class WhisperHUDApp(rumps.App):
         self.config.save()
         self._schedule_menu_rebuild()
 
+    def _set_recording_sensitivity(self, preset_id: str):
+        """Apply an auto-stop silence preset."""
+        for candidate_id, _label, duration, threshold in RECORDING_SENSITIVITY_PRESETS:
+            if candidate_id == preset_id:
+                self.config.silence_duration = duration
+                self.config.silence_threshold = threshold
+                self.config.save()
+                self._schedule_menu_rebuild()
+                return
+
     def _set_max_duration(self, seconds: int):
         """Set max recording duration."""
         self.config.max_recording_duration = seconds
@@ -4245,6 +4355,22 @@ class WhisperHUDApp(rumps.App):
         except Exception as e:
             logger.error(f"Import settings error: {e}")
             rumps.alert(title="Import Failed", message=str(e))
+
+    def _reveal_config_file(self, sender):
+        """Reveal the config file, or its containing folder before first save."""
+        try:
+            import subprocess
+
+            from .config import CONFIG_DIR, CONFIG_FILE
+
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            if CONFIG_FILE.exists():
+                subprocess.run(["open", "-R", str(CONFIG_FILE)], check=True)
+            else:
+                subprocess.run(["open", str(CONFIG_DIR)], check=True)
+        except Exception as e:
+            logger.error(f"Reveal config error: {e}")
+            rumps.alert(title="Reveal Failed", message=str(e))
 
     def _show_about(self, sender):
         """Show about dialog."""
@@ -6172,6 +6298,9 @@ class WhisperHUDApp(rumps.App):
                 logger.debug("Voice assistant stop during quit raised: %s", e)
 
         turn = self._active_turn
+        if turn:
+            self._cancel_turn_timers(turn)
+            self._close_live_session(turn)
         if turn and turn.batch_thread and turn.batch_thread.is_alive():
             logger.info("Waiting briefly for active transcription cleanup before quitting")
             turn.batch_thread.join(timeout=2.0)

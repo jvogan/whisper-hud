@@ -8,6 +8,7 @@ incremental transcript deltas and a final committed turn transcript.
 from __future__ import annotations
 
 import threading
+import time
 from collections import deque
 from typing import Any, Callable, Optional, Sequence
 
@@ -32,6 +33,10 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
     PRECONNECT_BUFFER_SECONDS = 2.0
     CLIENT_TIMEOUT_SECONDS = 30.0
     CLIENT_MAX_RETRIES = 0
+    RECV_POLL_SECONDS = 0.5
+    READY_IDLE_TIMEOUT_SECONDS = 10.0
+    FINAL_IDLE_TIMEOUT_SECONDS = 30.0
+    CLOSE_JOIN_TIMEOUT_SECONDS = 2.0
     # A one-shot dictation turn keeps its audio in the server-side input
     # buffer; an SDK auto-reconnect would silently drop that buffer and
     # truncate the transcript. Failing fast hands the turn to the local
@@ -91,7 +96,7 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
 
     def start(self) -> None:
         """Start the remote session in a background thread."""
-        if self._thread is not None:
+        if self._thread is not None or self._closed.is_set():
             return
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -128,16 +133,26 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
         self._commit_audio()
 
     def close(self) -> None:
-        """Close the session and underlying websocket."""
-        if self._closed.is_set():
-            return
+        """Close the session and underlying websocket, then briefly join the worker."""
+        already_closed = self._closed.is_set()
         self._closed.set()
-        connection = self._connection
-        if connection is not None:
+
+        if not already_closed:
+            with self._connection_lock:
+                connection = self._connection
+                self._connection = None
+            if connection is not None:
+                try:
+                    connection.close()
+                except Exception:
+                    logger.debug("Failed to close OpenAI realtime connection cleanly", exc_info=True)
+
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
             try:
-                connection.close()
-            except Exception:
-                logger.debug("Failed to close OpenAI realtime connection cleanly", exc_info=True)
+                thread.join(timeout=self.CLOSE_JOIN_TIMEOUT_SECONDS)
+            except RuntimeError:
+                logger.debug("Failed to join OpenAI realtime worker", exc_info=True)
 
     def _run(self) -> None:
         """Own the websocket lifetime and process incoming events."""
@@ -152,19 +167,63 @@ class OpenAIRealtimeSession(LiveTranscriptionSession):
                 max_retries=self.CONNECT_MAX_RETRIES,
                 extra_query={"intent": "transcription"},
             ) as connection:
-                self._connection = connection
+                with self._connection_lock:
+                    self._connection = connection
                 connection.session.update(session=self._build_session_update())
 
+                last_server_event_at = time.monotonic()
                 while not self._closed.is_set():
-                    event = connection.recv()
+                    try:
+                        event = self._recv_event(connection)
+                    except TimeoutError as e:
+                        now = time.monotonic()
+                        if self._server_idle_timed_out(last_server_event_at, now):
+                            self._notify_error(
+                                RuntimeError(build_provider_error_message("OpenAI Realtime", "session", e))
+                            )
+                            break
+                        continue
+
+                    if self._closed.is_set():
+                        break
+                    last_server_event_at = time.monotonic()
                     self._handle_event(event)
-                    if self._final_sent:
+                    if self._final_sent or self._error_sent:
                         break
         except Exception as e:
             if not self._closed.is_set():
                 self._notify_error(RuntimeError(build_provider_error_message("OpenAI Realtime", "session", e)))
         finally:
             self.close()
+
+    def _recv_event(self, connection: Any) -> Any:
+        """Receive one SDK event, polling with a timeout when the wrapped socket supports it."""
+        raw_connection = getattr(connection, "_connection", None)
+        raw_recv = getattr(raw_connection, "recv", None) if raw_connection is not None else None
+        parse_event = getattr(connection, "parse_event", None)
+
+        if callable(raw_recv) and callable(parse_event):
+            try:
+                raw_message = raw_recv(timeout=self.RECV_POLL_SECONDS, decode=False)
+            except TypeError:
+                pass
+            else:
+                return parse_event(raw_message)
+
+        recv = getattr(connection, "recv")
+        try:
+            return recv(timeout=self.RECV_POLL_SECONDS)
+        except TypeError:
+            return recv()
+
+    def _server_idle_timed_out(self, last_server_event_at: float, now: float) -> bool:
+        """Return True when the server has gone idle in a terminal wait state."""
+        idle_seconds = now - last_server_event_at
+        if not self._ready.is_set():
+            return idle_seconds >= self.READY_IDLE_TIMEOUT_SECONDS
+        if self._stop_requested.is_set() or self._commit_sent:
+            return idle_seconds >= self.FINAL_IDLE_TIMEOUT_SECONDS
+        return False
 
     def _build_session_update(self) -> dict[str, Any]:
         """Build the transcription session payload."""

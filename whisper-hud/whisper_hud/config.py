@@ -8,6 +8,7 @@ API keys are stored separately via the configured credential storage mode (see k
 import json
 import os
 import tempfile
+from copy import deepcopy
 from pathlib import Path
 from dataclasses import dataclass, asdict, field
 from datetime import datetime
@@ -786,7 +787,8 @@ class Config:
 
     def reset_appearance(self) -> None:
         """Reset appearance to default."""
-        self.widget_appearance = {
+        active_custom_icon = deepcopy(self.widget_appearance.get("custom_icon", {}))
+        default_appearance = {
             "theme": "default",
             "colors": {
                 "idle": {"background": "#232329", "icon": "#66A5FF", "background_hover": "#383840"},
@@ -806,6 +808,10 @@ class Config:
                 "character_pack": None,
             },
         }
+        if active_custom_icon.get("character_pack"):
+            default_appearance["custom_icon"] = active_custom_icon
+
+        self.widget_appearance = default_appearance
         self.save()
 
     def set_custom_icon_shape_mode(self, mode: str) -> None:

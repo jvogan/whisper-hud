@@ -19,7 +19,7 @@ HUD uses for rough cost display only.
 """
 
 from types import SimpleNamespace
-from typing import Callable, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence
 from .base import TranscriptionProvider, TranscriptionResult
 from .error_utils import build_provider_error_message
 from .vocabulary_utils import normalize_vocabulary_phrases
@@ -31,6 +31,10 @@ _BASE_TRANSCRIPTION_PROMPT = """Transcribe this audio exactly as spoken.
 Output ONLY the transcription text, nothing else.
 Do not add any commentary, labels, or formatting.
 Preserve natural punctuation."""
+
+
+class _GeminiResponseError(RuntimeError):
+    """Raised when Gemini returns no usable transcription text."""
 
 
 class GeminiProvider(TranscriptionProvider):
@@ -215,9 +219,13 @@ class GeminiProvider(TranscriptionProvider):
         # Calculate cost
         cost = (duration_seconds / 60) * model_config["cost_per_minute"]
 
+        block_reason = self._extract_block_reason(response)
+        if block_reason:
+            raise _GeminiResponseError(self._build_blocked_response_error(block_reason))
+
         text = self._extract_transcription_text(response)
         if text is None:
-            raise RuntimeError(
+            raise _GeminiResponseError(
                 "Gemini transcription returned an unexpected response format. " "No transcription text was found."
             )
 
@@ -265,13 +273,97 @@ class GeminiProvider(TranscriptionProvider):
         return build_provider_error_message("Gemini", "transcription", error)
 
     @staticmethod
+    def _safe_get_field(obj: Any, *keys: str) -> Any:
+        """Read SDK response fields from dict-like or object-like payloads."""
+        if obj is None:
+            return None
+        for key in keys:
+            if isinstance(obj, dict) and key in obj:
+                value = obj[key]
+            else:
+                try:
+                    value = getattr(obj, key)
+                except Exception:
+                    continue
+            if value is not None:
+                return value
+        return None
+
+    @staticmethod
+    def _normalize_block_reason(reason: Any) -> str | None:
+        """Return a normalized safety/block reason when one is present."""
+        if reason is None:
+            return None
+        candidates = [
+            getattr(reason, "name", None),
+            getattr(reason, "value", None),
+            str(reason),
+        ]
+        for value in candidates:
+            if value is None:
+                continue
+            normalized = str(value).split(".")[-1].strip().lower()
+            if not normalized:
+                continue
+            if "safety" in normalized:
+                return "safety"
+            if normalized in {"blocked", "blocklist", "prohibited_content"}:
+                return normalized.replace("_", " ")
+        return None
+
+    @classmethod
+    def _extract_block_reason(cls, response: Any) -> str | None:
+        """Return Gemini block/safety metadata from a response or chunk."""
+        prompt_feedback = cls._safe_get_field(response, "prompt_feedback", "promptFeedback")
+        reason = cls._normalize_block_reason(cls._safe_get_field(prompt_feedback, "block_reason", "blockReason"))
+        if reason:
+            return reason
+
+        candidates = cls._safe_get_field(response, "candidates") or []
+        for candidate in candidates:
+            reason = cls._normalize_block_reason(cls._safe_get_field(candidate, "finish_reason", "finishReason"))
+            if reason:
+                return reason
+        return None
+
+    @staticmethod
+    def _build_blocked_response_error(reason: str) -> str:
+        """Build the error shown when Gemini refuses to return transcription text."""
+        if reason == "safety":
+            return "Gemini transcription was blocked by safety filters."
+        return f"Gemini transcription was blocked: {reason}."
+
+    @staticmethod
+    def _has_response_text_field(response: Any) -> bool:
+        """Return True when Gemini returned an explicit text field, even if empty."""
+        if isinstance(response, dict):
+            return "text" in response
+        if isinstance(response, SimpleNamespace):
+            return "text" in response.__dict__
+        try:
+            getattr(response, "text")
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _extract_raw_response_text(response: Any) -> str | None:
+        """Return the raw Gemini text field when present."""
+        if isinstance(response, dict):
+            text = response.get("text")
+        elif isinstance(response, SimpleNamespace):
+            text = response.__dict__.get("text")
+        else:
+            try:
+                text = getattr(response, "text", None)
+            except Exception:
+                text = None
+        return text if isinstance(text, str) else None
+
+    @staticmethod
     def _extract_transcription_text(response) -> str | None:
         """Return stripped response text when Gemini returns a valid payload."""
-        text = getattr(response, "text", None)
-        if text is None and isinstance(response, dict):
-            text = response.get("text")
-        if text is None and isinstance(response, SimpleNamespace):
-            text = response.__dict__.get("text")
+        text = GeminiProvider._extract_raw_response_text(response)
         if text is None:
             return None
         return text.strip()
@@ -315,6 +407,7 @@ class GeminiProvider(TranscriptionProvider):
         last_error: Exception | None = None
         for model_id in attempt_models:
             cumulative_text = ""
+            saw_text_field = False
             try:
                 response = client.models.generate_content_stream(
                     model=model_id,
@@ -322,12 +415,21 @@ class GeminiProvider(TranscriptionProvider):
                 )
 
                 for chunk in response:
-                    if chunk.text:
-                        cumulative_text += chunk.text
+                    block_reason = self._extract_block_reason(chunk)
+                    if block_reason:
+                        raise _GeminiResponseError(self._build_blocked_response_error(block_reason))
+
+                    chunk_text = self._extract_raw_response_text(chunk)
+                    if chunk_text is not None:
+                        saw_text_field = True
+                    if chunk_text:
+                        cumulative_text += chunk_text
                         on_chunk(cumulative_text.strip())
 
                 used_model = model_id
                 break
+            except _GeminiResponseError:
+                raise
             except Exception as e:
                 last_error = e
                 if model_id != self.STABLE_FALLBACK_MODEL and self._is_model_not_found_error(e):
@@ -341,6 +443,10 @@ class GeminiProvider(TranscriptionProvider):
 
         # Get final text
         final_text = cumulative_text.strip()
+        if not saw_text_field:
+            raise _GeminiResponseError(
+                "Gemini transcription returned an unexpected response format. " "No transcription text was found."
+            )
 
         # Get the model config for cost calculation
         model_config = next((m for m in self.MODELS if m["id"] == used_model), self.MODELS[0])

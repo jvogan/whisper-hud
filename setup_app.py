@@ -41,8 +41,19 @@ except ImportError:
 PROJECT_ROOT = Path(__file__).parent
 ASSETS_DIR = PROJECT_ROOT / "assets"
 ICONS_DIR = ASSETS_DIR / "icons"
+CHARACTER_PACKS_DIR = ASSETS_DIR / "character-packs"
 APP_ICON = ICONS_DIR / "AppIcon.icns"
 CURRENT_YEAR = datetime.now().year
+CHARACTER_PACK_ASSET_SUFFIXES = {
+    ".aif",
+    ".aiff",
+    ".json",
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".wav",
+    ".webp",
+}
 
 # Optional Sparkle updater configuration (set via env)
 SPARKLE_FEED_URL = os.environ.get("WHISPERHUD_SPARKLE_FEED_URL")
@@ -59,6 +70,24 @@ if SPARKLE_FEED_URL:
 def _relpath(path: Path) -> str:
     """Return setup.py-relative path string for py2app data_files."""
     return str(path.relative_to(PROJECT_ROOT))
+
+
+def _asset_tree_data_files(root: Path, allowed_suffixes: set[str] | None = None) -> list[tuple[str, list[str]]]:
+    """Collect asset files recursively while preserving bundle subdirectories."""
+    if not root.exists():
+        return []
+
+    entries = []
+    directories = [root, *[p for p in root.rglob("*") if p.is_dir() and p.name != "__pycache__"]]
+    for directory in sorted(directories):
+        files = sorted(
+            _relpath(p)
+            for p in directory.iterdir()
+            if p.is_file() and (allowed_suffixes is None or p.suffix.lower() in allowed_suffixes)
+        )
+        if files:
+            entries.append((_relpath(directory), files))
+    return entries
 
 
 # Data files to include in the app bundle
@@ -81,6 +110,7 @@ DATA_FILES = [
         [_relpath(p) for p in (ASSETS_DIR / "ascii").glob("*.txt")] if (ASSETS_DIR / "ascii").exists() else [],
     ),
 ]
+DATA_FILES.extend(_asset_tree_data_files(CHARACTER_PACKS_DIR, CHARACTER_PACK_ASSET_SUFFIXES))
 
 # Apple Translation helper (optional)
 APPLE_TRANSLATE_HELPER = PROJECT_ROOT / "whisper-hud" / "bin" / "whisperhud-apple-translate"

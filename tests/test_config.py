@@ -52,6 +52,44 @@ class TestConfig:
                     assert loaded.default_provider == "gemini"
                     assert loaded.translation_enabled is True
 
+    def test_reset_appearance_preserves_active_character_pack(self):
+        """Resetting appearance should keep active character-pack paths intact."""
+        with patch("whisper_hud.config.CONFIG_FILE", Path("/tmp/test_config.json")):
+            from whisper_hud.config import Config
+
+            config = Config()
+            pack_icon_config = {
+                "enabled": True,
+                "path": "",
+                "per_state": True,
+                "icons": {
+                    "idle": "/packs/hero/idle.png",
+                    "recording": "/packs/hero/recording.png",
+                    "processing": "/packs/hero/processing.png",
+                    "success": "/packs/hero/success.png",
+                    "error": "/packs/hero/error.png",
+                },
+                "animations": {"idle": ["/packs/hero/idle-1.png"]},
+                "sounds": {"success": "/packs/hero/success.wav"},
+                "interpolation": {"idle": "nearest"},
+                "apply_state_tint": False,
+                "tint_opacity": 0.3,
+                "shape_mode": "alpha",
+                "character_pack": "hero",
+                "menubar_icon": "/packs/hero/menu.png",
+            }
+            default_colors = Config().widget_appearance["colors"]
+            config.widget_appearance["theme"] = "custom"
+            config.widget_appearance["colors"]["idle"]["background"] = "#010203"
+            config.widget_appearance["custom_icon"] = pack_icon_config.copy()
+
+            with patch.object(config, "save", return_value=True):
+                config.reset_appearance()
+
+            assert config.widget_appearance["theme"] == "default"
+            assert config.widget_appearance["colors"] == default_colors
+            assert config.widget_appearance["custom_icon"] == pack_icon_config
+
     def test_load_valid_json(self):
         """Valid config JSON should load normally."""
         with tempfile.TemporaryDirectory() as tmpdir:
